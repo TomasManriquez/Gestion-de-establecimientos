@@ -1,5 +1,6 @@
 # Data and secrets
 establishments.json
+backend/establishments.json
 Documentacion/
 # Python
 __pycache__/
