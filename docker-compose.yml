@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: slep_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - slep_network
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+    container_name: slep_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=slep_llanquihue
+      - JWT_SECRET=super-secret-slep-key-2026-llanquihue-digital-management
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - mongodb
+    networks:
+      - slep_network
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: slep_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - slep_network
+    restart: always
+
+volumes:
+  mongo_data:
+
+networks:
+  slep_network:
+    driver: bridge
