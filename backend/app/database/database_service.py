@@ -13,7 +13,7 @@ class DatabaseService:
     def __init__(self):
         self.client = None
         self.db = None
-
+    #initialize the database connection
     async def connect(self):
         try:
             self.client = AsyncIOMotorClient(settings.MONGODB_URL)
@@ -44,6 +44,7 @@ class DatabaseService:
                 "full_name": "Administrador SLEP",
                 "role": "admin"
             })
+            #eliminate the password from logs for security reasons /crear .env
             logger.info("Admin user seeded successfully. Credentials: admin / admin123")
 
         # 2. Seed Establishments and split metrics/counterparts

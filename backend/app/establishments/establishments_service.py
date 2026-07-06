@@ -31,9 +31,9 @@ class EstablishmentsService:
         
         if area_type:
             query["area_type"] = {"$regex": f"^{area_type}$", "$options": "i"}
-            
+        # el dato de category tiene conflictos con () de establecimiento (curso combinado) por lo que se hace comparacion directa, sin regex.
         if category:
-            query["general_info.category"] = {"$regex": f"^{category}", "$options": "i"}
+            query["general_info.category"] = category
 
         if coverage:
             query["general_info.covertura"] = {"$regex": f"^{coverage}", "$options": "i"}

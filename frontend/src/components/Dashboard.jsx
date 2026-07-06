@@ -125,7 +125,8 @@ export default function Dashboard() {
                   outerRadius={100}
                   paddingAngle={5}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                  nameKey="label"
+                  label={({ label, percent }) => `${label} (${(percent * 100).toFixed(0)}%)`}
                 >
                   {(charts?.enrollment_by_area || []).map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={index === 0 ? '#3b82f6' : '#10b981'} />
@@ -193,7 +194,8 @@ export default function Dashboard() {
                   outerRadius={100}
                   paddingAngle={0}
                   dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
+                  nameKey="label"
+                  label={({ label, value }) => `${label}: ${value}`}
                 >
                   {(charts?.establishments_by_connectivity || []).map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
