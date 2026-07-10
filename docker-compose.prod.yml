@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+
+  # ─── MongoDB ──────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: slep_mongodb
+    # Puerto NO expuesto al host en producción — solo accesible dentro de la red Docker
+    expose:
+      - "27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${DATABASE_NAME}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    networks:
+      - slep_internal
+    restart: always
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ─── Backend (FastAPI + Gunicorn) ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: slep_backend
+    expose:
+      - "8000"
+    environment:
+      MONGODB_URL: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongodb:27017/${DATABASE_NAME}?authSource=admin
+      DATABASE_NAME: ${DATABASE_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-180}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - slep_internal
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ─── Frontend (Nginx sirviendo build de Vite) ─────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: slep_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - slep_internal
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ─── Backup automático de MongoDB ─────────────────────────────────────────
+  backup:
+    image: mongo:7.0
+    container_name: slep_backup
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      DATABASE_NAME: ${DATABASE_NAME}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - mongo_backups:/backups
+      - ./scripts/backup-mongo.sh:/backup-mongo.sh:ro
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - slep_internal
+    # Ejecuta el backup cada día a las 2:00 AM del servidor
+    entrypoint: >
+      sh -c "
+        echo 'Backup service started. Running daily at 02:00 AM.';
+        while true; do
+          now=$$(date '+%H:%M');
+          if [ \"$$now\" = \"02:00\" ]; then
+            sh /backup-mongo.sh;
+            sleep 61;
+          fi;
+          sleep 30;
+        done
+      "
+    restart: always
+
+# ─── Volúmenes ────────────────────────────────────────────────────────────
+volumes:
+  mongo_data:
+    driver: local
+  mongo_config:
+    driver: local
+  mongo_backups:
+    driver: local
+
+# ─── Redes ────────────────────────────────────────────────────────────────
+networks:
+  slep_internal:
+    driver: bridge

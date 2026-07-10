@@ -6,15 +6,21 @@
       "sourceType": "autoskills-registry",
       "computedHash": "bffe3d08cfe92ebad63699f74ce29e35c19850ebfbf474c1463183cfe34d6a09"
     },
+    "fastapi-python": {
+      "source": "mindrally/skills",
+      "sourceType": "autoskills-registry",
+      "computedHash": "3d70c712ec1122ecbc03d78435f8b316b605c490d56e6e7d8cc5eebdf0c92792"
+    },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "autoskills-registry",
       "computedHash": "82fb11a63fb1e35ee2469516ed02d54695f783115b1540c0e783197af4240a3a"
     },
-    "fastapi-python": {
-      "source": "mindrally/skills",
-      "sourceType": "autoskills-registry",
-      "computedHash": "3d70c712ec1122ecbc03d78435f8b316b605c490d56e6e7d8cc5eebdf0c92792"
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "1e310d65fb286f8bd22c193f48e4aef8dc6c8b9caa6816eecca582b8faa5a096"
     },
     "pandas-data-analysis": {
       "source": "pluginagentmarketplace/custom-plugin-python",

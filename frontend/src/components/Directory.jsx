@@ -20,10 +20,10 @@ export default function Directory({ onSelectEstablishment }) {
   const comunas = ["PUERTO VARAS", "FRUTILLAR", "FRESIA", "LLANQUIHUE", "LOS MUERMOS"];
   const areas = ["URBANO", "RURAL"];
   const categories = [
-    { label: "Escuela Diferencial",  value: "0. ESCUELA DIFERENCIAL"},
-    { label: "Sala Cuna",  value: "1. SALA CUNA"},
-    { label: "Jardín - Sala Cuna", value: "2. J. INFANTIL - S. CUNA"},
-    { label: "Jardín", value: "3. JARDÍN INFANTIL" },
+    { label: "Escuela Diferencial",  value: "0. ESCUELA DIFERENCIAL" },
+    { label: "Sala Cuna",  value: "1. SALA CUNA" },
+    { label: "J. Infantil - Sala Cuna", value: "2. J. INFANTIL - S. CUNA" },
+    { label: "Jardín Infantil", value: "3. JARDIN INFANTIL" },
     { label: "Escuela Completa", value: "4. ESCUELA COMPLETA" },
     { label: "Escuela (Curso Combinado)", value: "5. ESCUELA COMPLETA (CON CURSO COMBINADO)" },
     { label: "Rural Multigrado", value: "6. RURAL MULTIGRADO" },

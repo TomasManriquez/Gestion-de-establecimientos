@@ -37,15 +37,14 @@ class DatabaseService:
             logger.info("Seeding default admin user...")
             # Use bcrypt directly for hashing
             salt = bcrypt.gensalt()
-            hashed_pw = bcrypt.hashpw("admin123".encode('utf-8'), salt).decode('utf-8')
+            hashed_pw = bcrypt.hashpw(settings.ADMIN_PASSWORD.encode('utf-8'), salt).decode('utf-8')
             await self.db.users.insert_one({
                 "username": "admin",
                 "hashed_password": hashed_pw,
                 "full_name": "Administrador SLEP",
                 "role": "admin"
             })
-            #eliminate the password from logs for security reasons /crear .env
-            logger.info("Admin user seeded successfully. Credentials: admin / admin123")
+            logger.info("Admin user seeded successfully with credentials from ADMIN_PASSWORD env var.")
 
         # 2. Seed Establishments and split metrics/counterparts
         est_count = await self.db.establishments.count_documents({})

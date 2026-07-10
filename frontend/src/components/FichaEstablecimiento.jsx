@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   ArrowLeft, Edit3, School, MapPin, Users, Wifi, Printer, 
-  UserCheck, History, Calendar, CheckCircle2, XCircle, Info, PhoneCall
+  UserCheck, History, Calendar, CheckCircle2, XCircle, Info, PhoneCall,
+  Mail, Phone, X, TrendingUp
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
@@ -13,7 +14,8 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
   const [counterparts, setCounterparts] = useState([]);
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('general'); // general, counterparts, connectivity, printers
+  const [activeTab, setActiveTab] = useState('general'); // general, statistics, connectivity, printers
+  const [showDirectorContact, setShowDirectorContact] = useState(false);
 
   const fetchFichaData = async () => {
     setLoading(true);
@@ -36,6 +38,18 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
   useEffect(() => {
     fetchFichaData();
   }, [rbd]);
+
+  // Click outside handler for director contact popover
+  useEffect(() => {
+    if (!showDirectorContact) return;
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('#director-contact-popup') && !e.target.closest('#director-name-btn')) {
+        setShowDirectorContact(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showDirectorContact]);
 
   if (loading) {
     return (
@@ -108,8 +122,8 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
       {/* Tabs list */}
       <div className="flex border-b border-slate-200 overflow-x-auto gap-2 pb-px">
         {[
-          { id: 'general', label: 'General e Historial', icon: School },
-          { id: 'counterparts', label: 'Contrapartes Técnicas', icon: UserCheck },
+          { id: 'general', label: 'Información General', icon: School },
+          { id: 'statistics', label: 'Estadísticas e Historial', icon: History },
           { id: 'connectivity', label: 'Internet y Conectividad', icon: Wifi },
           { id: 'printers', label: 'Inventario Impresoras', icon: Printer }
         ].map(tab => {
@@ -134,9 +148,9 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
       {/* Tabs Content */}
       <div className="mt-4">
         
-        {/* Tab 1: General e Historial */}
+        {/* Tab 1: Información General y Contrapartes */}
         {activeTab === 'general' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
             
             {/* Left side: General details */}
             <div className="lg:col-span-1 space-y-6">
@@ -144,164 +158,295 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
                 <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Detalles Generales</h3>
                 
                 <div className="space-y-3 text-sm">
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Director / Encargado</span>
-                    <span className="font-bold text-slate-800">{establishment.general_info.director || 'Sin especificar'}</span>
+                  {/* Director/Encargado block with interactive contact popup */}
+                  <div className="relative">
+                    <div 
+                      id="director-name-btn"
+                      onClick={() => setShowDirectorContact(!showDirectorContact)}
+                      className={`p-3 rounded-xl border transition-all cursor-pointer select-none group ${
+                        showDirectorContact 
+                          ? 'bg-sky-50 border-sky-300 shadow-sm' 
+                          : 'bg-slate-50 border-slate-100 hover:bg-sky-50/50 hover:border-sky-200'
+                      }`}
+                    >
+                      <span className="block text-[10px] font-bold text-slate-450 uppercase group-hover:text-sky-600 transition-colors">
+                        Director / Encargado
+                      </span>
+                      <div className="flex items-center justify-between gap-2 mt-0.5">
+                        <span className="font-bold text-slate-800 group-hover:text-sky-700 transition-colors">
+                          {establishment.general_info.director || 'Sin especificar'}
+                        </span>
+                        {establishment.general_info.director && (
+                          <span className="text-[10px] font-bold text-sky-600 bg-sky-100/80 px-2 py-0.5 rounded-md hover:bg-sky-100 transition-colors">
+                            Contacto
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Popover contact card */}
+                    {showDirectorContact && establishment.general_info.director && (
+                      <div 
+                        id="director-contact-popup"
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl p-4 animate-fade-in space-y-3.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-700 font-extrabold text-sm uppercase font-outfit shadow-sm">
+                              {establishment.general_info.director.split(' ').filter(Boolean).map(n => n[0]).slice(0, 2).join('') || 'DR'}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-slate-800 text-sm leading-tight">{establishment.general_info.director}</h4>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Director / Encargado</span>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowDirectorContact(false);
+                            }}
+                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-650 rounded-lg transition-colors"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+
+                        <div className="border-t border-slate-100 pt-3 space-y-2.5 text-xs">
+                          <div className="flex items-center gap-2.5 text-slate-600">
+                            <Mail size={14} className="text-slate-400 flex-shrink-0" />
+                            {establishment.general_info.director_email ? (
+                              <a 
+                                href={`mailto:${establishment.general_info.director_email}`}
+                                className="font-semibold text-sky-600 hover:underline break-all"
+                              >
+                                {establishment.general_info.director_email}
+                              </a>
+                            ) : (
+                              <span className="text-slate-400 italic">Sin correo registrado</span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2.5 text-slate-600">
+                            <Phone size={14} className="text-slate-400 flex-shrink-0" />
+                            {establishment.general_info.director_phone ? (
+                              <a 
+                                href={`tel:${establishment.general_info.director_phone}`}
+                                className="font-bold text-slate-700 hover:text-sky-600 hover:underline"
+                              >
+                                {establishment.general_info.director_phone}
+                              </a>
+                            ) : (
+                              <span className="text-slate-400 italic">Sin teléfono registrado</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
+
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Dirección</span>
-                    <span className="font-bold text-slate-800 flex items-center gap-1">
+                    <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
                       <MapPin size={14} className="text-sky-500 flex-shrink-0" />
                       {establishment.address || 'Sin especificar'}
                     </span>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Categoría de establecimiento</span>
-                    <span className="font-bold text-slate-800">{establishment.general_info.category || '-'}</span>
+                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.category || '-'}</span>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Cobertura Curricular</span>
-                    <span className="font-bold text-slate-800">{establishment.general_info.covertura || '-'}</span>
+                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.covertura || '-'}</span>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Licitación ADP</span>
-                    <span className="font-bold text-slate-800">{establishment.general_info.adp || 'No'}</span>
+                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.adp || 'No'}</span>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Profesional PAME</span>
-                    <span className="font-bold text-slate-800">{establishment.general_info.pame || '-'}</span>
+                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.pame || '-'}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Right side: Charts and Stats */}
+            {/* Right side: Counterparts */}
             <div className="lg:col-span-2 space-y-6">
-              
-              {/* Enrollment chart */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[320px]">
-                <div className="flex items-center gap-2 mb-4">
-                  <History size={16} className="text-sky-600" />
-                  <h3 className="text-sm font-bold text-slate-800 font-outfit">Evolución Histórica de Matrícula</h3>
-                </div>
-                <div className="flex-1 min-h-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={enrollmentHistoryData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="year" tick={{ fill: '#64748b', fontSize: 11 }} />
-                      <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
-                      <Tooltip formatter={(value) => [value + " Alumnos", "Matrícula"]} />
-                      <Line type="monotone" dataKey="matricula" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 6 }} activeDot={{ r: 8 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Advanced metrics details */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Indicadores de Matrícula y Rendimiento (2026)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="p-4 bg-sky-50/50 rounded-xl border border-sky-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">Matrícula actual</span>
-                    <span className="text-xl font-extrabold text-sky-700 font-outfit">{latestMetric.enrollment || 0}</span>
+                {/* Contrapartes del Establecimiento */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-slate-800 font-outfit flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 bg-blue-500 rounded-full"></span>
+                      Equipo del Establecimiento
+                    </h3>
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">Asistencia Prom.</span>
-                    <span className="text-xl font-extrabold text-slate-700 font-outfit">
-                      {latestMetric.attendance_avg ? `${(parseFloat(latestMetric.attendance_avg) * 100).toFixed(1)}%` : '-'}
-                    </span>
-                  </div>
-                  <div className="p-4 bg-orange-50/40 rounded-xl border border-orange-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">IVE Básica</span>
-                    <span className="text-xl font-extrabold text-orange-700 font-outfit">
-                      {latestMetric.ive_basica ? `${(latestMetric.ive_basica * 100).toFixed(0)}%` : '-'}
-                    </span>
-                  </div>
-                  <div className="p-4 bg-orange-50/40 rounded-xl border border-orange-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">IVE Media</span>
-                    <span className="text-xl font-extrabold text-orange-700 font-outfit">
-                      {latestMetric.ive_media ? `${(latestMetric.ive_media * 100).toFixed(0)}%` : '-'}
-                    </span>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">Docentes</span>
-                    <span className="text-xl font-extrabold text-slate-700 font-outfit">{latestMetric.num_teachers || 0}</span>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">Asistentes</span>
-                    <span className="text-xl font-extrabold text-slate-700 font-outfit">{latestMetric.num_assistants || 0}</span>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">Promedio Notas</span>
-                    <span className="text-xl font-extrabold text-slate-700 font-outfit">{latestMetric.grade_avg?.toFixed(2) || '-'}</span>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <span className="block text-xs font-semibold text-slate-500 mb-1">Retención %</span>
-                    <span className="text-xl font-extrabold text-slate-700 font-outfit">{latestMetric.tasa_retencion || '-'}</span>
+                  <div className="space-y-3">
+                    {schoolCounterparts.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6">No hay contrapartes registradas para el recinto.</p>
+                    ) : (
+                      schoolCounterparts.map((cp, idx) => (
+                        <div key={idx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5 hover:border-slate-200 transition-all">
+                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[9px] font-bold rounded-md uppercase tracking-wider">
+                            {cp.role.replace('_', ' ')}
+                          </span>
+                          <h4 className="font-bold text-slate-800 mt-1">{cp.name}</h4>
+                          <div className="space-y-1 text-xs text-slate-500">
+                            {cp.email && (
+                              <p className="flex items-center gap-1.5 break-all">
+                                <Mail size={12} className="text-slate-400 flex-shrink-0" />
+                                <a href={`mailto:${cp.email}`} className="hover:text-sky-600 hover:underline">{cp.email}</a>
+                              </p>
+                            )}
+                            {cp.phone && (
+                              <p className="flex items-center gap-1.5">
+                                <Phone size={12} className="text-slate-400 flex-shrink-0" />
+                                <a href={`tel:${cp.phone}`} className="hover:text-sky-600 hover:underline">{cp.phone}</a>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
+
+                {/* Contrapartes del SLEP */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-slate-800 font-outfit flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 bg-sky-500 rounded-full"></span>
+                      Contrapartes Técnicas del SLEP Llanquihue
+                    </h3>
+                  </div>
+                  <div className="space-y-3">
+                    {slepCounterparts.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6">No hay contrapartes técnicas asignadas del servicio local.</p>
+                    ) : (
+                      slepCounterparts.map((cp, idx) => (
+                        <div key={idx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5 hover:border-slate-200 transition-all">
+                          <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[9px] font-bold rounded-md uppercase tracking-wider">
+                            {cp.role.replace('_', ' ')}
+                          </span>
+                          <h4 className="font-bold text-slate-800 mt-1">{cp.name}</h4>
+                          <div className="space-y-1 text-xs text-slate-500">
+                            {cp.email && (
+                              <p className="flex items-center gap-1.5 break-all">
+                                <Mail size={12} className="text-slate-400 flex-shrink-0" />
+                                <a href={`mailto:${cp.email}`} className="hover:text-sky-600 hover:underline">{cp.email}</a>
+                              </p>
+                            )}
+                            {cp.phone && (
+                              <p className="flex items-center gap-1.5">
+                                <Phone size={12} className="text-slate-400 flex-shrink-0" />
+                                <a href={`tel:${cp.phone}`} className="hover:text-sky-600 hover:underline">{cp.phone}</a>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
               </div>
             </div>
 
           </div>
         )}
 
-        {/* Tab 2: Contrapartes Técnicas */}
-        {activeTab === 'counterparts' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Tab 2: Estadísticas e Historial */}
+        {activeTab === 'statistics' && (
+          <div className="space-y-6">
             
-            {/* Contrapartes del Establecimiento */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-6">
-              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-800 font-outfit flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 bg-blue-500 rounded-full"></span>
-                  Equipo del Establecimiento
-                </h3>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {schoolCounterparts.length === 0 ? (
-                  <p className="text-sm text-slate-400 col-span-2 text-center py-6">No hay contrapartes registradas para el recinto.</p>
-                ) : (
-                  schoolCounterparts.map((cp, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[9px] font-bold rounded-md uppercase tracking-wider">
-                        {cp.role.replace('_', ' ')}
-                      </span>
-                      <h4 className="font-bold text-slate-800 mt-1">{cp.name}</h4>
-                      {cp.email && <p className="text-xs text-slate-500 break-all">{cp.email}</p>}
-                      {cp.phone && <p className="text-xs text-slate-400 font-semibold">{cp.phone}</p>}
-                    </div>
-                  ))
-                )}
+            {/* Indicators Grid */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-450 uppercase tracking-wider mb-4">Indicadores de Matrícula y Rendimiento (2026)</h3>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="p-4 bg-sky-50/50 rounded-xl border border-sky-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">Matrícula actual</span>
+                  <span className="text-2xl font-extrabold text-sky-700 font-outfit">{latestMetric.enrollment || 0}</span>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">Asistencia Prom.</span>
+                  <span className="text-2xl font-extrabold text-slate-700 font-outfit">
+                    {latestMetric.attendance_avg ? `${(parseFloat(latestMetric.attendance_avg) * 100).toFixed(1)}%` : '-'}
+                  </span>
+                </div>
+                <div className="p-4 bg-orange-50/40 rounded-xl border border-orange-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">IVE Básica</span>
+                  <span className="text-2xl font-extrabold text-orange-700 font-outfit">
+                    {latestMetric.ive_basica ? `${(latestMetric.ive_basica * 100).toFixed(0)}%` : '-'}
+                  </span>
+                </div>
+                <div className="p-4 bg-orange-50/40 rounded-xl border border-orange-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">IVE Media</span>
+                  <span className="text-2xl font-extrabold text-orange-700 font-outfit">
+                    {latestMetric.ive_media ? `${(latestMetric.ive_media * 100).toFixed(0)}%` : '-'}
+                  </span>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">Docentes</span>
+                  <span className="text-2xl font-extrabold text-slate-700 font-outfit">{latestMetric.num_teachers || 0}</span>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">Asistentes</span>
+                  <span className="text-2xl font-extrabold text-slate-700 font-outfit">{latestMetric.num_assistants || 0}</span>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">Promedio Notas</span>
+                  <span className="text-2xl font-extrabold text-slate-700 font-outfit">{latestMetric.grade_avg?.toFixed(2) || '-'}</span>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center hover:shadow-sm transition-all duration-200">
+                  <span className="block text-xs font-semibold text-slate-500 mb-1">Retención %</span>
+                  <span className="text-2xl font-extrabold text-slate-700 font-outfit">{latestMetric.tasa_retencion || '-'}</span>
+                </div>
               </div>
             </div>
 
-            {/* Contrapartes del SLEP */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-6">
-              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-800 font-outfit flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 bg-sky-500 rounded-full"></span>
-                  Contrapartes Técnicas del SLEP Llanquihue
-                </h3>
+            {/* Enrollment chart at full width */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[380px]">
+              <div className="flex items-center gap-2 mb-4">
+                <History size={18} className="text-sky-600" />
+                <h3 className="text-base font-bold text-slate-800 font-outfit">Evolución Histórica de Matrícula</h3>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {slepCounterparts.length === 0 ? (
-                  <p className="text-sm text-slate-400 col-span-2 text-center py-6">No hay contrapartes técnicas asignadas del servicio local.</p>
-                ) : (
-                  slepCounterparts.map((cp, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
-                      <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[9px] font-bold rounded-md uppercase tracking-wider">
-                        {cp.role.replace('_', ' ')}
-                      </span>
-                      <h4 className="font-bold text-slate-800 mt-1">{cp.name}</h4>
-                      {cp.email && <p className="text-xs text-slate-500 break-all">{cp.email}</p>}
-                      {cp.phone && <p className="text-xs text-slate-400 font-semibold">{cp.phone}</p>}
-                    </div>
-                  ))
-                )}
+              <div className="flex-1 min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={enrollmentHistoryData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="year" tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <Tooltip formatter={(value) => [value + " Alumnos", "Matrícula"]} />
+                    <Line type="monotone" dataKey="matricula" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 6 }} activeDot={{ r: 8 }} />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
             </div>
+
+            {/* Future segments for future expansion */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Segment 1: Future Stats / Performance Analysis */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-150 border-dashed shadow-sm flex flex-col items-center justify-center text-center p-8 min-h-[160px] group hover:border-sky-300 transition-colors duration-200">
+                <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-sky-50 flex items-center justify-center mb-3 transition-colors duration-200">
+                  <TrendingUp className="text-slate-400 group-hover:text-sky-600 transition-colors duration-200" size={20} />
+                </div>
+                <h4 className="text-sm font-bold text-slate-700 font-outfit">Módulo de Análisis de Rendimiento</h4>
+                <p className="text-xs text-slate-400 mt-1.5 max-w-xs">Futuro segmento para comparar indicadores de asistencia mensual, metas SLEP e historial de repitencia.</p>
+              </div>
+    </div>
+              {/* Segment 2: Future Stats / SIMCE & Evaluation */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-150 border-dashed shadow-sm flex flex-col items-center justify-center text-center p-8 min-h-[160px] group hover:border-sky-300 transition-colors duration-200">
+                <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-sky-50 flex items-center justify-center mb-3 transition-colors duration-200">
+                  <Users className="text-slate-400 group-hover:text-sky-600 transition-colors duration-200" size={20} />
+                </div>
+                <h4 className="text-sm font-bold text-slate-700 font-outfit">Módulo de Evaluaciones Estandarizadas</h4>
+                <p className="text-xs text-slate-400 mt-1.5 max-w-xs">Próximamente se integrará el historial de puntajes SIMCE, indicadores de desarrollo personal y social, y caracterización socioeconómica.</p>
+              </div>
 
           </div>
         )}
