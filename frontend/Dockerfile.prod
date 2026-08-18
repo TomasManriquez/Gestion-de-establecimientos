@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copy dependency definitions and install
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm install
 
 # Copy source and build
 COPY . .
@@ -26,6 +26,6 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget -qO- http://localhost/health || exit 1
+  CMD wget -qO- http://127.0.0.1/health || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
