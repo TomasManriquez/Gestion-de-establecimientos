@@ -46,7 +46,7 @@ async def login_for_access_token_form(form_data: OAuth2PasswordRequestForm = Dep
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/logout")
-async def logout(current_user: dict = Depends(auth_service.get_current_user)):
+async def logout():
     # JWT is stateless, so we just acknowledge logout.
     # The client discards the token.
     return {"message": "Successfully logged out"}
