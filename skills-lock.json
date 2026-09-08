@@ -46,6 +46,12 @@
       "source": "wshobson/agents",
       "sourceType": "autoskills-registry",
       "computedHash": "07b87d62993c0b6159a91d18fc8723b7f4c13d5000c0984266c207493ce641ff"
+    },
+    "shadcn": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "f615de216e085a84e31593ad0fa9062232adc40cd87b7c7ab2b8e49abf6500be"
     }
   }
 }
