@@ -1,6 +1,20 @@
+import math
 from typing import List, Optional
 from app.database.database_service import db_service
 from app.establishments.establishments_entity import EstablishmentUpdate
+
+LISTING_PROJECTION = {
+    "_id": 1,
+    "rbd": 1,
+    "rbd_full": 1,
+    "name": 1,
+    "comuna": 1,
+    "area_type": 1,
+    "address": 1,
+    "general_info.category": 1,
+    "general_info.adp": 1,
+    "general_info.covertura": 1,
+}
 
 class EstablishmentsService:
     async def find_all(
@@ -10,8 +24,10 @@ class EstablishmentsService:
         area_type: Optional[str] = None,
         category: Optional[str] = None,
         coverage: Optional[str] = None,
-        adp: Optional[str] = None
-    ) -> List[dict]:
+        adp: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 100
+    ) -> dict:
         query = {}
         
         # Search by name or RBD (starts with/contains, case-insensitive)
@@ -41,18 +57,40 @@ class EstablishmentsService:
         if adp:
             query["general_info.adp"] = {"$regex": f"^{adp}$", "$options": "i"}
 
-        cursor = db_service.db.establishments.find(query)
-        establishments = []
-        async for doc in cursor:
-            # MongoDB _id is ObjectId, we don't need it in output or can convert it
-            doc["_id"] = str(doc["_id"])
-            establishments.append(doc)
-        return establishments
+        total = await db_service.db.establishments.count_documents(query)
+        skip = (page - 1) * page_size
 
-    async def find_by_rbd(self, rbd: str) -> Optional[dict]:
+        cursor = db_service.db.establishments.find(query, LISTING_PROJECTION) \
+                                              .sort("name", 1) \
+                                              .skip(skip) \
+                                              .limit(page_size)
+        items = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            gi = doc.pop("general_info", {}) or {}
+            doc["category"] = gi.get("category", "")
+            doc["adp"] = gi.get("adp", "")
+            doc["covertura"] = gi.get("covertura", "")
+            items.append(doc)
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": math.ceil(total / page_size) if total > 0 else 1,
+        }
+
+    async def find_by_rbd(self, rbd: str, include_sensitive: bool = False) -> Optional[dict]:
         doc = await db_service.db.establishments.find_one({"rbd": rbd})
         if doc:
             doc["_id"] = str(doc["_id"])
+            if not include_sensitive:
+                for lic in doc.get("licenses", []):
+                    if lic.get("password"):
+                        lic["password"] = "[REDACTED]"
+                if doc.get("connectivity", {}).get("ssid_password"):
+                    doc["connectivity"]["ssid_password"] = "[REDACTED]"
             return doc
         return None
 
@@ -69,7 +107,7 @@ class EstablishmentsService:
                 set_data[field] = update_dict[field]
 
         if not set_data:
-            return await self.find_by_rbd(rbd)
+            return await self.find_by_rbd(rbd, include_sensitive=True)
 
         result = await db_service.db.establishments.update_one(
             {"rbd": rbd},
@@ -77,7 +115,7 @@ class EstablishmentsService:
         )
         
         if result.modified_count > 0 or result.matched_count > 0:
-            return await self.find_by_rbd(rbd)
+            return await self.find_by_rbd(rbd, include_sensitive=True)
         return None
 
 establishments_service = EstablishmentsService()

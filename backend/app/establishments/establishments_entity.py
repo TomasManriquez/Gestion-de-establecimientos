@@ -7,7 +7,7 @@ class OwnedPrinter(BaseModel):
     qty: int
     type: str  # COLOR / BN
     provider: str
-    licitation: str
+    licitation: Optional[str] = ""
     expiry_date: Optional[str] = ""
     obs: Optional[str] = ""
 
@@ -119,3 +119,21 @@ class EstablishmentUpdate(BaseModel):
     connectivity: Optional[Connectivity] = None
     printers: Optional[Printers] = None
     licenses: Optional[List[LicenseCredential]] = None
+
+class EstablishmentSummary(BaseModel):
+    rbd: str
+    rbd_full: str
+    name: str
+    comuna: str
+    area_type: str
+    address: str = ""
+    category: Optional[str] = ""
+    adp: Optional[str] = ""
+    covertura: Optional[str] = ""
+
+class EstablishmentListResponse(BaseModel):
+    items: List[EstablishmentSummary]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
