@@ -87,6 +87,11 @@ class GeneralInfo(BaseModel):
     priorizado_asistencia: Optional[str] = ""
     distancia_cafra: Optional[str] = ""
 
+# Geolocation sub-model
+class Location(BaseModel):
+    lat: float
+    lng: float
+
 # Main License sub-model
 class LicenseCredential(BaseModel):
     name: str
@@ -105,6 +110,7 @@ class Establishment(BaseModel):
     comuna: str
     area_type: str  # URBANO / RURAL
     address: str
+    location: Optional[Location] = None
     general_info: GeneralInfo = GeneralInfo()
     connectivity: Connectivity = Connectivity()
     printers: Printers = Printers()
@@ -115,6 +121,7 @@ class EstablishmentUpdate(BaseModel):
     comuna: Optional[str] = None
     area_type: Optional[str] = None
     address: Optional[str] = None
+    location: Optional[Location] = None
     general_info: Optional[GeneralInfo] = None
     connectivity: Optional[Connectivity] = None
     printers: Optional[Printers] = None

@@ -21,6 +21,7 @@ class DatabaseService:
             logger.info(f"Connected to MongoDB at {settings.MONGODB_URL}")
             # Run auto-seed
             await self.seed_if_empty()
+            await self.ensure_indexes()
         except Exception as e:
             logger.error(f"Error connecting to MongoDB: {e}")
             raise e
@@ -120,12 +121,12 @@ class DatabaseService:
 
                 # --- 2. Extract Counterparts (Strategy Pattern / Typed Subdocuments) ---
                 cp_raw = item.get("counterparts", {})
+
+                # Roles fijos sin variación por año
                 role_mappings = {
                     "personal_procesos_adm": ("PERSONAL_PROCESOS_ADM", "SLEP"),
                     "gestor_infraestructura": ("GESTOR_INFRAESTRUCTURA", "SLEP"),
                     "comprador": ("COMPRADOR", "SLEP"),
-                    "territorial_2026": ("TERRITORIAL", "SLEP"),
-                    "territorial": ("TERRITORIAL", "SLEP"),
                     "rrhh": ("RRHH", "SLEP"),
                     "infraestructura": ("INFRAESTRUCTURA", "SLEP"),
                     "compras": ("COMPRAS", "SLEP"),
@@ -139,27 +140,55 @@ class DatabaseService:
                     "sige_encargado": ("SIGE_ENCARGADO", "ESTABLECIMIENTO")
                 }
 
+                # Roles con posible sufijo de año en los datos fuente (ej: territorial_2026).
+                # Se resuelve dinámicamente para no depender del año en el código.
+                # Detecta cualquier clave que empiece con el prefijo del rol.
+                year_variant_roles = {
+                    "territorial": ("TERRITORIAL", "SLEP"),
+                }
+
                 seen_roles = set()
+
+                # Procesar roles fijos
                 for field_name, (role, origin) in role_mappings.items():
                     name_val = cp_raw.get(field_name, "")
                     if name_val and name_val != "-":
-                        # De-duplicate roles (e.g. territorial_2026 vs territorial)
                         role_key = (role, origin)
                         if role_key in seen_roles:
                             continue
                         seen_roles.add(role_key)
-
-                        email_val = cp_raw.get(f"{field_name}_email", "")
-                        phone_val = cp_raw.get(f"{field_name}_phone", "")
-                        
                         counterparts_to_insert.append({
                             "rbd": rbd,
                             "role": role,
                             "origin": origin,
                             "name": name_val,
-                            "email": email_val,
-                            "phone": phone_val
+                            "email": cp_raw.get(f"{field_name}_email", ""),
+                            "phone": cp_raw.get(f"{field_name}_phone", "")
                         })
+
+                # Procesar roles con variantes de año: busca el primero disponible
+                for prefix, (role, origin) in year_variant_roles.items():
+                    role_key = (role, origin)
+                    if role_key in seen_roles:
+                        continue
+                    # Ordenar claves para preferir la más reciente (mayor año)
+                    candidates = sorted(
+                        [k for k in cp_raw if k == prefix or k.startswith(f"{prefix}_")],
+                        reverse=True
+                    )
+                    for field_name in candidates:
+                        name_val = cp_raw.get(field_name, "")
+                        if name_val and name_val != "-":
+                            seen_roles.add(role_key)
+                            counterparts_to_insert.append({
+                                "rbd": rbd,
+                                "role": role,
+                                "origin": origin,
+                                "name": name_val,
+                                "email": cp_raw.get(f"{field_name}_email", ""),
+                                "phone": cp_raw.get(f"{field_name}_phone", "")
+                            })
+                            break
 
                 # Also insert the director as a counterpart from general_info / main data
                 director_name = item.get("general_info", {}).get("director", "")
@@ -202,5 +231,26 @@ class DatabaseService:
                 logger.info(f"Inserted {len(metrics_to_insert)} metrics.")
 
             logger.info("Database seeding completed successfully.")
+
+    async def ensure_indexes(self):
+        """BE-01: Crea índices optimizados en todas las colecciones.
+        Idempotente: usar create_index() con motor/pymongo es seguro si el índice ya existe."""
+        logger.info("Ensuring MongoDB indexes...")
+
+        # Establishments
+        await self.db.establishments.create_index("rbd", unique=True, background=True)
+        await self.db.establishments.create_index([("comuna", 1), ("area_type", 1)], background=True)
+        await self.db.establishments.create_index("name", background=True)
+        await self.db.establishments.create_index("general_info.category", background=True)
+
+        # Counterparts
+        await self.db.counterparts.create_index("rbd", background=True)
+        await self.db.counterparts.create_index([("rbd", 1), ("role", 1)], background=True)
+
+        # Metrics
+        await self.db.metrics.create_index([("rbd", 1), ("year", -1)], unique=True, background=True)
+        await self.db.metrics.create_index("year", background=True)
+
+        logger.info("MongoDB indexes ensured.")
 
 db_service = DatabaseService()

@@ -102,7 +102,7 @@ class EstablishmentsService:
         # However, to be simple and safe, we can just replace the top-level objects that were provided.
         # Let's check what fields we have: general_info, connectivity, printers, licenses.
         set_data = {}
-        for field in ["name", "comuna", "area_type", "address", "general_info", "connectivity", "printers", "licenses"]:
+        for field in ["name", "comuna", "area_type", "address", "location", "general_info", "connectivity", "printers", "licenses"]:
             if field in update_dict:
                 set_data[field] = update_dict[field]
 
