@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { 
   ArrowLeft, Edit3, School, MapPin, Users, Wifi, Printer, 
@@ -8,13 +9,27 @@ import {
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts';
+import EstablishmentMap from './EstablishmentMap';
 
-export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
+/**
+ * FichaEstablecimiento — FE-02
+ * Lee el RBD desde la URL via useParams() en vez de recibirlo como prop.
+ * Deep-link directo a /establecimientos/:rbd funciona en F5 y bookmarks.
+ * "Volver" usa navigate con la ruta de origen guardada en location.state.from,
+ * o navigate(-1) como fallback si viene de navegación de historial.
+ * "Editar" navega a /establecimientos/:rbd/editar con datos en location.state
+ * para evitar re-fetch innecesario si EditFicha ya los tiene disponibles.
+ */
+export default function FichaEstablecimiento() {
+  const { rbd } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [establishment, setEstablishment] = useState(null);
   const [counterparts, setCounterparts] = useState([]);
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('general'); // general, statistics, connectivity, printers
+  const [activeTab, setActiveTab] = useState('general');
   const [showDirectorContact, setShowDirectorContact] = useState(false);
 
   const fetchFichaData = async () => {
@@ -87,7 +102,13 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
         <div className="flex items-center gap-4">
           <button 
-            onClick={onBack}
+            onClick={() => {
+              // Volver a la URL del directorio con los filtros que tenía al navegar
+              const backTo = location.state?.from
+                ? `/establecimientos${location.state.from}`
+                : '/establecimientos';
+              navigate(backTo);
+            }}
             className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all"
           >
             <ArrowLeft size={18} />
@@ -111,7 +132,15 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
         </div>
 
         <button 
-          onClick={() => onEdit(establishment, counterparts, metrics)}
+          onClick={() =>
+            navigate(`/establecimientos/${rbd}/editar`, {
+              state: {
+                initialEst: establishment,
+                initialCps: counterparts,
+                initialMetrics: metrics,
+              }
+            })
+          }
           className="flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-xl text-sm shadow-md shadow-sky-600/10 hover:shadow-sky-500/20 transition-all font-outfit"
         >
           <Edit3 size={16} />
@@ -353,6 +382,16 @@ export default function FichaEstablecimiento({ rbd, onBack, onEdit }) {
                 </div>
 
               </div>
+            </div>
+
+            {/* Full-width: Ubicación */}
+            <div className="lg:col-span-3">
+              <EstablishmentMap
+                lat={establishment.location?.lat}
+                lng={establishment.location?.lng}
+                name={establishment.name}
+                address={establishment.address}
+              />
             </div>
 
           </div>

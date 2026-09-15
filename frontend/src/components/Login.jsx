@@ -1,12 +1,31 @@
 import React, { useState } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { School, Lock, User, AlertCircle } from 'lucide-react';
+import { School, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function Login({ onLoginSuccess }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [username, setUsername]       = useState('');
+  const [password, setPassword]       = useState('');
+  const [error, setError]             = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [searchParams]                = useSearchParams();
+  const navigate                      = useNavigate();
+
+  // Ruta de destino post-login (guardada por ProtectedRoute en ?from=)
+  const redirectTo = searchParams.get('from') || '/dashboard';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -14,18 +33,15 @@ export default function Login({ onLoginSuccess }) {
     setLoading(true);
 
     try {
-      const response = await axios.post('/api/auth/login', {
-        username,
-        password,
-      });
-      const { access_token } = response.data;
-      localStorage.setItem('token', access_token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      const { data } = await axios.post('/api/auth/login', { username, password });
+      localStorage.setItem('token', data.access_token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`;
       onLoginSuccess();
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       console.error(err);
       setError(
-        err.response?.data?.detail || 
+        err.response?.data?.detail ||
         'Error de conexión. Verifique sus credenciales o intente más tarde.'
       );
     } finally {
@@ -34,83 +50,112 @@ export default function Login({ onLoginSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-tr from-sky-900 via-slate-900 to-indigo-950 flex items-center justify-center p-4">
-      {/* Background decoration */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div className="relative min-h-screen w-full flex items-center justify-center p-4 sm:p-6 md:p-8 bg-gradient-to-tr from-sky-950 via-slate-900 to-indigo-950 overflow-hidden">
+      {/* Elementos decorativos de fondo con desenfoque adaptativo */}
+      <div
+        className="absolute -top-24 -left-24 size-72 sm:size-96 rounded-full bg-sky-500/15 blur-3xl pointer-events-none"
+        aria-hidden="true"
+      />
+      <div
+        className="absolute -bottom-24 -right-24 size-72 sm:size-96 rounded-full bg-indigo-500/15 blur-3xl pointer-events-none"
+        aria-hidden="true"
+      />
 
-      <div className="w-full max-w-md bg-white/90 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-white/20 animate-fade-in">
-        <div className="flex flex-col items-center mb-8">
-          <div className="p-4 bg-sky-500 text-white rounded-2xl shadow-lg shadow-sky-500/30 mb-4 animate-bounce">
-            <School size={32} />
+      <Card className="w-full max-w-sm sm:max-w-md bg-white/95 dark:bg-card/90 backdrop-blur-xl border-white/20 shadow-2xl animate-fade-in z-10">
+        <CardHeader className="flex flex-col items-center text-center pb-6">
+          <div className="flex items-center justify-center size-14 sm:size-16 rounded-2xl bg-sky-600 text-white shadow-lg shadow-sky-600/30 mb-3 transition-transform hover:scale-105">
+            <School className="size-7 sm:size-8" />
           </div>
-          <h1 className="text-3xl font-bold font-outfit text-slate-800 text-center">
+          <CardTitle className="text-2xl sm:text-3xl font-bold font-outfit tracking-tight text-slate-800 dark:text-foreground">
             SLEP Llanquihue
-          </h1>
-          <p className="text-sm text-slate-500 mt-1 font-sans">
+          </CardTitle>
+          <CardDescription className="text-xs sm:text-sm text-slate-500 dark:text-muted-foreground font-sans">
             Gestión Centralizada de Establecimientos
-          </p>
-        </div>
+          </CardDescription>
+        </CardHeader>
 
-        {error && (
-          <div className="mb-6 p-4 bg-rose-50 border-l-4 border-rose-500 text-rose-800 rounded-r-lg flex items-start gap-3 text-sm animate-fade-in">
-            <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
-        )}
+        <CardContent className="flex flex-col gap-5">
+          {error && (
+            <Alert variant="destructive" className="animate-fade-in">
+              <AlertCircle className="size-4" />
+              <AlertDescription className="text-xs sm:text-sm font-medium">
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-              Usuario de red
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                <User size={18} />
-              </span>
-              <input
-                type="text"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="ej. admin"
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 transition-all font-sans"
-              />
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label
+                htmlFor="username"
+                className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+              >
+                Usuario de red
+              </Label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground pointer-events-none">
+                  <User className="size-4" />
+                </span>
+                <Input
+                  id="username"
+                  name="username"
+                  type="text"
+                  required
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="ej. admin"
+                  className="pl-9 h-11 text-sm bg-slate-50/70 dark:bg-background focus-visible:ring-sky-500 font-sans"
+                />
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-              Contraseña
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                <Lock size={18} />
-              </span>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 transition-all font-sans"
-              />
+            <div className="flex flex-col gap-2">
+              <Label
+                htmlFor="password"
+                className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+              >
+                Contraseña
+              </Label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground pointer-events-none">
+                  <Lock className="size-4" />
+                </span>
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="pl-9 h-11 text-sm bg-slate-50/70 dark:bg-background focus-visible:ring-sky-500 font-sans"
+                />
+              </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-xl text-sm shadow-lg shadow-sky-600/20 hover:shadow-sky-500/30 transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none mt-2 font-outfit"
-          >
-            {loading ? 'Iniciando sesión...' : 'Ingresar al sistema'}
-          </button>
-        </form>
+            <Button
+              type="submit"
+              disabled={loading}
+              className="w-full h-11 mt-2 text-sm sm:text-base font-semibold font-outfit shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                  Iniciando sesión...
+                </>
+              ) : (
+                'Ingresar al sistema'
+              )}
+            </Button>
+          </form>
+        </CardContent>
 
-        <div className="mt-8 text-center text-xs text-slate-400">
+        <CardFooter className="flex justify-center border-t border-slate-100 dark:border-border/40 py-4 text-center text-xs text-slate-400 dark:text-muted-foreground">
           Servicio Local de Educación Pública de Llanquihue &copy; 2026
-        </div>
-      </div>
+        </CardFooter>
+      </Card>
     </div>
   );
 }

@@ -98,10 +98,10 @@ export default function Dashboard() {
           description="Profesionales de aula 2026"
         />
         <StatCard
-          title="Comunas Cobertas"
+          title="Comunas Cubiertas"
           value={kpis?.total_communes || 0}
           icon={MapPin}
-          description="Puerto Varas, Frutillar, Fresia, etc."
+          description="Puerto Varas, Frutillar, Fresia, Los Muermos, Llanquihue."
         />
       </div>
 

@@ -1,13 +1,60 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { Save, X, Plus, Trash2, ShieldAlert } from 'lucide-react';
+import { Save, X, Plus, Trash2, ShieldAlert, RefreshCw } from 'lucide-react';
 
-export default function EditFicha({ initialEst, initialCps, initialMetrics, onSaveSuccess, onCancel }) {
-  const [est, setEst] = useState({ ...initialEst });
-  const [cps, setCps] = useState([...initialCps]);
+/**
+ * EditFicha — FE-03
+ * Lee el RBD desde useParams(). Acepta datos pre-cargados via location.state
+ * (al navegar desde FichaEstablecimiento), o los carga autónomamente si el
+ * acceso es directo (F5, bookmark). Elimina dependencia de props initialEst/onSaveSuccess.
+ */
+export default function EditFicha() {
+  const { rbd } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Si venimos de FichaEstablecimiento, los datos ya están en location.state
+  const stateData = location.state ?? {};
+  const hasStateData = Boolean(stateData.initialEst);
+
+  const [loadingData, setLoadingData] = useState(!hasStateData);
+  const [est, setEst] = useState(hasStateData ? { ...stateData.initialEst } : null);
+  const [cps, setCps] = useState(hasStateData ? [...(stateData.initialCps ?? [])] : []);
   const [deletedCpIds, setDeletedCpIds] = useState([]);
   const [saving, setSaving] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState('general');
+
+  // Carga autónoma solo cuando no hay datos en location.state
+  useEffect(() => {
+    if (hasStateData) return;
+    const loadData = async () => {
+      setLoadingData(true);
+      try {
+        const [estRes, cpRes] = await Promise.all([
+          axios.get(`/api/establishments/${rbd}`),
+          axios.get(`/api/counterparts/establishment/${rbd}`),
+        ]);
+        setEst({ ...estRes.data });
+        setCps([...cpRes.data]);
+      } catch (err) {
+        console.error('Error loading EditFicha data', err);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+    loadData();
+  }, [rbd, hasStateData]);
+
+  if (loadingData || !est) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <RefreshCw size={32} className="animate-spin text-sky-500" />
+        <p className="text-sm font-medium text-slate-500">Cargando datos del establecimiento...</p>
+      </div>
+    );
+  }
+
 
   // Input change handlers
   const handleGeneralChange = (field, value) => {
@@ -112,11 +159,14 @@ export default function EditFicha({ initialEst, initialCps, initialMetrics, onSa
     setSaving(true);
     try {
       // 1. Save base establishment (general_info, connectivity, printers)
+      const lat = est.location?.lat;
+      const lng = est.location?.lng;
       const estPayload = {
         name: est.name,
         comuna: est.comuna,
         area_type: est.area_type,
         address: est.address,
+        location: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined,
         general_info: est.general_info,
         connectivity: est.connectivity,
         printers: est.printers,
@@ -156,7 +206,7 @@ export default function EditFicha({ initialEst, initialCps, initialMetrics, onSa
         }
       }
 
-      onSaveSuccess();
+      navigate(`/establecimientos/${est.rbd}`);
     } catch (err) {
       console.error('Error saving Ficha data', err);
       alert('Ocurrió un error al guardar los cambios: ' + (err.response?.data?.detail || err.message));
@@ -176,7 +226,7 @@ export default function EditFicha({ initialEst, initialCps, initialMetrics, onSa
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={onCancel}
+            onClick={() => navigate(-1)}
             disabled={saving}
             className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-xl text-sm transition-all"
           >
@@ -237,6 +287,40 @@ export default function EditFicha({ initialEst, initialCps, initialMetrics, onSa
                 type="text"
                 value={est.address}
                 onChange={(e) => setEst({ ...est, address: e.target.value })}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 font-sans"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500">Latitud</label>
+              <input
+                type="number"
+                step="any"
+                value={est.location?.lat ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEst({
+                    ...est,
+                    location: { ...(est.location ?? {}), lat: val === '' ? undefined : parseFloat(val) }
+                  });
+                }}
+                placeholder="-41.320720"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 font-sans"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-500">Longitud</label>
+              <input
+                type="number"
+                step="any"
+                value={est.location?.lng ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEst({
+                    ...est,
+                    location: { ...(est.location ?? {}), lng: val === '' ? undefined : parseFloat(val) }
+                  });
+                }}
+                placeholder="-72.980972"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 font-sans"
               />
             </div>
