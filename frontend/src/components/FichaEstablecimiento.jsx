@@ -180,7 +180,17 @@ export default function FichaEstablecimiento() {
         {/* Tab 1: Información General y Contrapartes */}
         {activeTab === 'general' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-            
+
+            {/* Full-width: Ubicación */}
+            <div className="lg:col-span-3">
+              <EstablishmentMap
+                lat={establishment.location?.lat}
+                lng={establishment.location?.lng}
+                name={establishment.name}
+                address={establishment.address}
+              />
+            </div>
+
             {/* Left side: General details */}
             <div className="lg:col-span-1 space-y-6">
               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
@@ -201,6 +211,7 @@ export default function FichaEstablecimiento() {
                       <span className="block text-[10px] font-bold text-slate-450 uppercase group-hover:text-sky-600 transition-colors">
                         Director / Encargado
                       </span>
+                      {/*informacion general del director */}
                       <div className="flex items-center justify-between gap-2 mt-0.5">
                         <span className="font-bold text-slate-800 group-hover:text-sky-700 transition-colors">
                           {establishment.general_info.director || 'Sin especificar'}
@@ -382,16 +393,6 @@ export default function FichaEstablecimiento() {
                 </div>
 
               </div>
-            </div>
-
-            {/* Full-width: Ubicación */}
-            <div className="lg:col-span-3">
-              <EstablishmentMap
-                lat={establishment.location?.lat}
-                lng={establishment.location?.lng}
-                name={establishment.name}
-                address={establishment.address}
-              />
             </div>
 
           </div>
