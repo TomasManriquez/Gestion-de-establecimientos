@@ -1,7 +1,10 @@
 # Data and secrets
 establishments.json
 backend/establishments.json
-Documentacion/
+# Ignore data files in Documentation, but keep .md
+Documentacion/*.xlsx
+Documentacion/*.json
+Documentacion/establishments.json
 # Python
 __pycache__/
 *.py[cod]
