@@ -181,6 +181,28 @@ dependencia que FastAPI resuelve por `Depends()` es `auth_service.get_current_us
 ruta vive en el `APIRouter(prefix=...)` de cada controller, no en `main.py`. Un módulo nuevo
 requiere exactamente dos líneas en `main.py`: el import y el `include_router`.
 
+### 4.3 🧭 Módulos previstos por la feature de usuarios (F2, sin implementar)
+
+```
+backend/app/
+├── auth/            # verifica credenciales, emite tokens, require_access, auth_tokens
+├── users/           # NUEVO: dueño de la colección users
+├── units/           # NUEVO: units y subrogations
+├── platforms/       # NUEVO: registro de plataformas y sus roles
+├── audit/           # NUEVO (propuesta): audit_log, solo de agregado
+├── mail/            # NUEVO, infraestructura: mail_service.py (un solo archivo)
+└── …                # establishments, counterparts, metrics, analytics sin cambios de estructura
+```
+
+Dirección de imports (ADR-013): `auth → users → {units, platforms, establishments, audit}` y
+`counterparts → users`, sin ciclos. Dos controllers componen servicios de dos módulos para
+evitar los ciclos `users ↔ units` y `users ↔ auth`. `mail` es infraestructura, al nivel de
+`database/`: los módulos de dominio no saben que existe Gmail.
+
+El `lifespan` seguirá llamando solo a `db_service.connect()` (que hace seed e índices) y después
+a `units_service.ensure_bootstrap_units()` y `users_service.ensure_bootstrap_admin()`, en ese
+orden. Esto reemplaza `_seed_admin_user`.
+
 ---
 
 ## 5. Ciclo de vida de la aplicación

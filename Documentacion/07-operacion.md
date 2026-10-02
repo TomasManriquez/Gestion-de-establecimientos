@@ -104,6 +104,38 @@ significa que ninguna omisión impide el arranque — ver la brecha de `04-segur
 
 El frontend **no tiene variables de entorno** (ADR-008).
 
+### 2.1 🧭 DISEÑO F2: variables de la feature de usuarios (no implementadas)
+
+Cada una debe declararse en **los cuatro archivos** (`config.py`, `docker-compose.yml`,
+`docker-compose.prod.yml`, `.env.production.template`; un test lo verifica) y evaluarse para el
+paso 1 de `scripts/deploy.sh`. **Las de identidad y secreto no tienen default: si falta una, la app
+no arranca.**
+
+| Variable | Default | Significado |
+|---|---|---|
+| `ALLOWED_EMAIL_DOMAINS` | **ninguno** | Lista separada por comas (`slepllanquihue.cl`). Valida las altas y el claim `hd` de Google |
+| `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | Correo del admin sembrado o migrado |
+| `PUBLIC_BASE_URL` | **ninguno** | URL pública base (https, salvo `localhost`); forma el enlace de los correos |
+| `MAIL_MODE` | **ninguno** | `gmail` (envío real) o `console` (escribe el mensaje en el log; solo desarrollo, el arranque lo rechaza si `PUBLIC_BASE_URL` no es `localhost` o `127.0.0.1`). Con `console` no hacen falta las cuatro variables de Gmail/Google siguientes |
+| `GMAIL_SENDER_ADDRESS` | **ninguno** | Casilla remitente dedicada, no personal |
+| `GMAIL_REFRESH_TOKEN` | **ninguno** | **Secreto.** Token de la casilla remitente, obtenido una vez (§9). Trátese como `JWT_SECRET` |
+| `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Hoy está en el `.env` de la raíz pero **no llega al contenedor** (ningún compose lo nombra) |
+| `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Lo usa el refresco del token de Gmail |
+| `PASSWORD_MIN_LENGTH` | `15` | Mínimo ≥ 8 (NIST SP 800-63B-4: 15 sin MFA) |
+| `PASSWORD_MAX_LENGTH` | `64` | Mínimo permitido 64; la política también rechaza lo que pase de 72 bytes (límite de bcrypt) |
+| `PASSWORD_REQUIRE_CHAR_CLASSES` | `0` | De 0 a 4. NIST recomienda 0 |
+| `JWT_SECRET`, `ADMIN_PASSWORD` | **ninguno** (hoy tienen default, D2) | Pasan a ser obligatorias; `docker-compose.yml` (desarrollo) debe definir `ADMIN_PASSWORD` |
+
+**Cada variable pasa a ser obligatoria en la fase que la usa**, no antes: F3 exige
+`BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `JWT_SECRET`, `ADMIN_PASSWORD` y la política de
+contraseñas; F4 agrega `MAIL_MODE` y `PUBLIC_BASE_URL` (y las de Gmail/Google si `MAIL_MODE=gmail`);
+F6 agrega `GOOGLE_CLIENT_ID`. Mientras la cuenta remitente no exista se trabaja con
+`MAIL_MODE=console`.
+
+Un valor de la política fuera de rango impide el arranque con un mensaje claro. Los vencimientos
+de los enlaces (72 h invitación, 24 h restablecimiento) y el tope de 200 ítems por lote son
+constantes de código, no variables.
+
 `.env.production.template` es la plantilla a copiar como `.env` en el servidor. `.env` está
 git-ignored.
 
@@ -140,6 +172,10 @@ npm test                # vitest run
 ```
 
 Suites `test_FE00` a `test_FE05` e `test_INT01`, en `frontend/src/tests/`.
+
+> 🧭 **DISEÑO F2:** los tests nuevos usan los IDs `BE09` en adelante, `INT03` en adelante y
+> `FE06` en adelante (último existente: `BE08`, `INT02`, `FE05`). Se propone un
+> `requirements-dev.txt` con `pytest`, `pytest-asyncio` y `httpx` (D22).
 
 **Evidencia observable (regla 1 de `GEMINI.md`):** presentar siempre la salida real de estos
 comandos. Un código de salida sin stdout visible no cuenta como verificación. Si el entorno no
@@ -309,6 +345,37 @@ lo evidencia.
 | Agrega un archivo estático o una ruta del frontend | El `try_files $uri $uri/ /index.html` de `nginx.conf` ya cubre el fallback de React Router. Sin cambios. |
 | Cambia el endpoint de healthcheck | `Dockerfile.prod` (backend), `docker-compose.prod.yml` (los tres healthchecks), `nginx.conf` (`/health`). |
 | Toca `auth/`, `ProtectedRoute` o `database_service` | Punto único de falla: rama aislada, punto de restauración, y tests de autenticación pasando antes y después (regla 3 de `GEMINI.md`). |
+| 🧭 Agrega un componente de shadcn | `npx shadcn@latest add …` (nunca descargar a mano ni usar `--overwrite` sin aprobación); revisar con `--dry-run` las dependencias `@radix-ui/*` que trae, porque obligan a reconstruir la imagen del frontend. Requiere corregir antes `components.json` (D18). |
+| 🧭 Envía correo desde el backend | `GMAIL_*` y `GOOGLE_*` en los cuatro archivos; el consentimiento inicial de la casilla es una tarea manual (§9). |
+| 🧭 Agrega un contador o una colección con TTL | `ensure_indexes()` con `expireAfterSeconds`; comprobar que sigue siendo idempotente. |
+
+---
+
+## 9. 🧭 DISEÑO F2: casilla remitente de Gmail (checklist manual)
+
+> **Estado: sin implementar.** Son tareas de la consola de Google Cloud y de Google Workspace
+> que **ni el código ni un agente pueden hacer**: las ejecuta una persona con permisos de
+> administrador. Decisión y riesgos: ADR-012.
+
+1. [ ] **Elegir o pedir a TI la casilla remitente**: `@slepllanquihue.cl`, dedicada
+   (notificaciones o no-reply), no personal. Si fuera personal, al irse su dueño o cambiar su
+   contraseña se corta el envío para todos.
+2. [ ] En el proyecto de Google Cloud del cliente OAuth existente, abrir la **pantalla de
+   consentimiento** y confirmar que es de tipo **Internal**. Si fuera *External* en estado
+   *Testing*, Google caduca el refresh token a los **7 días**.
+3. [ ] Agregar el scope `https://www.googleapis.com/auth/gmail.send` (y ningún otro) al cliente.
+4. [ ] Con la casilla remitente, ejecutar **una sola vez** el script
+   `backend/scripts/gmail_consent.py` (instala `google-auth-oauthlib` solo donde se ejecute; no
+   va en la imagen). Imprime el **refresh token** por pantalla; no lo escribe en ningún archivo.
+5. [ ] Guardar el token como secreto en el `.env` del servidor (`GMAIL_REFRESH_TOKEN`) junto con
+   `GMAIL_SENDER_ADDRESS`. **Nunca** en el repositorio ni en un chat.
+6. [ ] Agregar `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` al `.env` del servidor y a los dos
+   compose (hoy no llegan al contenedor).
+7. [ ] **Si cambia la contraseña de la casilla remitente**, Google revoca los tokens con scopes de
+   Gmail: repetir los pasos 4 y 5. Mientras tanto los usuarios quedan `invited` y el error se ve
+   en `users.invitation.last_error`; al restablecer el envío, el admin reenvía las invitaciones.
+8. [ ] Confirmar con TI que el filtro de salida o de spam del dominio no bloquea los correos de la
+   casilla remitente antes de la primera alta masiva.
 
 ---
 

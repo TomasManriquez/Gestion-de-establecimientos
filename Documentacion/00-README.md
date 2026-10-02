@@ -5,6 +5,8 @@
 > a qué documento ir según lo que se quiera hacer. No contiene detalle de implementación.
 >
 > **Estado:** verificado contra el repositorio el 2026-09-23, rama `master`, commit `5b0984e`.
+> El 2026-10-02 se agregaron las secciones marcadas `🧭 DISEÑO F2` (feature de usuarios e IAM);
+> no se re-verificó el resto contra el código.
 
 ---
 
@@ -67,6 +69,9 @@ son correctas *a esta escala* y dejan de serlo un orden de magnitud más arriba.
 | Agregar un gráfico nuevo al dashboard | `05` §2.4 |
 | Cambiar algo del despliegue o las variables de entorno | `07` §2 y §5 |
 | Saber qué está mal hoy y qué falta | `05` §5 y las marcas `🔸 BRECHA` de cada documento |
+| Entender la feature de usuarios e IAM (diseño aprobado, sin implementar) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
+| Entender cómo se conectarán otras plataformas (`selloverde`) | `04` §10 |
+| Configurar el correo de invitaciones (Gmail) | `07` §9 |
 
 ---
 
@@ -100,6 +105,12 @@ según de dónde vino el dato.
 | **OC** | Orden de Compra (identificador de adquisición del Estado). | `BamEntry.oc`, `LeasedPrinter.oc_equipo` |
 | **Telsur 2030 / Starlink / WOM** | Proveedores de conectividad presentes en el territorio. | `connectivity.internet_provider` |
 | **Ficha** | Vista de detalle de un establecimiento en el frontend. | `frontend/src/components/FichaEstablecimiento.jsx` |
+| **IAM** | *Identity and Access Management.* Gestión centralizada de usuarios, accesos y autenticación. 🧭 Diseño F2. | `04` §9 y §10 |
+| **Plataforma** | Un sistema del SLEP bajo `*.slepllanquihue.gob.cl` (`datos`, `selloverde`) más la plataforma lógica `iam`. Cada usuario tiene un rol por plataforma. 🧭 | `users.access[]`, `platforms` |
+| **Admin global** | Quien tiene `iam/admin`. Es un rol distinto de `datos/admin`. 🧭 | `04` §9.3 |
+| **Unidad** | Unidad organizacional del SLEP, con nivel 1 a 5 (Dirección Ejecutiva, subdirecciones…). Los funcionarios SLEP pertenecen a una unidad; los usuarios de establecimiento, a un `rbd`. 🧭 | colección `units` |
+| **Jefatura / subrogancia** | Quien dirige una unidad; y quien la reemplaza temporalmente. La subrogancia da visibilidad, no permisos. 🧭 | `units.head_user_id`, `subrogations` |
+| **Invitación** | Estado `invited` de un usuario recién creado: recibe un correo con un enlace de un solo uso para definir su contraseña. 🧭 | `04` §9.5 |
 
 ---
 
@@ -107,6 +118,9 @@ según de dónde vino el dato.
 
 - `> ⚠️ NO VERIFICADO:` — afirmación que no pudo confirmarse leyendo el repositorio. Dice
   qué falta leer o ejecutar para confirmarla.
+- `> 🧭 DISEÑO F2:` — decisión aprobada que **todavía no está implementada**. El código actual
+  no la cumple. Se retira la marca cuando la fase correspondiente la implementa y un test la
+  verifica. Todo lo que no lleva esta marca describe el código actual.
 - `> 🔸 BRECHA:` — el código actual no cumple una convención que este documento declara
   normativa, o presenta un riesgo conocido. **Es un registro, no un plan**: nada de lo
   marcado así fue corregido al escribir esta documentación.

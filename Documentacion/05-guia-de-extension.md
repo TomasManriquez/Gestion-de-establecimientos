@@ -32,6 +32,14 @@ backend/app/inventario/
 └── inventario_controller.py
 ```
 
+> 🔸 **BRECHA (D23, nombre de carpeta):** esta receta dice «en español», pero el código usa
+> inglés en todos los módulos. Para los módulos nuevos de la feature de usuarios se sigue el
+> código (`users`, `units`, `platforms`, `audit`).
+>
+> 🧭 **DISEÑO F2:** dos excepciones acotadas a «exactamente tres archivos», ambas decididas en
+> ADR: `units` es dueño de dos colecciones (`units`, `subrogations`, ADR-010) y
+> `backend/app/mail/` es infraestructura con un solo archivo `mail_service.py` (ADR-012).
+
 Convenciones **no negociables**, porque son las que hacen predecible el árbol:
 carpeta en **singular o plural según el nombre del dominio, en español**, coherente con el
 resto; los tres archivos con el prefijo **exacto** del nombre de la carpeta; sufijos
@@ -378,6 +386,12 @@ Reglas que no se negocian, con la consecuencia concreta de violarlas.
 | L10 | **El `rbd` es `str` en todo el stack.** | Cambio breaking del contrato (`03` §4), invalidación del índice único y rotura de las referencias de `counterparts` y `metrics`. |
 | L11 | **La lógica compartida entre módulos vive en el módulo dueño del dato**, y se consume importando su service (L5). No hay carpeta `utils/` ni `shared/`, y no debe crearse una sin un ADR. | Una carpeta `utils/` sin dueño acumula lógica de negocio huérfana; es como se pierde la trazabilidad de qué módulo es responsable de qué regla. |
 
+> 🧭 **DISEÑO F2 (norma propuesta para L5):** el grafo de imports entre los módulos de la
+> feature está fijado en ADR-013 (`auth → users → {units, platforms, establishments, audit}`).
+> Un test recorrerá los imports y fallará ante un ciclo o una arista no declarada. Cuando una
+> regla de un módulo necesita un dato de otro que está **por encima** en el grafo, el controller
+> lo calcula y se lo pasa al service como parámetro (mismo patrón que `include_sensitive`).
+
 ---
 
 ## 4. Puntos de extensión ya previstos
@@ -439,14 +453,27 @@ Registro ordenado por consecuencia. Cada entrada apunta al documento donde está
 | D14 | El healthcheck no consulta MongoDB | `main.py:50` | Un backend sin base pasa como sano. `03` §5.1 |
 | D15 | El seeding **no es una migración**: solo corre con la colección vacía | `seed_service.py:9` | No hay forma reproducible de cargar datos nuevos. `07` §4 |
 | D16 | Sin pines de versión en `requirements.txt`; tres dependencias declaradas sin uso | `requirements.txt` | Builds no reproducibles. `01` §3 |
-| D17 | `Documentacion/` está en `.gitignore` | `.gitignore:4` | **Esta documentación no se versiona ni viaja con el repositorio.** Ver abajo. |
+| ~~D17~~ | ✅ Resuelto: `.gitignore` ya solo ignora `Documentacion/*.xlsx`, `Documentacion/*.json` y `Documentacion/establishments.json` | `.gitignore:5-7` | Los `.md` de `Documentacion/` están versionados (`git ls-files Documentacion`). Ver abajo. |
 
-> 🔸 **BRECHA (D17, atención):** `.gitignore:4` excluye `Documentacion/` completa. Todo este
-> conjunto de documentos vive solo en el disco local: no llega a otro desarrollador por `git
-> clone`, no tiene historial y se pierde con la máquina. La exclusión probablemente se agregó
-> por las planillas `.xlsx` y el `establishments.json` con datos reales que también están en esa
-> carpeta. La corrección natural es ignorar esos archivos por extensión y versionar los `.md`,
-> pero **no se aplicó**: este documento registra el estado, no lo cambia.
+> ✅ **RESUELTO (D17):** `.gitignore:5-7` ignora por extensión los `.xlsx` y `.json` de
+> `Documentacion/` y deja versionar los `.md`. Verificado con `git ls-files Documentacion`
+> (nueve archivos `.md`, incluido `historico/`). Cumple la política de versionado del estándar
+> de documentación (`.agents/skills/project-documentation-standard.md` §3).
+
+### 5.3b Deuda registrada al diseñar la feature de usuarios (F2)
+
+Brechas encontradas al verificar el prompt de la feature contra el repositorio el 2026-10-02.
+Son un registro, no un plan: ninguna se corrigió al documentarla (salvo que una historia de la
+feature lo diga, indicada en la última columna).
+
+| # | Deuda | Ubicación | Consecuencia | Se atiende en |
+|---|---|---|---|---|
+| D18 | `components.json` empieza con un BOM UTF-8 y declara `baseColor: "sky"`, que el registro de shadcn no tiene | `frontend/components.json:1,9` | `npx shadcn@latest info` falla con «Invalid configuration»; sin el CLI no se puede cumplir la regla de agregar componentes solo con el CLI. Reproducido y corregido en una copia de trabajo | US-39 (F5) |
+| D19 | No existe `frontend/src/lib/api.js` (ADR-008 lo recomienda) | `frontend/src/lib/` (solo `utils.js`) | Las ~14 llamadas siguen dispersas; sin un lugar donde cambiar el prefijo. La feature crea el módulo solo para pantallas nuevas | US-40 (F5) |
+| D20 | `npm run lint` no se puede ejecutar: el script existe, `eslint` no está en `devDependencies` ni instalado, y no hay configuración | `frontend/package.json:9` | CLAUDE.md §2 lista el lint como verificación, pero no hay forma de correrlo. No se declara nunca que el lint pasó | sin historia (decisión pendiente) |
+| D21 | 513 clases de color crudas (`bg-slate-900`, `text-sky-500`…) y 57 líneas con `space-x/y-*` en los nueve componentes | `frontend/src/components/*.jsx` | Viola la regla de estilos de la skill de shadcn. Las pantallas nuevas no lo replican; las existentes **no se refactorizan** en la feature | fuera de alcance |
+| D22 | `pytest`, `pytest-asyncio` y `httpx` no están en `requirements.txt`; el docstring de `conftest.py` dice mongomock pero el código usa `unittest.mock` | `backend/requirements.txt`; `backend/tests/conftest.py:4` | Un entorno limpio no puede correr los tests. Ya registrado en `07` §3 | US-07 propone `requirements-dev.txt` |
+| D23 | El paso 1 de la receta (§1) pide carpetas en español, pero los cinco módulos existentes usan inglés (`establishments`, `counterparts`, `metrics`, `analytics`, `auth`) | `05` §1 «Paso 1»; `backend/app/*` | Los módulos nuevos (`users`, `units`, `platforms`, `audit`) siguen el **código** (inglés). Esta es la 🔸 **BRECHA** de documentación: la receta debe decir inglés | US-60 |
 
 ### 5.4 Qué escala mal a partir de aquí
 
