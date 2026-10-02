@@ -10,13 +10,14 @@ Verifica a nivel de integración (usando TestClient) que:
   - GET /api/establishments/{rbd} con token admin → passwords visibles
   - El campo 'licenses' no aparece en ningún item del listado paginado
 """
+import copy
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from tests.conftest import (
     SAMPLE_ESTABLISHMENT, SAMPLE_ESTABLISHMENT_2,
-    ADMIN_USER, VIEWER_USER
+    ADMIN_USER, VIEWER_USER, authenticated_as
 )
 
 
@@ -85,33 +86,35 @@ def test_INT02_listing_response_never_contains_licenses_field():
     mock_collection.count_documents = AsyncMock(return_value=2)
 
     with patch("app.establishments.establishments_service.db_service") as mock_db_svc, \
-         patch("app.auth.auth_service.auth_service.get_current_user",
-               new_callable=AsyncMock, return_value=ADMIN_USER):
+         authenticated_as(ADMIN_USER) as auth_headers:
 
         mock_db_svc.db.establishments = mock_collection
 
         with TestClient(app) as client:
             response = client.get(
                 "/api/establishments",
-                headers={"Authorization": "Bearer fake-valid-token"}
+                headers=auth_headers
             )
 
-    if response.status_code == 200:
-        data = response.json()
-        items = data.get("items", data) if isinstance(data, dict) else data
+    assert response.status_code == 200, (
+        f"La ruta respondió {response.status_code}: el test no verificaría nada. "
+        f"Cuerpo: {response.text}"
+    )
+    data = response.json()
+    items = data.get("items", data) if isinstance(data, dict) else data
 
-        for item in items:
-            assert "licenses" not in item, (
-                f"El establecimiento '{item.get('name')}' incluye 'licenses' en el listado. "
-                "La proyección MongoDB debe excluir este campo."
-            )
-            assert "connectivity" not in item, (
-                f"El establecimiento '{item.get('name')}' incluye 'connectivity' en el listado. "
-                "Este campo contiene ssid_password."
-            )
-            assert "printers" not in item, (
-                f"El establecimiento '{item.get('name')}' incluye 'printers' en el listado."
-            )
+    for item in items:
+        assert "licenses" not in item, (
+            f"El establecimiento '{item.get('name')}' incluye 'licenses' en el listado. "
+            "La proyección MongoDB debe excluir este campo."
+        )
+        assert "connectivity" not in item, (
+            f"El establecimiento '{item.get('name')}' incluye 'connectivity' en el listado. "
+            "Este campo contiene ssid_password."
+        )
+        assert "printers" not in item, (
+            f"El establecimiento '{item.get('name')}' incluye 'printers' en el listado."
+        )
 
 
 def test_INT02_listing_response_does_not_contain_password_string_anywhere():
@@ -132,26 +135,28 @@ def test_INT02_listing_response_does_not_contain_password_string_anywhere():
     mock_collection.count_documents = AsyncMock(return_value=1)
 
     with patch("app.establishments.establishments_service.db_service") as mock_db_svc, \
-         patch("app.auth.auth_service.auth_service.get_current_user",
-               new_callable=AsyncMock, return_value=ADMIN_USER):
+         authenticated_as(ADMIN_USER) as auth_headers:
 
         mock_db_svc.db.establishments = mock_collection
 
         with TestClient(app) as client:
             response = client.get(
                 "/api/establishments",
-                headers={"Authorization": "Bearer fake-valid-token"}
+                headers=auth_headers
             )
 
-    if response.status_code == 200:
-        raw_json = response.text
-        # Buscar 'password' como clave JSON (entre comillas seguida de :)
-        import re
-        password_keys = re.findall(r'"password"\s*:', raw_json)
-        assert len(password_keys) == 0, (
-            f"El JSON del listado contiene {len(password_keys)} ocurrencia(s) de '\"password\":'. "
-            "CRÍTICO: Ningún campo password debe estar en la respuesta del directorio."
-        )
+    assert response.status_code == 200, (
+        f"La ruta respondió {response.status_code}: el test no verificaría nada. "
+        f"Cuerpo: {response.text}"
+    )
+    raw_json = response.text
+    # Buscar 'password' como clave JSON (entre comillas seguida de :)
+    import re
+    password_keys = re.findall(r'"password"\s*:', raw_json)
+    assert len(password_keys) == 0, (
+        f"El JSON del listado contiene {len(password_keys)} ocurrencia(s) de '\"password\":'. "
+        "CRÍTICO: Ningún campo password debe estar en la respuesta del directorio."
+    )
 
 
 # ─── Tests del detalle (GET /api/establishments/{rbd}) ────────────────────────
@@ -161,34 +166,36 @@ def test_INT02_detail_with_non_admin_token_returns_redacted_passwords():
     from app.main import app
 
     with patch("app.establishments.establishments_service.db_service") as mock_db_svc, \
-         patch("app.auth.auth_service.auth_service.get_current_user",
-               new_callable=AsyncMock, return_value=VIEWER_USER):
+         authenticated_as(VIEWER_USER) as auth_headers:
 
-        mock_db_svc.db.establishments.find_one = AsyncMock(return_value=SAMPLE_ESTABLISHMENT)
+        mock_db_svc.db.establishments.find_one = AsyncMock(return_value=copy.deepcopy(SAMPLE_ESTABLISHMENT))
 
         with TestClient(app) as client:
             response = client.get(
                 "/api/establishments/7722",
-                headers={"Authorization": "Bearer fake-viewer-token"}
+                headers=auth_headers
             )
 
-    if response.status_code == 200:
-        data = response.json()
+    assert response.status_code == 200, (
+        f"La ruta respondió {response.status_code}: el test no verificaría nada. "
+        f"Cuerpo: {response.text}"
+    )
+    data = response.json()
 
-        # Verificar licenses
-        for lic in data.get("licenses", []):
-            pw = lic.get("password", "")
-            assert pw == "[REDACTED]", (
-                f"Usuario viewer recibió password='{pw}'. "
-                "Debe ser '[REDACTED]' para usuarios sin rol admin."
-            )
-
-        # Verificar ssid_password
-        ssid_pw = data.get("connectivity", {}).get("ssid_password", "")
-        assert ssid_pw == "[REDACTED]", (
-            f"Usuario viewer recibió ssid_password='{ssid_pw}'. "
+    # Verificar licenses
+    for lic in data.get("licenses", []):
+        pw = lic.get("password", "")
+        assert pw == "[REDACTED]", (
+            f"Usuario viewer recibió password='{pw}'. "
             "Debe ser '[REDACTED]' para usuarios sin rol admin."
         )
+
+    # Verificar ssid_password
+    ssid_pw = data.get("connectivity", {}).get("ssid_password", "")
+    assert ssid_pw == "[REDACTED]", (
+        f"Usuario viewer recibió ssid_password='{ssid_pw}'. "
+        "Debe ser '[REDACTED]' para usuarios sin rol admin."
+    )
 
 
 def test_INT02_detail_with_admin_token_returns_real_passwords():
@@ -196,28 +203,30 @@ def test_INT02_detail_with_admin_token_returns_real_passwords():
     from app.main import app
 
     with patch("app.establishments.establishments_service.db_service") as mock_db_svc, \
-         patch("app.auth.auth_service.auth_service.get_current_user",
-               new_callable=AsyncMock, return_value=ADMIN_USER):
+         authenticated_as(ADMIN_USER) as auth_headers:
 
-        mock_db_svc.db.establishments.find_one = AsyncMock(return_value=SAMPLE_ESTABLISHMENT)
+        mock_db_svc.db.establishments.find_one = AsyncMock(return_value=copy.deepcopy(SAMPLE_ESTABLISHMENT))
 
         with TestClient(app) as client:
             response = client.get(
                 "/api/establishments/7722",
-                headers={"Authorization": "Bearer fake-admin-token"}
+                headers=auth_headers
             )
 
-    if response.status_code == 200:
-        data = response.json()
+    assert response.status_code == 200, (
+        f"La ruta respondió {response.status_code}: el test no verificaría nada. "
+        f"Cuerpo: {response.text}"
+    )
+    data = response.json()
 
-        for lic in data.get("licenses", []):
-            pw = lic.get("password", "")
-            assert pw != "[REDACTED]", (
-                "Admin recibió '[REDACTED]' en un password. "
-                "El admin debe ver las contraseñas reales."
-            )
-
-        ssid_pw = data.get("connectivity", {}).get("ssid_password", "")
-        assert ssid_pw != "[REDACTED]", (
-            "Admin recibió '[REDACTED]' en ssid_password."
+    for lic in data.get("licenses", []):
+        pw = lic.get("password", "")
+        assert pw != "[REDACTED]", (
+            "Admin recibió '[REDACTED]' en un password. "
+            "El admin debe ver las contraseñas reales."
         )
+
+    ssid_pw = data.get("connectivity", {}).get("ssid_password", "")
+    assert ssid_pw != "[REDACTED]", (
+        "Admin recibió '[REDACTED]' en ssid_password."
+    )

@@ -172,3 +172,38 @@ VIEWER_USER = {
     "full_name": "Usuario Lectura",
     "role": "viewer",
 }
+
+
+# ─── Aislamiento y autenticación para los tests ──────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_database_lifecycle():
+    """Ningún test debe conectarse a la base real.
+
+    `TestClient(app)` ejecuta el `lifespan` de `app.main`, que llama a
+    `db_service.connect()` (seed + índices) contra `MONGODB_URL`. En un equipo con la
+    MongoDB de desarrollo levantada (puerto 27017 publicado por docker-compose), eso
+    escribe en la base real. Se reemplaza por un doble que no hace nada.
+    """
+    with patch("app.main.db_service") as mock_db:
+        mock_db.connect = AsyncMock()
+        mock_db.close = AsyncMock()
+        yield mock_db
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def authenticated_as(user):
+    """Autentica de verdad: emite un JWT firmado y simula solo la lectura del usuario.
+
+    A diferencia de parchear `get_current_user` (la dependencia ya quedó capturada al
+    importar el controller, así que el parche no surte efecto y la ruta responde 401),
+    esto ejercita el camino completo de verificación del token. Cede las cabeceras.
+    """
+    from app.auth.auth_service import auth_service
+    token = auth_service.create_access_token({"sub": user["username"], "role": user.get("role", "user")})
+    with patch("app.auth.auth_service.db_service") as mock_auth_db:
+        mock_auth_db.db.users.find_one = AsyncMock(return_value=user)
+        yield {"Authorization": f"Bearer {token}"}
