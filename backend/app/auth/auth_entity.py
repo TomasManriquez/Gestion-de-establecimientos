@@ -62,3 +62,34 @@ class UserResponse(BaseModel):
     id: Optional[str] = None
     email: Optional[str] = None
     access: List[AccessSummary] = []
+
+
+class PasswordPolicy(BaseModel):
+    """Lo único que el cliente necesita para validar en vivo. Nunca incluye la lista de bloqueo."""
+    min_length: int
+    max_length: int
+    require_char_classes: int
+
+
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(..., min_length=1, max_length=1024)
+    new_password: str = Field(..., min_length=1, max_length=1024)
+
+
+# ─── Política de contraseñas: listas de bloqueo (NIST SP 800-63B-4 §3.1.1.2) ─────────────
+# Contraseñas comunes en español e inglés y variantes típicas de un SLEP. La lista de bloqueo
+# real de un despliegue puede ampliarse; esta es la base mínima verificable por test.
+COMMON_PASSWORDS = frozenset("""
+password contrasena clave secreto admin administrador administrator qwerty qwertyuiop asdfgh asdfghjkl
+zxcvbn zxcvbnm abc123 abcdef abcdefgh abcd1234 letmein welcome bienvenido bienvenida changeme cambiame
+iloveyou monkey dragon master login passw0rd p4ssword pass1234 password1 password12 password123
+password1234 contrasena1 contrasena12 contrasena123 contrasena1234 clave123 clave1234 clave12345
+admin123 admin1234 admin12345 admin123456 administrador123 12345678 123456789 1234567890 12345678910
+111111111 000000000 987654321 1q2w3e4r 1q2w3e4r5t 1qaz2wsx qazwsxedc q1w2e3r4 usuario usuario123
+chile chile123 santiago santiago123 llanquihue puertovaras frutillar fresia losmuermos
+slep slep123 slep1234 slep2026 slep2025 slepllanquihue slepllanquihue1 slepllanquihue123
+slepllanquihue2026 slepllanquihue2025 slepllanquihue.cl educacion educacion123 colegio escuela
+""".split())
+# Palabras de contexto que no pueden formar parte de la contraseña
+CONTEXT_WORDS = ("slepllanquihue", "llanquihue", "slepllan")

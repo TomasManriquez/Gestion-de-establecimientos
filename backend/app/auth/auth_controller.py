@@ -3,8 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
 from app.auth.auth_service import auth_service, require_access
-from app.auth.auth_entity import (AccessContext, AccessSummary, LoginRequest, PLATFORM_DATOS, Token,
-                                  UserResponse)
+from app.auth.auth_entity import (AccessContext, AccessSummary, ChangePasswordRequest, LoginRequest, PLATFORM_DATOS,
+                                  PasswordPolicy, Token, UserResponse)
+from app.users.users_entity import UserNotFound
+from app.users.users_service import users_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -72,3 +74,39 @@ async def read_users_me(ctx: AccessContext = Depends(require_access(None))):
         "email": user.get("email"),
         "access": [AccessSummary(platform_id=a["platform_id"], role=a["role"]) for a in user.get("access", [])],
     }
+
+
+@router.get("/password-policy", response_model=PasswordPolicy)
+async def get_password_policy():
+    """Pública: el frontend la necesita antes de que haya sesión (pantalla de definir contraseña).
+    Solo expone los números de la política, nunca la lista de bloqueo."""
+    return {"min_length": settings.PASSWORD_MIN_LENGTH, "max_length": settings.PASSWORD_MAX_LENGTH,
+            "require_char_classes": settings.PASSWORD_REQUIRE_CHAR_CLASSES}
+
+
+@router.post("/password", response_model=Token)
+async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext = Depends(require_access(None))):
+    """Cambio de contraseña propio (C19). Devuelve un token nuevo: el cambio fija
+    `password_changed_at`, lo que invalida el token con el que se llamó.
+
+    Una contraseña actual incorrecta responde 400, NUNCA 401: el interceptor del frontend
+    (App.jsx) cierra la sesión ante cualquier 401.
+    """
+    user = ctx.user
+    provider = next((p for p in user.get("auth_providers", []) if p.get("provider") == "local"), None)
+    if provider is None or not provider.get("hashed_password"):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={
+            "code": "no_local_password",
+            "message": "Esta cuenta no tiene contraseña local. Solicita un restablecimiento."})
+    if not auth_service.verify_password(payload.current_password, provider["hashed_password"]):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={
+            "code": "current_password_incorrect", "message": "La contraseña actual no es correcta"})
+    violations = auth_service.check_password_policy(payload.new_password, user.get("email"))
+    if violations:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=violations)
+    try:
+        updated = await users_service.set_local_password(ctx.user_id, auth_service.get_password_hash(payload.new_password))
+    except UserNotFound:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return _issue_token(updated)

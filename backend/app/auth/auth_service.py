@@ -1,4 +1,6 @@
+import re
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
@@ -7,7 +9,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.auth.auth_entity import AccessContext
+from app.auth.auth_entity import AccessContext, COMMON_PASSWORDS, CONTEXT_WORDS
 from app.config import settings
 from app.users.users_service import users_service
 
@@ -38,16 +40,66 @@ def local_provider(user: dict) -> Optional[dict]:
     return None
 
 
+BCRYPT_MAX_BYTES = 72     # bcrypt 5 lanza ValueError sobre 72 bytes: se rechaza con 422, no 500
+
+
+def normalize_password(password: str) -> str:
+    """NFKC antes de validar y hashear (NIST: normalizar Unicode para que el mismo texto
+    escrito con distinto teclado produzca el mismo hash)."""
+    return unicodedata.normalize("NFKC", password)
+
+
 class AuthService:
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        try:
-            return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
-        except Exception:
-            return False
+        """Prueba la contraseña normalizada y, si difiere, la cruda (hashes anteriores a NFKC)."""
+        candidates = {normalize_password(plain_password), plain_password}
+        for candidate in candidates:
+            data = candidate.encode("utf-8")
+            if len(data) > BCRYPT_MAX_BYTES:
+                continue
+            try:
+                if bcrypt.checkpw(data, hashed_password.encode("utf-8")):
+                    return True
+            except Exception:
+                continue
+        return False
 
     def get_password_hash(self, password: str) -> str:
-        salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
-        return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+        data = normalize_password(password).encode("utf-8")
+        if len(data) > BCRYPT_MAX_BYTES:
+            raise ValueError("password exceeds 72 bytes")      # la política lo rechaza antes
+        return bcrypt.hashpw(data, bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("utf-8")
+
+    def check_password_policy(self, password: str, email: Optional[str] = None) -> list:
+        """Única función de política: la usan el cambio propio, el canje del enlace y el bootstrap
+        (C17). Devuelve las infracciones como [{code, message}]; lista vacía = cumple."""
+        pw = normalize_password(password)
+        violations = []
+
+        def add(code, message):
+            violations.append({"code": code, "message": message})
+
+        if len(pw) < settings.PASSWORD_MIN_LENGTH:
+            add("min_length", f"Debe tener al menos {settings.PASSWORD_MIN_LENGTH} caracteres")
+        if len(pw) > settings.PASSWORD_MAX_LENGTH:
+            add("max_length", f"No puede superar {settings.PASSWORD_MAX_LENGTH} caracteres")
+        if len(pw.encode("utf-8")) > BCRYPT_MAX_BYTES:
+            add("max_bytes", f"No puede superar {BCRYPT_MAX_BYTES} bytes (los acentos ocupan más de uno)")
+        if settings.PASSWORD_REQUIRE_CHAR_CLASSES:
+            classes = sum([bool(re.search(r"[a-záéíóúñü]", pw)), bool(re.search(r"[A-ZÁÉÍÓÚÑÜ]", pw)),
+                           bool(re.search(r"[0-9]", pw)), bool(re.search(r"[^\w\s]|_", pw))])
+            if classes < settings.PASSWORD_REQUIRE_CHAR_CLASSES:
+                add("char_classes", f"Debe combinar al menos {settings.PASSWORD_REQUIRE_CHAR_CLASSES} tipos de caracteres")
+        folded = re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", pw.lower()).encode("ascii", "ignore").decode())
+        if pw.lower() in COMMON_PASSWORDS or folded in COMMON_PASSWORDS:
+            add("common_password", "Es una contraseña demasiado común")
+        context = list(CONTEXT_WORDS)
+        local = (email or "").partition("@")[0].lower()
+        if len(local) >= 4:
+            context.append(local)
+        if any(w in folded or w in pw.lower() for w in context):
+            add("context_word", "No puede contener tu correo ni el nombre de la institución")
+        return violations
 
     async def authenticate_user(self, login: str, password: str) -> Optional[dict]:
         """Correo (normalizado) o username legado. Solo entra quien está `active` y tiene

@@ -295,3 +295,24 @@ def user_with_password(user: dict, password: str, **overrides) -> dict:
                               "password_changed_at": None, "must_change_password": False}]
     doc.update(overrides)
     return doc
+
+
+def run(coro):
+    """Ejecuta una corrutina desde un test síncrono (preparación de datos con la base en memoria)."""
+    import asyncio
+    return asyncio.run(coro)
+
+
+def prepare_org(fake_db, *users):
+    """Índices + organigrama + plataformas + usuarios de prueba. Devuelve {code: id(str)} de las unidades."""
+    from app.database.database_service import DatabaseService
+    from app.platforms.platforms_service import platforms_service
+    from app.units.units_service import units_service
+    svc = DatabaseService()
+    svc.db = fake_db
+    run(svc.ensure_indexes())
+    run(units_service.ensure_bootstrap_units())
+    run(platforms_service.ensure_bootstrap_platforms())
+    if users:
+        seed_users(fake_db, *users)
+    return {d["code"]: str(d["_id"]) for d in fake_db.units.docs}
