@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
-from app.auth.auth_service import auth_service
+from app.auth.auth_service import require_access
+from app.auth.auth_entity import (AccessContext, PLATFORM_DATOS, DATOS_READ, DATOS_WRITE,
+                                  DATOS_DELETE, SENSITIVE_ROLES)
 from app.establishments.establishments_service import establishments_service
 from app.establishments.establishments_entity import (
     Establishment, EstablishmentUpdate,
-    EstablishmentSummary, EstablishmentListResponse
+    EstablishmentSummary, EstablishmentListResponse, RedactedPlaceholderError
 )
 
 router = APIRouter(prefix="/api/establishments", tags=["establishments"])
@@ -19,7 +21,7 @@ async def get_establishments(
     adp: Optional[str] = Query(None, description="Filtrar por cargo ADP (Si/No)"),
     page: int = Query(1, ge=1, description="Página actual"),
     page_size: int = Query(100, ge=1, le=200, description="Items por página (máx 200)"),
-    current_user: dict = Depends(auth_service.get_current_user) # Require authentication for reading directory
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_READ)),
 ):
     return await establishments_service.find_all(
         search=search,
@@ -35,10 +37,11 @@ async def get_establishments(
 @router.get("/{rbd}", response_model=Establishment)
 async def get_establishment_detail(
     rbd: str,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_READ)),
 ):
-    is_admin = current_user.get("role") == "admin"
-    est = await establishments_service.find_by_rbd(rbd, include_sensitive=is_admin)
+    # Solo `viewer` recibe las credenciales redactadas (C20). El service no sabe qué es un rol.
+    include_sensitive = ctx.role in SENSITIVE_ROLES
+    est = await establishments_service.find_by_rbd(rbd, include_sensitive=include_sensitive)
     if not est:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -50,9 +53,13 @@ async def get_establishment_detail(
 async def update_establishment(
     rbd: str,
     payload: EstablishmentUpdate,
-    current_user: dict = Depends(auth_service.get_current_user) # Only logged-in users can update
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_WRITE)),
 ):
-    updated_est = await establishments_service.update_by_rbd(rbd, payload)
+    try:
+        updated_est = await establishments_service.update_by_rbd(
+            rbd, payload, include_sensitive=ctx.role in SENSITIVE_ROLES)
+    except RedactedPlaceholderError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     if not updated_est:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -28,6 +28,28 @@ class EstablishmentPosition(str, Enum):
     ASISTENTE_EDUCACION = "ASISTENTE_EDUCACION"
 
 
+# ─── Errores de dominio (el service no importa fastapi, L2; el controller los traduce) ───
+
+class UserNotFound(Exception):
+    pass
+
+
+class UserConflict(Exception):
+    """Violación de una regla de negocio o de unicidad. -> 409"""
+    def __init__(self, message: str, code: str = "conflict", field: str = None):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.field = field
+
+
+class UserInvalid(Exception):
+    """Referencia o combinación inválida detectada por el service (por ejemplo, unit_id inexistente). -> 422"""
+    def __init__(self, errors):
+        super().__init__("; ".join(e["message"] for e in errors))
+        self.errors = errors
+
+
 class UserStatus(str, Enum):
     INVITED = "invited"
     ACTIVE = "active"

@@ -280,6 +280,14 @@ class FakeCollection:
                 if [tuple(map(repr, _get_path(other, k) or [None])) for k in keys] == key_vals:
                     raise DuplicateKeyError(f"E11000 duplicate key error collection: {self.name} index: {keys}")
 
+    def seed(self, *docs):
+        """Carga documentos de forma síncrona (preparación de un test, sin pasar por índices)."""
+        for d in docs:
+            d = copy.deepcopy(d)
+            d.setdefault("_id", ObjectId())
+            self.docs.append(d)
+        return self
+
     # ── escritura ──
     async def insert_one(self, doc):
         self.calls.append("insert_one")

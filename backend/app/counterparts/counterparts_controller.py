@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
-from app.auth.auth_service import auth_service
+from app.auth.auth_service import require_access
+from app.auth.auth_entity import (AccessContext, PLATFORM_DATOS, DATOS_READ, DATOS_WRITE,
+                                  DATOS_DELETE, SENSITIVE_ROLES)
 from app.counterparts.counterparts_service import counterparts_service
 from app.counterparts.counterparts_entity import Counterpart, CounterpartCreate, CounterpartUpdate
 
@@ -9,14 +11,14 @@ router = APIRouter(prefix="/api/counterparts", tags=["counterparts"])
 @router.get("/establishment/{rbd}", response_model=List[Counterpart])
 async def get_counterparts_by_establishment(
     rbd: str,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_READ))
 ):
     return await counterparts_service.find_by_rbd(rbd)
 
 @router.post("", response_model=Counterpart, status_code=status.HTTP_201_CREATED)
 async def create_counterpart(
     payload: CounterpartCreate,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_WRITE))
 ):
     return await counterparts_service.create(payload)
 
@@ -24,7 +26,7 @@ async def create_counterpart(
 async def update_counterpart(
     cp_id: str,
     payload: CounterpartUpdate,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_WRITE))
 ):
     updated = await counterparts_service.update(cp_id, payload)
     if not updated:
@@ -37,7 +39,7 @@ async def update_counterpart(
 @router.delete("/{cp_id}", status_code=status.HTTP_200_OK)
 async def delete_counterpart(
     cp_id: str,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_DELETE))
 ):
     success = await counterparts_service.delete(cp_id)
     if not success:

@@ -14,6 +14,7 @@ Verifica que:
 import copy
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from app.auth.auth_entity import AccessContext
 from tests.conftest import SAMPLE_ESTABLISHMENT, ADMIN_USER, VIEWER_USER
 
 
@@ -155,16 +156,12 @@ async def test_BE05_controller_passes_include_sensitive_true_for_admin():
     with patch.object(EstablishmentsService, "find_by_rbd", new_callable=AsyncMock) as mock_find:
         mock_find.return_value = {**SAMPLE_ESTABLISHMENT}
 
-        with patch("app.establishments.establishments_controller.establishments_service") as mock_svc, \
-             patch("app.establishments.establishments_controller.auth_service.get_current_user",
-                   new_callable=AsyncMock) as mock_auth:
-
-            mock_auth.return_value = ADMIN_USER
+        with patch("app.establishments.establishments_controller.establishments_service") as mock_svc:
             mock_svc.find_by_rbd = mock_find
 
             # Importar y llamar al controller manualmente
             from app.establishments.establishments_controller import get_establishment_detail
-            result = await get_establishment_detail(rbd="7722", current_user=ADMIN_USER)
+            result = await get_establishment_detail(rbd="7722", ctx=AccessContext(user_id=ADMIN_USER["_id"], role="admin"))
 
     # Verificar que find_by_rbd fue llamado con include_sensitive=True
     call_kwargs = mock_find.call_args
@@ -189,7 +186,7 @@ async def test_BE05_controller_passes_include_sensitive_false_for_viewer():
             mock_svc.find_by_rbd = mock_find
 
             from app.establishments.establishments_controller import get_establishment_detail
-            await get_establishment_detail(rbd="7722", current_user=VIEWER_USER)
+            await get_establishment_detail(rbd="7722", ctx=AccessContext(user_id=VIEWER_USER["_id"], role="viewer"))
 
     if mock_find.call_args:
         args, kwargs = mock_find.call_args
