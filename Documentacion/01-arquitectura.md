@@ -181,16 +181,16 @@ dependencia que FastAPI resuelve por `Depends()` es `auth_service.get_current_us
 ruta vive en el `APIRouter(prefix=...)` de cada controller, no en `main.py`. Un módulo nuevo
 requiere exactamente dos líneas en `main.py`: el import y el `include_router`.
 
-### 4.3 🧭 Módulos previstos por la feature de usuarios (F2, sin implementar)
+### 4.3 Módulos de la feature de usuarios (✅ `users`, `units`, `platforms` y `mail` pendiente de F4; 🧭 `audit`)
 
 ```
 backend/app/
 ├── auth/            # verifica credenciales, emite tokens, require_access, auth_tokens
-├── users/           # NUEVO: dueño de la colección users
-├── units/           # NUEVO: units y subrogations
-├── platforms/       # NUEVO: registro de plataformas y sus roles
-├── audit/           # NUEVO (propuesta): audit_log, solo de agregado
-├── mail/            # NUEVO, infraestructura: mail_service.py (un solo archivo)
+├── users/           # ✅ dueño de la colección users
+├── units/           # ✅ units (subrogations 🧭 F4)
+├── platforms/       # ✅ registro de plataformas y sus roles
+├── audit/           # 🧭 F4 (propuesta): audit_log, solo de agregado
+├── mail/            # 🧭 F4, infraestructura: mail_service.py (un solo archivo)
 └── …                # establishments, counterparts, metrics, analytics sin cambios de estructura
 ```
 
@@ -199,9 +199,11 @@ Dirección de imports (ADR-013): `auth → users → {units, platforms, establis
 evitar los ciclos `users ↔ units` y `users ↔ auth`. `mail` es infraestructura, al nivel de
 `database/`: los módulos de dominio no saben que existe Gmail.
 
-El `lifespan` seguirá llamando solo a `db_service.connect()` (que hace seed e índices) y después
-a `units_service.ensure_bootstrap_units()` y `users_service.ensure_bootstrap_admin()`, en ese
-orden. Esto reemplaza `_seed_admin_user`.
+El `lifespan` llama a `db_service.connect()` (seed de establecimientos e índices) y después a
+`run_bootstrap()` (`main.py`): `units_service.ensure_bootstrap_units()`,
+`platforms_service.ensure_bootstrap_platforms()` y `users_service.ensure_bootstrap_admin()`, en ese
+orden. Esto reemplazó a `_seed_admin_user`. `database` sigue sin importar módulos de dominio:
+por eso `run_bootstrap` vive en `main.py` (un test lo verifica).
 
 ---
 
@@ -210,14 +212,15 @@ orden. Esto reemplaza `_seed_admin_user`.
 `app/main.py:16-24` define un `lifespan` asíncrono:
 
 - **Arranque:** `db_service.connect()` → abre `AsyncIOMotorClient`, luego
-  `seed_if_empty()` y `ensure_indexes()` en ese orden.
+  `seed_if_empty()` (establecimientos) y `ensure_indexes()` en ese orden; después `run_bootstrap()`
+  (unidades, plataformas y admin, ver `07` §1.3).
 - **Apagado:** `db_service.close()`.
 
 Dos propiedades que condicionan el desarrollo:
 
 1. **El seeding es automático y condicional.** `seed_if_empty()` inserta solo si
-   `establishments` está vacía y solo si `users` está vacía (son dos comprobaciones
-   independientes, `seed_service.py:19` y `:36`). Arrancar contra una base ya poblada no
+   `establishments` está vacía. El admin, las unidades y las plataformas los siembran sus
+   módulos dueños, cada uno con su propia condición (ver `07` §1.3). Arrancar contra una base ya poblada no
    hace nada. Para re-sembrar hay que vaciar la colección primero.
 2. **Los índices se aseguran en cada arranque.** `ensure_indexes()` es idempotente por
    contrato (`test_BE01_ensure_indexes_is_idempotent`) porque `create_index` no falla si el

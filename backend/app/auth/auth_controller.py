@@ -103,7 +103,7 @@ async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext
             "code": "current_password_incorrect", "message": "La contraseña actual no es correcta"})
     violations = auth_service.check_password_policy(payload.new_password, user.get("email"))
     if violations:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=violations)
+        raise HTTPException(422, detail=violations)
     try:
         updated = await users_service.set_local_password(ctx.user_id, auth_service.get_password_hash(payload.new_password))
     except UserNotFound:

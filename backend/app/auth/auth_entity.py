@@ -93,3 +93,6 @@ slepllanquihue2026 slepllanquihue2025 slepllanquihue.cl educacion educacion123 c
 """.split())
 # Palabras de contexto que no pueden formar parte de la contraseña
 CONTEXT_WORDS = ("slepllanquihue", "llanquihue", "slepllan")
+# Secuencias que un atacante prueba antes que nada: números, abecedario y filas del teclado
+SEQUENCES = ("01234567890123456789", "98765432109876543210", "abcdefghijklmnopqrstuvwxyz",
+             "zyxwvutsrqponmlkjihgfedcba", "qwertyuiopasdfghjklzxcvbnm", "mnbvcxzlkjhgfdsapoiuytrewq", "1q2w3e4r5t6y7u8i9o0p")

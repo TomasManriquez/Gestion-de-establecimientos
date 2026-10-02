@@ -24,25 +24,27 @@ Base: `/api`. Sin versionado en la ruta. Servidor documentado en `main.py:27-31`
 | 2 | POST | `/api/auth/login` | pública | `Token` |
 | 3 | POST | `/api/auth/login-form` | pública | `Token` |
 | 4 | POST | `/api/auth/logout` | pública | `{message}` |
-| 5 | GET | `/api/auth/me` | Bearer | `UserResponse` |
-| 6 | GET | `/api/establishments` | Bearer | `EstablishmentListResponse` |
-| 7 | GET | `/api/establishments/{rbd}` | Bearer | `Establishment` |
-| 8 | PUT | `/api/establishments/{rbd}` | Bearer | `Establishment` |
-| 9 | GET | `/api/counterparts/establishment/{rbd}` | Bearer | `Counterpart[]` |
-| 10 | POST | `/api/counterparts` | Bearer | `Counterpart` (201) |
-| 11 | PUT | `/api/counterparts/{cp_id}` | Bearer | `Counterpart` |
-| 12 | DELETE | `/api/counterparts/{cp_id}` | Bearer | `{message}` |
-| 13 | GET | `/api/metrics/establishment/{rbd}` | Bearer | `Metric[]` |
-| 14 | GET | `/api/metrics/establishment/{rbd}/{year}` | Bearer | `Metric` |
-| 15 | PUT | `/api/metrics/establishment/{rbd}/{year}` | Bearer | `Metric` |
-| 16 | GET | `/api/analytics/kpis` | Bearer | objeto de KPIs |
-| 17 | GET | `/api/analytics/charts` | Bearer | objeto de series |
+| 5 | GET | `/api/auth/me` | autenticado | `UserResponse` (ver §5.5) |
+| 6 | GET | `/api/establishments` | `datos`: admin, editor, viewer | `EstablishmentListResponse` |
+| 7 | GET | `/api/establishments/{rbd}` | `datos`: admin, editor, viewer | `Establishment` |
+| 8 | PUT | `/api/establishments/{rbd}` | `datos`: admin, editor | `Establishment` |
+| 9 | GET | `/api/counterparts/establishment/{rbd}` | `datos`: admin, editor, viewer | `Counterpart[]` |
+| 10 | POST | `/api/counterparts` | `datos`: admin, editor | `Counterpart` (201) |
+| 11 | PUT | `/api/counterparts/{cp_id}` | `datos`: admin, editor | `Counterpart` |
+| 12 | DELETE | `/api/counterparts/{cp_id}` | `datos`: admin | `{message}` |
+| 13 | GET | `/api/metrics/establishment/{rbd}` | `datos`: admin, editor, viewer | `Metric[]` |
+| 14 | GET | `/api/metrics/establishment/{rbd}/{year}` | `datos`: admin, editor, viewer | `Metric` |
+| 15 | PUT | `/api/metrics/establishment/{rbd}/{year}` | `datos`: admin, editor | `Metric` |
+| 16 | GET | `/api/analytics/kpis` | `datos`: admin, editor, viewer | objeto de KPIs |
+| 17 | GET | `/api/analytics/charts` | `datos`: admin, editor, viewer | objeto de series |
 
 Más los tres endpoints que FastAPI monta solo: `/docs`, `/redoc`, `/openapi.json`.
 
-> 🧭 **DISEÑO F2 (no implementado):** la feature de usuarios agrega 35 endpoints y cambia el
-> comportamiento de los 12 de datos. Ver §8. Esta tabla y las secciones 2 a 7 describen el
-> código actual.
+**Estado tras F3 (2026-10-02).** La columna *Auth* de arriba es la que rige hoy: los 12 endpoints de
+datos exigen un rol en la plataforma `datos` (`viewer` solo lee, `editor` escribe, solo `admin`
+borra; `403` si falta, `401` sin sesión válida). Además existen, implementados, los endpoints
+de la feature de usuarios marcados ✅ en §8 (auth: `password-policy` y `password`; `users`; `units`;
+`platforms`). Lo marcado 🧭 en §8 sigue sin implementar.
 
 > ⚠️ **Contradice el plan histórico.** `historico/implementation_plan_iter1.md` §5 documenta
 > `/api/counterparts/{rbd}` y `/api/metrics/{rbd}`. Las rutas reales llevan el segmento
@@ -52,14 +54,14 @@ Más los tres endpoints que FastAPI monta solo: `/docs`, `/redoc`, `/openapi.jso
 
 ## 2. Autenticación
 
-Esquema: **JWT Bearer**, HS256, sin refresh. Detalle del flujo y del modelo de roles en
+Esquema: **JWT Bearer**, HS256, sin refresh. El `sub` es `str(_id)` del usuario y el token lleva `iat`. Detalle del flujo y del modelo de roles en
 `04-seguridad-y-acceso.md`; aquí solo lo que el cliente necesita.
 
 ```
 POST /api/auth/login
 Content-Type: application/json
 
-{"username": "admin", "password": "..."}
+{"username": "admin@slepllanquihue.cl", "password": "..."}
 ```
 
 ```json
@@ -75,6 +77,10 @@ refresh: al expirar hay que volver a autenticarse.
 "Authorize" de Swagger UI funcione (`oauth2_scheme` apunta a `tokenUrl="/api/auth/login"`,
 `auth_service.py:11`). **Un cliente propio debe usar `/login`, no `/login-form`.**
 
+`username` acepta el **correo** (se normaliza: minúsculas y sin espacios) o, mientras dure la
+compatibilidad, el username legado del admin sembrado. Un usuario `invited` o `disabled` recibe
+el mismo `401` que una credencial errónea.
+
 `POST /api/auth/logout` **no invalida nada**: el JWT es stateless y no hay lista de revocación.
 Devuelve `{"message": "Successfully logged out"}` y es el cliente quien debe descartar el token.
 La ruta ni siquiera exige autenticación.
@@ -83,8 +89,12 @@ La ruta ni siquiera exige autenticación.
 > credenciales de un usuario humano de la colección `users`. Sin API keys, sin client
 > credentials, sin scopes.
 >
-> 🔸 **BRECHA:** sin revocación ni refresh, un token filtrado es válido hasta 3 horas y no hay
-> forma de cortarlo salvo rotar `JWT_SECRET`, lo que invalida las sesiones de todos.
+> ✅ **Revocación parcial (F3):** desactivar a un usuario, quitarle el acceso o cambiarle la
+> contraseña corta sus sesiones en la siguiente petición (se relee el usuario y se compara `iat`
+> con `password_changed_at`). `logout` sigue sin invalidar el token en el servidor.
+>
+> 🔸 **BRECHA:** sigue sin haber refresh; un token filtrado es válido hasta su `exp` (3 h) salvo
+> que se desactive al usuario o se cambie su contraseña.
 
 ---
 
@@ -349,7 +359,7 @@ Usada como healthcheck en `Dockerfile.prod` y `docker-compose.prod.yml`. No repo
 > porque no la consulta. Un backend sin base pasaría el healthcheck y Nginx lo consideraría sano.
 
 ### 5.2 `POST /api/auth/login`
-Pública. Body `LoginRequest {username: str, password: str}` (JSON). `200` → `Token {access_token, token_type: "bearer"}`. `401` credenciales inválidas. `422` body mal formado.
+Pública. Body `LoginRequest {username: str, password: str}` (JSON, solo escalares: un objeto de operadores da `422`). `200` → `Token {access_token, token_type: "bearer"}`. `401` credenciales inválidas o usuario no activo. `422` body mal formado.
 
 ### 5.3 `POST /api/auth/login-form`
 Idéntico, body `application/x-www-form-urlencoded`. Existe solo para Swagger UI.
@@ -358,11 +368,18 @@ Idéntico, body `application/x-www-form-urlencoded`. Existe solo para Swagger UI
 Pública, sin efecto de servidor. `200` → `{"message": "Successfully logged out"}`.
 
 ### 5.5 `GET /api/auth/me`
-Bearer. `200` → `UserResponse {username, full_name, role}`. `401` token inválido/expirado.
-El frontend lo usa al montar para rehidratar la sesión desde el token de `localStorage` (`App.jsx:48`).
+Autenticado (cualquier rol, incluso sin acceso a `datos`). `200` → `UserResponse`:
 
-> 🔸 **BRECHA:** `current_user["full_name"]` se accede por índice, no con `.get()`
-> (`auth_controller.py:58`). Un usuario insertado a mano sin `full_name` produce `KeyError` → 500.
+```json
+{"username": "admin@slepllanquihue.cl", "full_name": "Administrador SLEP", "role": "admin",
+ "id": "66…", "email": "admin@slepllanquihue.cl",
+ "access": [{"platform_id": "iam", "role": "admin"}, {"platform_id": "datos", "role": "admin"}]}
+```
+
+`username`, `full_name` y `role` son el contrato original. **`role` es el rol en `datos`, o
+`"none"` si el usuario no tiene acceso a esa plataforma.** `id`, `email` y `access` son aditivos
+(F3). `401` token inválido/expirado, usuario no activo o sesión anterior a un cambio de contraseña.
+El frontend lo usa al montar para rehidratar la sesión (`App.jsx:48`).
 
 ### 5.6 `GET /api/establishments`
 Bearer. Query: `search`, `comuna`, `area_type`, `category`, `coverage`, `adp` (§3.4) + `page`, `page_size` (§3.2).
@@ -382,16 +399,16 @@ Bearer. `200` → `Establishment` completo (esquema en `02-modelo-datos.md` §3)
 `licenses[].password` y `connectivity.ssid_password` valen `"[REDACTED]"`.
 
 ### 5.8 `PUT /api/establishments/{rbd}`
-Bearer (**cualquier autenticado, no solo admin**). Body `EstablishmentUpdate`: todos los campos
+`datos`: admin o editor (`viewer` recibe `403`). Body `EstablishmentUpdate`: todos los campos
 opcionales; `rbd`, `rbd_dv` y `rbd_full` **no** son modificables.
-`200` → `Establishment` actualizado **con los campos sensibles sin redactar** —
-`update_by_rbd` invoca `find_by_rbd(include_sensitive=True)` (`establishments_service.py:110,118`).
-`400` si no se pudo actualizar.
+`200` → `Establishment` actualizado; las credenciales van en claro porque solo `admin` y `editor`
+pueden llegar aquí (C20), y el controller pasa `include_sensitive` explícito al service.
+`422` si un secreto llega como `"[REDACTED]"` y no hay valor almacenado equivalente (misma
+posición y mismo `name` en las licencias). Si hay uno equivalente se conserva y la edición
+funciona. `400` si no se pudo actualizar.
 
-> 🔸 **BRECHA (fuga por escritura):** un usuario `viewer` que emita un PUT recibe en la respuesta
-> las contraseñas en claro que el GET le habría redactado. La redacción protege la lectura pero
-> no el retorno de la escritura. Es el vacío más directo entre BE-05 y el comportamiento real,
-> y no está cubierto por ningún test.
+> ✅ **RESUELTO (D4):** la fuga por escritura está cerrada (el `viewer` no puede escribir) y cubierta por `test_INT04_*`.
+
 >
 > 🔸 **BRECHA:** `update_by_rbd` devuelve el documento incluso cuando `matched_count == 0`
 > solo si el `$set` quedó vacío (`:109-110`), y en el camino normal comprueba
@@ -511,8 +528,8 @@ Registro de ausencias, no plan de trabajo. Un integrador debe saber que no exist
 
 ## 8. 🧭 DISEÑO F2: contrato de usuarios, unidades y acceso
 
-> **Estado: diseño aprobado el 2026-10-02, sin implementar.** Ninguna ruta de esta sección
-> existe todavía. Origen de las decisiones: ADR-009 a ADR-014 (`06`). Modelo de datos en `02` §9;
+> **Estado por ruta (2026-10-02):** ✅ implementada y verificada en F3 · 🧭 diseño aprobado, sin
+> implementar. Origen de las decisiones: ADR-009 a ADR-014 (`06`). Modelo de datos en `02` §9;
 > matriz de roles en `04` §9. Con D10 (sin versionado), **todo cambio de §8.2 es potencialmente
 > breaking y se coordina con el frontend** en la misma fase.
 
@@ -526,31 +543,31 @@ declaran **antes** de `/{id}` para que no las capture.
 
 | Método | Ruta | Acceso | Respuesta |
 |---|---|---|---|
-| POST | `/api/auth/google` | pública | `Token` (verifica el `id_token`; sin auto-provisión) |
-| GET | `/api/auth/config` | pública | `{google_client_id}` (el frontend no tiene variables de entorno, ADR-008) |
-| GET | `/api/auth/password-policy` | pública | `{min_length, max_length, require_char_classes}` |
-| POST | `/api/auth/set-password` | pública | `204` (canje del enlace; mismo error genérico `400` ante token usado, vencido o inexistente) |
-| POST | `/api/auth/password` | autenticado | `Token` nuevo (cambio de contraseña propia) |
+| POST | `/api/auth/google` 🧭 F6 | pública | `Token` (verifica el `id_token`; sin auto-provisión) |
+| GET | `/api/auth/config` 🧭 F6 | pública | `{google_client_id}` (el frontend no tiene variables de entorno, ADR-008) |
+| GET | `/api/auth/password-policy` ✅ | pública | `{min_length, max_length, require_char_classes}` |
+| POST | `/api/auth/set-password` 🧭 F4 | pública | `204` (canje del enlace; mismo error genérico `400` ante token usado, vencido o inexistente) |
+| POST | `/api/auth/password` ✅ | autenticado | `Token` nuevo (cambio de contraseña propia) |
 
 **`/api/users`** (módulo `users`; todo `iam/admin` salvo `/me`)
 
 | Método | Ruta | Acceso | Respuesta |
 |---|---|---|---|
-| GET | `/api/users/me` | autenticado | `UserMe` (incluye su propio `personal_phone`) |
-| PATCH | `/api/users/me` | autenticado | `UserMe` (solo `personal_phone` y `work_extension`; otro campo → `422`) |
-| GET | `/api/users` | `iam/admin` | `UserListResponse` (paginado, filtros) |
-| POST | `/api/users` | `iam/admin` | `201` `User` + `invitation` |
-| GET | `/api/users/{id}` | `iam/admin` | `User` |
-| PATCH | `/api/users/{id}` | `iam/admin` | `User` (no admite `access`, `status` ni `auth_providers`) |
-| POST | `/api/users/{id}/disable` · `/enable` | `iam/admin` | `User` |
-| PUT | `/api/users/{id}/access/{platform_id}` | `iam/admin` | `User` (`{role}`) |
-| DELETE | `/api/users/{id}/access/{platform_id}` | `iam/admin` | `User` |
-| POST | `/api/users/{id}/invitation` | `iam/admin` | `User` + `invitation` (reenvío; solo `invited`) |
-| POST | `/api/users/{id}/password-reset` | `iam/admin` | `202` (solo `active`) |
-| POST | `/api/users/import` | `iam/admin` | `ImportPreview` (CSV multipart → JSON con dry-run; no escribe) |
-| GET | `/api/users/import/template` | `iam/admin` | `text/csv` con BOM |
-| POST | `/api/users/bulk-create` | `iam/admin` | `BulkResult` (`dry_run` opcional) |
-| POST | `/api/users/bulk` | `iam/admin` | `BulkResult` (unión discriminada por `op`) |
+| GET | `/api/users/me` ✅ | autenticado | `UserMe` (incluye su propio `personal_phone`) |
+| PATCH | `/api/users/me` ✅ | autenticado | `UserMe` (solo `personal_phone` y `work_extension`; otro campo → `422`) |
+| GET | `/api/users` ✅ | `iam/admin` | `UserListResponse` (paginado, filtros) |
+| POST | `/api/users` ✅ | `iam/admin` | `201` `User` + `invitation` |
+| GET | `/api/users/{id}` ✅ | `iam/admin` | `User` |
+| PATCH | `/api/users/{id}` ✅ | `iam/admin` | `User` (no admite `access`, `status` ni `auth_providers`) |
+| POST | `/api/users/{id}/disable` · `/enable` ✅ | `iam/admin` | `User` |
+| PUT | `/api/users/{id}/access/{platform_id}` ✅ | `iam/admin` | `User` (`{role}`) |
+| DELETE | `/api/users/{id}/access/{platform_id}` ✅ | `iam/admin` | `User` |
+| POST | `/api/users/{id}/invitation` 🧭 F4 | `iam/admin` | `User` + `invitation` (reenvío; solo `invited`) |
+| POST | `/api/users/{id}/password-reset` 🧭 F4 | `iam/admin` | `202` (solo `active`) |
+| POST | `/api/users/import` 🧭 F4 | `iam/admin` | `ImportPreview` (CSV multipart → JSON con dry-run; no escribe) |
+| GET | `/api/users/import/template` 🧭 F4 | `iam/admin` | `text/csv` con BOM |
+| POST | `/api/users/bulk-create` 🧭 F4 | `iam/admin` | `BulkResult` (`dry_run` opcional) |
+| POST | `/api/users/bulk` 🧭 F4 | `iam/admin` | `BulkResult` (unión discriminada por `op`) |
 
 No existe `DELETE /api/users/{id}`: eliminar es desactivar (C9).
 
@@ -565,19 +582,19 @@ una plantilla HTML y de texto (ADR-012).
 
 | Método | Ruta | Acceso | Respuesta |
 |---|---|---|---|
-| GET | `/api/units` · `/api/units/tree` | autenticado | `Unit[]` · árbol anidado (`?expand=head` agrega id y nombre a mostrar) |
-| POST | `/api/units` | `iam/admin` | `201` `Unit` |
-| PATCH | `/api/units/{id}` | `iam/admin` | `Unit` (solo `name`, `order`) |
-| POST | `/api/units/{id}/move` | `iam/admin` | `Unit` (reescribe `ancestors` del subárbol) |
-| POST | `/api/units/{id}/deactivate` · `/activate` | `iam/admin` | `Unit` |
-| PUT | `/api/units/{id}/head` | `iam/admin` | `Unit` (`{user_id}` o `null`) |
-| POST | `/api/units/{id}/subrogations` · GET igual ruta | `iam/admin` · autenticado | `201` `Subrogation` · lista (Could) |
-| POST | `/api/units/subrogations/{sid}/cancel` | `iam/admin` | `Subrogation` (Could) |
-| GET | `/api/platforms` | `iam/admin` | `Platform[]` |
-| PATCH | `/api/platforms/{id}` | `iam/admin` | `Platform` (solo `name`, `status`) |
-| GET | `/api/audit` | `iam/admin` | paginado (`page_size ≤ 200`) |
+| GET | `/api/units` · `/api/units/tree` · `/api/units/{id}` ✅ | autenticado | `Unit[]` · árbol anidado (`?expand=head` agrega id y nombre a mostrar) |
+| POST | `/api/units` ✅ | `iam/admin` | `201` `Unit` |
+| PATCH | `/api/units/{id}` ✅ | `iam/admin` | `Unit` (solo `name`, `order`) |
+| POST | `/api/units/{id}/move` ✅ | `iam/admin` | `Unit` (reescribe `ancestors` del subárbol) |
+| POST | `/api/units/{id}/deactivate` · `/activate` ✅ | `iam/admin` | `Unit` |
+| PUT | `/api/units/{id}/head` ✅ | `iam/admin` | `Unit` (`{user_id}` o `null`) |
+| POST | `/api/units/{id}/subrogations` · GET igual ruta 🧭 F4 | `iam/admin` · autenticado | `201` `Subrogation` · lista (Could) |
+| POST | `/api/units/subrogations/{sid}/cancel` 🧭 F4 | `iam/admin` | `Subrogation` (Could) |
+| GET | `/api/platforms` ✅ | `iam/admin` | `Platform[]` |
+| PATCH | `/api/platforms/{id}` ✅ | `iam/admin` | `Platform` (solo `name`, `status`) |
+| GET | `/api/audit` 🧭 F4 | `iam/admin` | paginado (`page_size ≤ 200`) |
 
-### 8.2 Cambios a endpoints existentes
+### 8.2 Cambios a endpoints existentes (✅ todos implementados en F3, salvo `user_id` de contrapartes 🧭 F4)
 
 | Endpoint | Cambio | ¿Breaking? |
 |---|---|---|
@@ -595,10 +612,20 @@ tokens legados con `sub = username` se aceptan mientras dure la compatibilidad.
 - **Respuestas de escritura:** devuelven el documento resultante (L9), nunca `{"ok": true}`.
   Los `User` nunca incluyen `hashed_password` ni `token_hash`; `personal_phone` solo lo reciben
   `iam/admin` y el propio usuario.
-- **`invitation`** en el alta y el reenvío: `{sent: bool, error: string|null}`. Si el correo
-  falla, el alta igual responde `201`.
-- **Paginación:** `{items, total, page, page_size, total_pages}`, `page_size ≤ 200`
-  (patrón de §3.2). `GET /api/users` filtra por `q` (texto, escapado con `re.escape`), unidad
+- **`invitation`** (en todo `User`): `{sent_at, expires_at, last_error, sent}`. `sent` es
+  verdadero solo si hay `sent_at` y no hay `last_error`. Mientras no exista el envío de correo (F4)
+  un usuario recién creado trae `last_error: "mail_not_configured"` y `sent: false`: se dice la
+  verdad en vez de simular un envío. Si el correo falla en F4, el alta igual responde `201`.
+- **Errores de las rutas nuevas:** `409` lleva `detail: {code, message, field}` (`field` es el
+  campo en conflicto, por ejemplo `email`, para que el formulario lo marque); `422` por una
+  referencia o combinación inválida que detecta el service lleva `detail: [{field, code, message}]`
+  (la misma forma de lista que usa Pydantic); `404` lleva un texto. Los `code` estables son:
+  `duplicate`, `self_disable`, `last_admin`, `level2_no_children`, `invalid_parent_level`,
+  `single_root`, `cycle`, `has_active_users`, `has_active_children`, `inactive_parent`,
+  `head_inactive`, `head_not_slep_staff`, `head_not_member`, `unit_not_found`, `rbd_not_found`,
+  `invalid_role`, `invalid_combination`, `current_password_incorrect`, `no_local_password`.
+- **Paginación:** `{items, total, page, page_size, total_pages}`, `page_size ≤ 200`, por defecto 100
+  (patrón de §3.2); `total_pages` es 1 cuando no hay resultados. `GET /api/users` filtra por `q` (texto, escapado con `re.escape`), unidad
   (+ `include_descendants`), nivel, tipo, `rbd`, cargo, plataforma, rol, estado y `acting`.
 - **Entradas:** todo body y todo query param es un modelo Pydantic de tipos escalares con
   `extra="forbid"`. Un campo desconocido, o un objeto donde se espera un escalar

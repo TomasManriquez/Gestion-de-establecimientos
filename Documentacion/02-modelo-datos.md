@@ -73,9 +73,8 @@ endpoint de borrado de establecimientos, así que el escenario no es alcanzable 
 
 `users` no tiene relación con las otras tres. Es una colección de autenticación aislada.
 
-> 🧭 **DISEÑO F2 (no implementado):** la feature de usuarios e IAM reemplaza esa colección
-> aislada por un modelo de identidad con unidades, plataformas y accesos. Ver §9. Todo lo de
-> este documento fuera de §9 describe el código actual.
+> **Tras F3** esa colección es el modelo de identidad del módulo `users` (§6 y §9.3), y existen
+> además `units` y `platforms` (§9.4 y §9.5). Las secciones 2 a 5 y 8 no cambian.
 
 ---
 
@@ -431,29 +430,32 @@ duplicación literal de `MetricBase`, mantenida a mano.
 
 ## 6. `users`
 
-No tiene modelo Pydantic de persistencia. El documento se define inline en el seeding
-(`seed_service.py:23-29`, función `_seed_admin_user`) y se lee como `dict` crudo en
-`auth_service.py:25,57`.
+Módulo dueño: `users` (`users_entity.py`, `users_service.py`); `auth` ya no lee la colección
+directamente (C2, ADR-013). El documento y sus invariantes están en §9.3; aquí lo que importa
+para leer el código:
 
-```json
-{
-  "username": "admin",
-  "hashed_password": "$2b$12$...",
-  "full_name": "Administrador SLEP",
-  "role": "admin"
-}
-```
+- `users_entity.py` modela la **entrada** (`UserCreate`, `UserAdminUpdate`, `UserSelfUpdate`, los
+  tres con `extra="forbid"`) y la **salida** (`User`, `UserSummary`, `UserMe`), que no declaran
+  `hashed_password` ni `token_hash`. La regla «funcionario SLEP XOR usuario de establecimiento»
+  es una sola función, `check_mode`, usada por el alta y por la edición.
+- El documento almacenado guarda `unit_id`, `created_by`, `updated_by` y `access[].granted_by` como
+  `ObjectId`; los services los devuelven como `str`.
+- **Migración del admin sembrado (hecha en F3, §9.10).** El documento original
+  `{username, hashed_password, full_name, role}` se completa en el mismo `_id` y **conserva** esos
+  cuatro campos legados, de modo que volver al código anterior sigue funcionando. Los tokens con
+  `sub = "admin"` se aceptan mientras dure la compatibilidad.
+- **Índices** (`database_service.ensure_indexes`): `email` único **parcial** (el admin legado no
+  tiene correo y un índice único normal haría chocar los documentos sin el campo),
+  `auth_providers.subject` único parcial, `username` parcial, `unit_id`, `rbd`, `positions`
+  (multikey), `access.platform_id`, `status`, `last_activity_at`.
 
-`auth_entity.py` solo modela el tránsito HTTP (`LoginRequest`, `Token`, `TokenData`,
-`UserResponse`), no la persistencia.
-
-> 🧭 **DISEÑO F2:** el módulo `users` y el modelo nuevo están en §9.3 (ADR-009, ADR-013).
+> ✅ **RESUELTO:** existen `users_entity.py`, `users_service.py` y los endpoints de gestión de
+> usuarios (`03` §8). El índice sobre `username` ya existe (parcial, no único: es solo para la
+> compatibilidad del login legado).
 >
-> 🔸 **BRECHA:** no existe `users_entity.py`, `users_service.py` ni endpoint de gestión de
-> usuarios. El único usuario se crea por seeding con la contraseña de `ADMIN_PASSWORD`. Crear
-> un segundo usuario requiere insertarlo a mano en MongoDB. No hay índice único sobre
-> `users.username`, pese a que `auth_service.authenticate_user` asume unicidad usando
-> `find_one`.
+> 🔸 **BRECHA:** el índice `username` no es único y no hay manera de impedir un segundo documento
+> con `username: "admin"`. Solo importa mientras exista la compatibilidad con el login legado;
+> se retira con ella.
 
 ---
 
@@ -472,7 +474,8 @@ Este es el inventario que cualquier cambio debe respetar. Su enforcement está e
 | `general_info.director_email`, `director_phone` | `establishments` | Datos personales | Sin redactar. Excluidos del listado solo por no estar proyectados. |
 | `counterparts[].email`, `.phone` | `counterparts` | Datos personales de funcionarios | **Sin redactar ni restringir.** Cualquier autenticado lee todas las contrapartes. |
 | `LeasedPrinter.ip_address`, `.support_*`, `.director_*` | `establishments` | Dirección IP interna y contactos | Sin redactar. Excluidos del listado por proyección. |
-| `users.hashed_password` | `users` | Hash bcrypt | Nunca sale: `UserResponse` solo expone `username`, `full_name`, `role` |
+| `users.auth_providers[].hashed_password` y el legado `users.hashed_password` | `users` | Hash bcrypt | Nunca sale: ningún modelo de respuesta lo declara y `test_INT07_*` recorre el JSON de cada ruta buscándolo |
+| `users.personal_phone` | `users` | Dato personal (Ley 19.628; Ley 21.719 desde dic-2026) | Fuera de `USERS_LISTING_PROJECTION`; solo lo reciben el admin global (detalle) y el propio usuario (`/me`) |
 
 > 🔸 **BRECHA:** la redacción es una **lista blanca de dos campos**, codificada como dos `if`
 > literales en `find_by_rbd`. Un campo sensible nuevo no queda protegido por omisión: hay que
@@ -522,9 +525,11 @@ poblada requiere hoy vaciar las colecciones y reiniciar, o escribir en Mongo a m
 
 ## 9. 🧭 DISEÑO F2: colecciones de la feature de usuarios e IAM
 
-> **Estado: diseño aprobado el 2026-10-02, sin implementar.** Nada de esta sección existe en el
-> código. La marca `🧭` se retira, sección por sección, cuando la fase correspondiente la
-> implemente y un test la verifique. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
+> **Estado por subsección (2026-10-02).** ✅ Implementado y verificado en F3: 9.1 (salvo
+> `auth_tokens`, `subrogations`, `audit_log`, `rate_limits` y `counterparts.user_id`), 9.2, 9.3,
+> 9.4, 9.5, 9.10 y 9.12 (salvo las transiciones por correo). 🧭 Pendiente: 9.6 `subrogations`
+> y 9.7 `auth_tokens` (F4), 9.8 `counterparts.user_id` (F4), 9.9 `audit_log` y `rate_limits` (F4).
+> La marca `🧭` se retira cuando la fase correspondiente lo implemente y un test lo verifique. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
 > y campos en inglés, igual que los cinco módulos existentes (ver D23 en `05` §5).
 
 ### 9.1 Panorama
@@ -660,7 +665,7 @@ estado de la invitación (cuándo se envió, cuándo vence, último error) para 
 fallos del correo sin que `users` tenga que leer `auth_tokens`, que es de `auth` (ADR-013).
 `hashed_password` y `token_hash` son sensibles.
 
-### 9.2 Organigrama del SLEP
+### 9.2 ✅ Organigrama del SLEP
 
 ```mermaid
 flowchart TD
@@ -728,7 +733,7 @@ referencia (`GP-REM`, `AF-TI`, `GT-GT`, `PC-INF`) se respetaron. Un nodo de nive
   "head_user_id":"<_id>","status":"active"}
 ```
 
-### 9.3 `users`
+### 9.3 ✅ `users`
 
 Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente.
 
@@ -783,7 +788,7 @@ correo y dos documentos sin el campo chocarían en un índice único normal);
 `auth_providers.subject` único parcial (solo `provider: "google"`); `unit_id`; `rbd`;
 `positions` (multikey); `access.platform_id`; `status`; `last_activity_at`.
 
-### 9.4 `units`
+### 9.4 ✅ `units`
 
 ```json
 {"_id":"ObjectId","code":"SD-GT","name":"Subdirección de Gestión Territorial","level":3,
@@ -799,7 +804,7 @@ usuarios activos ni con hijas activas. **Índices:** `code` único; `(parent_id,
 `ancestors` (multikey); `level`. **Seed:** `units_service.ensure_bootstrap_units()` desde una
 constante del módulo, solo con la colección vacía.
 
-### 9.5 `platforms`
+### 9.5 ✅ `platforms`
 
 ```json
 {"_id":"datos","name":"Gestión de Establecimientos","base_url":"https://datos.slepllanquihue.gob.cl",
@@ -811,7 +816,7 @@ Sembradas: `iam` (roles `["admin"]`), `datos` y `selloverde` (`["admin","editor"
 `@slepllanquihue.cl`; el **web** es `*.slepllanquihue.gob.cl`. No son el mismo. Las credenciales
 y URLs de redirección de las plataformas consumidoras se diseñan en F7 (`04` §10).
 
-### 9.6 `subrogations` (propiedad de `units`, prioridad Could)
+### 9.6 🧭 `subrogations` (propiedad de `units`, prioridad Could)
 
 ```json
 {"_id":"ObjectId","unit_id":"ObjectId","subrogate_user_id":"ObjectId","starts_at":"ISODate",
@@ -825,7 +830,7 @@ sin jobs. Reglas: la registra el admin global; quien subroga está activo, no es
 titular y pertenece al subárbol de la unidad; no se superponen dos vigentes en una unidad;
 `ends_at` es obligatorio salvo `VACANCIA`. **No transfiere permisos.**
 
-### 9.7 `auth_tokens` (propiedad de `auth`)
+### 9.7 🧭 `auth_tokens` (propiedad de `auth`)
 
 ```json
 {"_id":"ObjectId","user_id":"ObjectId","purpose":"invite|reset","token_hash":"sha256(…)",
@@ -836,12 +841,12 @@ El token (`secrets.token_urlsafe(32)`) solo viaja en el correo; la base guarda s
 sobre `expires_at`. Emitir uno nuevo invalida el anterior del mismo usuario y propósito.
 Vigencia propuesta: 72 h (`invite`) y 24 h (`reset`).
 
-### 9.8 `counterparts`: cambio
+### 9.8 🧭 `counterparts`: cambio
 
 Se agrega `user_id: Optional[str] = None`, nunca obligatorio (ADR-011). El backfill es un script
 con dry-run por defecto que empareja por correo normalizado.
 
-### 9.9 `audit_log` y `rate_limits` (ADR-014)
+### 9.9 🧭 `audit_log` y `rate_limits` (ADR-014)
 
 ```json
 {"_id":"ObjectId","at":"ISODate","actor_id":"ObjectId","action":"user.create|access.grant|…",
@@ -851,11 +856,11 @@ con dry-run por defecto que empareja por correo normalizado.
 `audit_log` es solo de agregado; `changes` jamás contiene hashes, contraseñas ni tokens.
 `rate_limits` guarda `{key, count, expires_at}` con índice TTL.
 
-### 9.10 Migración del admin sembrado
+### 9.10 ✅ Migración del admin sembrado
 
 Hoy el único usuario es `{username, hashed_password, full_name, role}` (§6) y no tiene correo.
-`users_service.ensure_bootstrap_admin()` (invocado desde el `lifespan` **después** de
-`db_service.connect()`, que ya hace seed e índices) lo migra en el mismo `_id`: `email` desde
+`users_service.ensure_bootstrap_admin()` (invocado por `run_bootstrap()` en `main.py`, desde el `lifespan`, **después** de
+`db_service.connect()`, que ya hace seed de establecimientos e índices) lo migra en el mismo `_id`: `email` desde
 `BOOTSTRAP_ADMIN_EMAIL` (obligatoria, sin default), `auth_providers` con el hash original,
 `access` `iam/admin` y `datos/admin`, `status: active`, y la unidad `AF-TI`. Es idempotente y
 tolera la carrera de dos workers (`DuplicateKeyError`). Con la base vacía crea el admin con

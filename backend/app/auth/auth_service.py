@@ -9,7 +9,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.auth.auth_entity import AccessContext, COMMON_PASSWORDS, CONTEXT_WORDS
+from app.auth.auth_entity import AccessContext, COMMON_PASSWORDS, CONTEXT_WORDS, SEQUENCES
 from app.config import settings
 from app.users.users_service import users_service
 
@@ -91,8 +91,13 @@ class AuthService:
             if classes < settings.PASSWORD_REQUIRE_CHAR_CLASSES:
                 add("char_classes", f"Debe combinar al menos {settings.PASSWORD_REQUIRE_CHAR_CLASSES} tipos de caracteres")
         folded = re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", pw.lower()).encode("ascii", "ignore").decode())
-        if pw.lower() in COMMON_PASSWORDS or folded in COMMON_PASSWORDS:
-            add("common_password", "Es una contraseña demasiado común")
+        # Lista de bloqueo (NIST: comunes, esperadas o comprometidas). Además de la coincidencia
+        # exacta, se bloquea la palabra común con sufijo numérico ("password1234567"), las
+        # secuencias y lo casi sin variedad ("aaaaaaaaaaaaaaa"), que es lo que se prueba primero.
+        base = folded.rstrip("0123456789")
+        if (pw.lower() in COMMON_PASSWORDS or folded in COMMON_PASSWORDS or (base and base in COMMON_PASSWORDS)
+                or (folded and len(set(folded)) <= 3) or (len(folded) >= 8 and any(folded in seq for seq in SEQUENCES))):
+            add("common_password", "Es una contraseña demasiado común o predecible")
         context = list(CONTEXT_WORDS)
         local = (email or "").partition("@")[0].lower()
         if len(local) >= 4:

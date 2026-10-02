@@ -1,16 +1,10 @@
 # 04 · Seguridad y control de acceso
 
-> 🧭 **Las secciones §9 y §10 son DISEÑO F2, aprobado el 2026-10-02 y sin implementar.** Las
-> secciones 1 a 8 describen el código actual y siguen siendo ciertas hasta que la fase F3 las
-> reemplace; ahí se retirarán las brechas D3, D4 y la de `require_admin` que cierra §9.
-
-> **Alcance.** Autenticación, modelo de roles, protección de campos sensibles y los invariantes
-> que los tests garantizan. **Documento obligatorio antes de tocar `auth/`, las proyecciones o
-> cualquier campo marcado como sensible en `02-modelo-datos.md` §7.**
->
-> **Verificado contra:** `backend/app/auth/*`, `backend/app/config.py`, `backend/app/main.py`,
-> `backend/app/establishments/*`, `backend/tests/test_BE03_*`, `test_BE05_*`, `test_INT02_*`,
-> `docker-compose*.yml`, `.env.production.template`, `frontend/src/App.jsx`, `Login.jsx`.
+> **Estado (2026-10-02, rama `feature/usuarios-f3`).** Las secciones 1 a 8 describen el código
+> **tal como queda tras la fase F3** (identidad en el módulo `users`, `require_access`, sesión
+> revocable, política de contraseñas). La §9 conserva el diseño completo y marca con ✅ lo ya
+> implementado y con 🧭 lo que sigue pendiente (primer acceso por correo, Google, auditoría y
+> límites de intentos). La §10 es el marco de interconexión (F7), solo diseño.
 
 ---
 
@@ -21,58 +15,66 @@ sequenceDiagram
     participant C as Cliente
     participant AC as auth_controller
     participant AS as auth_service
+    participant US as users_service
     participant DB as MongoDB (users)
 
-    C->>AC: POST /api/auth/login {username, password}
+    C->>AC: POST /api/auth/login {username (correo o legado), password}
     AC->>AS: authenticate_user(username, password)
-    AS->>DB: users.find_one({username})
-    DB-->>AS: documento (o None)
-    AS->>AS: bcrypt.checkpw(password, hashed_password)
-    AS-->>AC: user | None
-    alt credenciales inválidas
-        AC-->>C: 401 + WWW-Authenticate: Bearer
+    AS->>US: find_by_login(login)
+    US->>DB: users.find_one({email}) o {username} si no hay '@'
+    DB-->>US: documento (o None)
+    AS->>AS: status == active y bcrypt.checkpw sobre el proveedor local
+    AS-->>AC: usuario | None
+    alt credenciales inválidas, usuario invited o disabled
+        AC-->>C: 401 + WWW-Authenticate: Bearer (idéntico en los tres casos)
     else válidas
-        AC->>AS: create_access_token({sub: username, role: user.role})
-        AS-->>AC: JWT firmado HS256
+        AS->>US: touch_login
+        AC->>AS: create_access_token({sub: str(_id), role, iat, exp})
         AC-->>C: 200 {access_token, token_type}
     end
 
-    Note over C: guarda el token y lo envía en cada request
-
     C->>AC: GET /api/... + Authorization: Bearer TOKEN
-    AC->>AS: Depends(get_current_user)
-    AS->>AS: jwt.decode(token, JWT_SECRET, [HS256])
-    AS->>DB: users.find_one({username: payload.sub})
-    DB-->>AS: documento
-    AS-->>AC: dict del usuario (fuente de verdad del rol)
+    AC->>AS: Depends(require_access(plataforma, roles))
+    AS->>AS: jwt.decode (firma y exp), sub malformado -> 401
+    AS->>US: find_for_session(sub)
+    US->>DB: users.find_one({_id}) (o {username} para tokens legados)
+    AS->>AS: status active, iat >= password_changed_at, rol de la plataforma permitido
+    AS->>US: touch_activity (como mucho cada 5 min)
+    AS-->>AC: AccessContext {user_id, role} (403 si falta el rol)
 ```
 
-**Hashing** (`auth_service.py:14-22`): `bcrypt` directo, `gensalt()` por contraseña,
-`checkpw` envuelto en `try/except` que devuelve `False` ante cualquier excepción — un hash
-corrupto en la base se traduce en "credenciales inválidas", no en un 500.
+**Hashing** (`auth_service.py`): `bcrypt` directo con costo `BCRYPT_ROUNDS` (12), contraseña
+normalizada NFKC y límite de 72 bytes (más allá, `bcrypt` 5 lanza `ValueError`: la política
+lo rechaza antes con 422). Si el usuario no existe se verifica contra un hash de relleno para
+igualar el tiempo de respuesta.
 
-**Emisión** (`auth_service.py:32-40`): payload `{sub: username, role: <rol>, exp: <UTC>}`,
-firmado HS256 con `settings.JWT_SECRET`. Expiración por defecto 180 minutos.
+**Emisión:** payload `{sub: str(_id), role, iat, exp}` firmado HS256 con `settings.JWT_SECRET`
+(sin default, T9). Expiración por defecto 180 minutos. `role` va en el token por compatibilidad
+pero **no se usa nunca para autorizar**.
 
-**Verificación** (`auth_service.py:42-60`): decodifica (firma y `exp` los valida PyJWT),
-extrae `sub`, y **vuelve a leer el usuario desde MongoDB**. Esa relectura es la decisión de
-diseño más importante del módulo y conviene entenderla:
+**Verificación (`get_current_user`):** decodifica, extrae `sub` y **vuelve a leer el usuario**.
+Esa relectura es la decisión de diseño más importante del módulo:
 
-> **El `role` del token no se usa nunca para autorizar.** El rol efectivo se toma del documento
-> de `users` recién leído. Consecuencia: degradar a un usuario en la base surte efecto en su
-> siguiente petición, sin esperar a que expire su token. El costo es una consulta a MongoDB por
-> cada request autenticada. A esta escala es el intercambio correcto; en un escenario de alto
-> tráfico sería el primer candidato a caché, y ahí habría que reintroducir conscientemente la
-> ventana de propagación que hoy no existe.
+> **El rol efectivo sale del documento de `users` recién leído, no del token.** Degradar,
+> desactivar o quitarle un acceso a alguien surte efecto en su siguiente petición. El costo es
+> una consulta a MongoDB por request autenticada; a esta escala es el intercambio correcto, y
+> en un escenario de alto tráfico sería el primer candidato a caché, reintroduciendo
+> conscientemente una ventana de propagación.
 
-Cualquier fallo — token ausente, firma inválida, expirado, `sub` ausente, usuario borrado —
-produce el mismo `401` con `WWW-Authenticate: Bearer`. No se distingue el motivo hacia afuera,
-lo cual es correcto.
+Devuelve `401` si: firma o `exp` inválidos, `sub` ausente o malformado (un objeto de operadores
+da `401`, no `500`), usuario inexistente, usuario que **no está `active`** (`invited` o
+`disabled`), o token emitido **antes del último cambio de contraseña** (`iat` menor que
+`password_changed_at`, comparado al segundo). Todo fallo es el mismo `401` con
+`WWW-Authenticate: Bearer`; no se distingue el motivo hacia afuera.
+
+El `sub` aceptado es `str(_id)`. Mientras dure la compatibilidad también se acepta el username
+legado del admin sembrado (`sub = "admin"`). Se retira una versión después de F3.
 
 **Lado cliente** (`frontend/src/App.jsx:26-44`, `Login.jsx:36-40`): el token se guarda en
 `localStorage`, se instala como `axios.defaults.headers.common['Authorization']`, y un
-interceptor de respuesta cierra la sesión ante cualquier `401`. Al montar la app, si hay token
-guardado se llama `GET /api/auth/me` para rehidratar la sesión y validar el token de una vez.
+interceptor de respuesta cierra la sesión ante **cualquier `401`**. Por eso un endpoint que
+valida una contraseña (cambio propio) responde `400` y nunca `401` ante la clave actual
+errónea. Al montar la app, si hay token se llama `GET /api/auth/me`.
 
 > 🔸 **BRECHA:** el token vive en `localStorage`, accesible desde JavaScript, por lo que
 > cualquier XSS en la SPA lo exfiltra. La alternativa habitual (cookie `HttpOnly` + `SameSite`)
@@ -83,48 +85,44 @@ guardado se llama `GET /api/auth/me` para rehidratar la sesión y validar el tok
 
 ## 2. Modelo de roles
 
-El modelo es más simple de lo que su vocabulario sugiere.
+Cada usuario tiene `access[]`: una entrada `{platform_id, role}` por plataforma (`iam`, `datos`,
+`selloverde`). Los roles válidos de cada plataforma salen de la colección `platforms`
+(`admin`, `editor`, `viewer`; `iam` solo tiene `admin`). **`iam/admin` (admin global) y
+`datos/admin` son roles distintos** (separación de funciones, C12). ADR-009.
 
-- **Valores conocidos:** `"admin"` (sembrado, `seed_service.py:30`) y `"viewer"` (aparece
-  solo en fixtures de test, `tests/conftest.py:173`). No hay enumeración: `role` es texto libre
-  en un documento sin esquema.
-- **Punto de aplicación:** **uno solo en todo el backend** —
-  `establishments_controller.py:40`, `is_admin = current_user.get("role") == "admin"`.
-- **Todo lo demás** solo distingue "autenticado" de "no autenticado", vía
-  `Depends(auth_service.get_current_user)`.
+- **Punto de aplicación:** la dependencia `require_access(plataforma, roles)`
+  (`auth_service.py`). Cada ruta la declara; devuelve un `AccessContext {user_id, role}`; `401`
+  si la sesión no es válida, `403` si falta el rol. `require_access(None)` exige solo un usuario
+  autenticado y activo (por ejemplo `/me`).
+- **Garantía por test:** `test_BE12_every_route_declares_access_or_is_allowlisted` recorre las
+  rutas reales y falla ante una ruta sin `require_access` fuera de la allowlist explícita
+  (`GET /`, `login`, `login-form`, `logout`, `password-policy`).
+- El service nunca recibe el usuario (L3): el controller traduce el rol a booleanos
+  (`include_sensitive = ctx.role in {admin, editor}`).
 
 ### 2.1 Matriz recurso × rol × operación
 
-| Recurso / operación | Anónimo | Autenticado (no admin) | Admin |
-|---|---|---|---|
-| `GET /` | ✅ | ✅ | ✅ |
-| `/docs`, `/redoc`, `/openapi.json` | ✅ | ✅ | ✅ |
-| `POST /api/auth/login`, `/login-form` | ✅ | ✅ | ✅ |
-| `POST /api/auth/logout` | ✅ | ✅ | ✅ |
-| `GET /api/auth/me` | ❌ 401 | ✅ | ✅ |
-| `GET /api/establishments` (listado) | ❌ | ✅ sin campos sensibles | ✅ igual |
-| `GET /api/establishments/{rbd}` | ❌ | ✅ **con passwords redactadas** | ✅ **con passwords en claro** |
-| `PUT /api/establishments/{rbd}` | ❌ | ✅ **y la respuesta trae passwords en claro** | ✅ |
-| `GET/POST/PUT/DELETE /api/counterparts/*` | ❌ | ✅ completo | ✅ igual |
-| `GET/PUT /api/metrics/*` | ❌ | ✅ completo | ✅ igual |
-| `GET /api/analytics/*` | ❌ | ✅ | ✅ igual |
+| Operación | Anónimo | `viewer` | `editor` | `admin` (`datos`) | `iam/admin` |
+|---|---|---|---|---|---|
+| `GET /`, `/docs`, `/redoc`, `/openapi.json`, `POST /api/auth/login`, `/login-form`, `/logout`, `GET /api/auth/password-policy` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/auth/me`, `GET`/`PATCH /api/users/me`, `POST /api/auth/password`, `GET /api/units*` | ❌ 401 | ✅ | ✅ | ✅ | ✅ |
+| `GET` de establecimientos, contrapartes, métricas y analytics | ❌ 401 | ✅ | ✅ | ✅ | solo si además tiene rol en `datos` |
+| Detalle de establecimiento: `licenses[].password` y `ssid_password` | — | ❌ `[REDACTED]` | ✅ en claro | ✅ en claro | según su rol en `datos` |
+| `PUT /api/establishments/{rbd}`, `POST`/`PUT` contrapartes, `PUT` métricas | ❌ 401 | ❌ 403 | ✅ | ✅ | según su rol en `datos` |
+| `DELETE /api/counterparts/{id}` | ❌ 401 | ❌ 403 | ❌ 403 | ✅ | según su rol en `datos` |
+| `/api/users/*` (salvo `/me`), escritura en `/api/units/*`, `/api/platforms/*` | ❌ 401 | ❌ 403 | ❌ 403 | ❌ 403 | ✅ |
 
-Leído de golpe, el modelo real es: **autenticado = puede escribirlo todo; admin = además ve
-dos campos de credenciales en claro.** El rol no restringe ninguna operación de escritura.
+Un usuario autenticado **sin ningún rol en `datos`** (por ejemplo, solo `selloverde`) recibe `403` en
+todas las rutas de datos, y `GET /api/auth/me` le devuelve `role: "none"`. Un `role` desconocido
+en `access[]` no concede nada. Ejecutada por HTTP real en `test_INT03_role_matrix_over_http`.
 
-> 🔸 **BRECHA (elevación de privilegio funcional):** un usuario `viewer` puede modificar
-> cualquier establecimiento, crear y borrar contrapartes y sobrescribir métricas. El nombre del
-> rol sugiere solo lectura; el código no lo impone en ningún punto. Es la brecha de seguridad de
-> mayor impacto práctico.
->
-> 🔸 **BRECHA (fuga por escritura):** `PUT /api/establishments/{rbd}` responde con
-> `find_by_rbd(include_sensitive=True)` (`establishments_service.py:110,118`) sin consultar el
-> rol. Un `viewer` obtiene las contraseñas en claro emitiendo un PUT vacío — exactamente lo que
-> BE-05 impide en el GET. **No hay test que cubra este camino.**
->
-> 🔸 **BRECHA:** no existe dependencia reutilizable tipo `require_admin`. El único chequeo de rol
-> es una comparación de string inline. Un módulo nuevo no tiene de dónde heredar el patrón, así
-> que lo más probable es que lo reinvente o lo omita. Ver `05-guia-de-extension.md` §3.
+> ⚠️ **El editor ve credenciales en claro (C20).** Antes solo las veía el admin. Si esa lectura
+> de la respuesta N10 fuera errónea, `SENSITIVE_ROLES` en `auth_entity.py` pasa a `{admin}` y el
+> resto de las garantías (incluida la protección de la sobrescritura, §3.2) sigue valiendo.
+
+> ✅ **RESUELTO (D3):** `viewer` ya no escribe nada; `editor` no borra.
+> ✅ **RESUELTO (D4):** el `PUT` respeta `include_sensitive` y nadie sin rol de escritura llega a él.
+> ✅ **RESUELTO:** existe la dependencia reutilizable `require_access`.
 
 ---
 
@@ -150,9 +148,17 @@ la cadena literal `"[REDACTED]"`:
 - cada `licenses[].password` no vacío;
 - `connectivity.ssid_password` si no está vacío.
 
-El controller decide el booleano (`establishments_controller.py:40-41`). El service nunca sabe
-qué es un rol; el controller nunca sabe qué campo se redacta. Esa separación es la que permite
-probar ambos lados por separado, y es la que hay que preservar.
+El controller decide el booleano (`establishments_controller.py`, `include_sensitive = ctx.role in
+SENSITIVE_ROLES`): solo `viewer` recibe `[REDACTED]`. El service nunca sabe qué es un rol; el
+controller nunca sabe qué campo se redacta. Esa separación permite probar ambos lados por
+separado y es la que hay que preservar. El `PUT` pasa el mismo booleano a `update_by_rbd`, de
+modo que su respuesta tampoco devuelve credenciales a quien no corresponde (cierra D4).
+
+**El marcador `[REDACTED]` nunca se persiste.** Un cliente que recibió el detalle redactado y lo
+reenvía completo en el `PUT` (así lo hace `EditFicha.jsx:35` y `:173-175`) no destruye las
+credenciales: `_resolve_redacted_markers` conserva el valor almacenado si hay uno equivalente
+(misma posición y mismo `name` en las licencias; el `ssid_password` existente) y responde `422`
+si no lo hay. Verificado por `test_BE13_*` y `test_INT04_*`.
 
 Esta protección es **por lista negra**, con dos entradas literales. Un campo sensible nuevo
 **no** queda protegido por omisión: hay que agregarlo a mano.
@@ -192,13 +198,20 @@ rompa está cambiando una garantía de seguridad, no un detalle de implementaci�
 | **Integración:** el JSON del listado no contiene la clave `password` en ninguna parte | `test_INT02_listing_response_does_not_contain_password_string_anywhere` | Agregar un campo que contenga la subcadena `password` al listado |
 | **Integración:** el detalle con token no-admin trae passwords redactadas | `test_INT02_detail_with_non_admin_token_returns_redacted_passwords` | — |
 | **Integración:** el detalle con token admin trae passwords reales | `test_INT02_detail_with_admin_token_returns_real_passwords` | — |
+| **Integración:** la matriz de roles completa por HTTP con tres tokens y anónimo | `test_INT03_role_matrix_over_http` | Cambiar una celda de 2.1 sin darse cuenta |
+| Toda ruta declara `require_access` o está en la allowlist | `test_BE12_every_route_declares_access_or_is_allowlisted` | Una ruta nueva sin protección |
+| `viewer` no escribe; `editor` no borra; sin rol en `datos` ⇒ `403`; `datos/admin ≠ iam/admin` | `test_BE12_*` | Volver a D3 |
+| El `PUT` no devuelve credenciales a quien no puede escribir; el marcador no sobrescribe el secreto | `test_BE13_*`, `test_INT04_*` | Volver a D4 y a la pérdida de datos de `EditFicha` |
+| `sub = str(_id)`; sesiones cortadas por desactivación y por cambio de contraseña; todos los fallos dan el mismo `401` | `test_BE11_*` | Un token sobrevive a la desactivación |
+| Ninguna respuesta de usuarios contiene `hashed_password`, `token_hash` ni un hash bcrypt; `personal_phone` solo para el admin global y el propio usuario | `test_INT07_*` | Fuga de credenciales o de datos personales |
+| Operadores (`{"$ne": null}`) y campos extra en cualquier body de escritura dan `422`; falla si aparece una ruta de escritura sin revisar | `test_INT08_*` | Inyección de operadores y asignación masiva |
+| Variables de identidad y secreto sin default; todas declaradas en compose y plantilla | `test_BE14_*` | Volver a D2 |
 
 Los tests corren contra MongoDB **mockeado** (`tests/conftest.py`: `AsyncMock`/`MagicMock`
 sobre `db_service.db`), no contra una instancia real. Verifican la lógica del backend, no el
 comportamiento de MongoDB ni la existencia física de los índices.
 
-> 🔸 **BRECHA:** no hay test que cubra la fuga por `PUT` descrita en §2. El conjunto BE-05/INT-02
-> verifica exhaustivamente la lectura y deja la escritura sin cubrir.
+> ✅ **RESUELTO:** la fuga por `PUT` ya tiene test (`test_INT04_*`).
 
 ---
 
@@ -230,35 +243,41 @@ origen (Nginx o el proxy de Vite), así que nunca hace una petición cross-origi
 
 ## 6. Secretos y configuración
 
-`config.py` lee variables de entorno con `os.getenv` y **todas tienen default**:
+`config.py` (`Settings`) lee el entorno **al instanciarse** y valida (T9). Las variables de
+identidad y de secreto **no tienen default**: si falta una, la app no arranca y el mensaje nombra
+la variable (`ConfigError`). `repr(settings)` no vuelca valores.
 
-| Variable | Default en el código | Riesgo |
+| Variable | Default | Validación |
 |---|---|---|
-| `MONGODB_URL` | `mongodb://localhost:27017` | Bajo (falla ruidosamente) |
-| `DATABASE_NAME` | `slep_llanquihue` | Bajo |
-| `JWT_SECRET` | `super-secret-slep-key-2026-llanquihue-digital-management` | **Crítico** |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `180` | Bajo |
-| `ADMIN_PASSWORD` | `admin123` | **Crítico** |
+| `MONGODB_URL` | `mongodb://localhost:27017` | — (falla ruidosamente al conectar) |
+| `DATABASE_NAME` | `slep_llanquihue` | — |
+| `JWT_SECRET` | **ninguno** | obligatoria, no vacía |
+| `ADMIN_PASSWORD` | **ninguno** | obligatoria; solo se usa para crear el admin con la base vacía |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `180` | entero ≥ 1 |
+| `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | obligatoria; debe pertenecer a `ALLOWED_EMAIL_DOMAINS` |
+| `ALLOWED_EMAIL_DOMAINS` | **ninguno** | lista separada por comas, dominios válidos, normalizados |
+| `PASSWORD_MIN_LENGTH` | `15` | entero ≥ 8 y ≤ `PASSWORD_MAX_LENGTH` |
+| `PASSWORD_MAX_LENGTH` | `64` | entero ≥ 64 |
+| `PASSWORD_REQUIRE_CHAR_CLASSES` | `0` | entero de 0 a 4 |
 
-> 🔸 **BRECHA (crítica):** `JWT_SECRET` y `ADMIN_PASSWORD` tienen valores por defecto
-> funcionales y presentes en el repositorio. Un despliegue que olvide definirlos arranca sin
-> error: emite tokens firmados con un secreto público — cualquiera que lea el código puede
-> falsificar un token de admin — y siembra el usuario `admin` con la contraseña `admin123`.
-> **Fallar al arrancar sería el comportamiento correcto para ambos.**
+> ✅ **RESUELTO (D2):** `JWT_SECRET` y `ADMIN_PASSWORD` ya no tienen default en el código, y no
+> queda ningún secreto del repositorio en `config.py` (`test_BE14_jwt_secret_and_admin_password_have_no_default`).
+> `Settings` valida en rango y falla con un mensaje útil (ya no un `ValueError` en el import).
 >
-> 🔸 **BRECHA:** `docker-compose.yml` (desarrollo) repite ese mismo `JWT_SECRET` literal, lo que
-> normaliza su uso y aumenta la probabilidad de que llegue a producción por copia.
+> 🔸 **BRECHA:** `docker-compose.yml` (desarrollo) sigue fijando `JWT_SECRET` y `ADMIN_PASSWORD`
+> como literales para poder levantar el entorno. Son valores solo de desarrollo, comentados como
+> tales, pero un despliegue que copie ese archivo los heredaría. Producción no los tiene: usa
+> `${JWT_SECRET}` y `${ADMIN_PASSWORD}` del `.env`.
 >
-> 🔸 **BRECHA:** `config.py` usa una clase plana con anotaciones de tipo que Python no valida en
-> tiempo de ejecución. `ACCESS_TOKEN_EXPIRE_MINUTES` sí se convierte con `int()`, pero un valor
-> no numérico produce un `ValueError` en el import, no un mensaje útil. `pydantic-settings`
-> daría validación y fallo explícito; hoy no se usa.
+> 🔸 **BRECHA:** para `/docs` y `/openapi.json` públicos, ver §7.
 
-**Producción sí está bien planteada.** `.env.production.template` obliga a rellenar todos los
-valores, incluye el comando para generar el secreto
-(`python -c "import secrets; print(secrets.token_hex(64))"`), y `docker-compose.prod.yml` los
-inyecta por entorno junto con autenticación de MongoDB. El problema no es el procedimiento, es
-que nada lo hace obligatorio.
+**Producción:** `.env.production.template` incluye el comando para generar el secreto
+(`python -c "import secrets; print(secrets.token_hex(64))"`), `docker-compose.prod.yml` los inyecta
+por entorno junto con la autenticación de MongoDB, y `scripts/deploy.sh` valida en su paso 1 las
+siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATABASE_NAME`,
+`BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`). Un test comprueba que toda variable que lee
+`Settings` está declarada en la plantilla y en los dos compose
+(`test_BE14_every_env_var_declared_in_templates_and_compose`).
 
 ---
 
@@ -271,14 +290,14 @@ que nada lo hace obligatorio.
 | Rate limiting | **No existe** — el login admite intentos ilimitados |
 | Bloqueo por intentos fallidos | **No existe** |
 | Auditoría de accesos | **No existe** — ningún registro de quién leyó o modificó qué |
-| Validación de entrada | Solo la de Pydantic. `$regex` sin escapar (ver `03` §3.4) |
+| Validación de entrada | Pydantic con `extra="forbid"` y tipos escalares en toda la feature de usuarios (`test_INT08_*`). En establecimientos, `$regex` sin escapar (D5, ver `03` §3.4); en la búsqueda de usuarios sí se escapa con `re.escape` |
 | Cabeceras de seguridad (CSP, HSTS, X-Frame-Options) | **No configuradas** en `nginx.conf` |
 | `/openapi.json`, `/docs` | **Públicos** — exponen el esquema completo a cualquiera |
-| Secretos en el repositorio | `establishments.json` y `Documentacion/` están git-ignored; `JWT_SECRET` por defecto **sí está** en el código versionado |
+| Secretos en el repositorio | `establishments.json` y los `.xlsx`/`.json` de `Documentacion/` están git-ignored. `config.py` ya no contiene ningún secreto (D2 resuelta); `docker-compose.yml` de desarrollo sí tiene valores literales solo-desarrollo |
 
 > 🔸 **BRECHA:** sin rate limiting ni bloqueo, `POST /api/auth/login` admite fuerza bruta
-> ilimitada contra una base con un solo usuario conocido (`admin`). Es la combinación de esta
-> ausencia con el default `admin123` la que la hace relevante.
+> ilimitada. El default `admin123` ya no existe (D2), pero el límite de intentos sigue pendiente:
+> es la épica de endurecimiento de la feature (ADR-014, F4).
 
 ---
 
@@ -299,7 +318,11 @@ que nada lo hace obligatorio.
 
 ## 9. 🧭 DISEÑO F2: modelo de acceso por plataforma
 
-> **Estado: sin implementar.** Decisiones: ADR-009 (acceso y roles), ADR-012 (primer acceso),
+> **Estado por subsección.** ✅ Implementado y verificado en F3: 9.1 (flujo, sin las partes de
+> correo y Google), 9.2, 9.3, 9.4 y de 9.5 la política de contraseñas, el cambio propio y el
+> bootstrap del admin. 🧭 Pendiente: de 9.5 la invitación y el restablecimiento por correo (F4);
+> 9.6 login con Google (F6); y la auditoría y el rate limiting de ADR-014 (F4).
+> Decisiones: ADR-009 (acceso y roles), ADR-012 (primer acceso),
 > ADR-013 (dependencias) y ADR-014 (auditoría y límites) en `06`. Modelo de datos en `02` §9;
 > contrato en `03` §8. **Documento obligatorio antes de tocar `auth/`:** F3 y F6 tocan un punto
 > único de falla, así que valen la rama aislada y los tests BE03, BE05 e INT02 antes y después.

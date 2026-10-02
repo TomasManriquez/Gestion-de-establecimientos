@@ -59,7 +59,7 @@ async def update_establishment(
         updated_est = await establishments_service.update_by_rbd(
             rbd, payload, include_sensitive=ctx.role in SENSITIVE_ROLES)
     except RedactedPlaceholderError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc))
     if not updated_est:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

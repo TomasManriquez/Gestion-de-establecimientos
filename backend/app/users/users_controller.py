@@ -22,7 +22,7 @@ def _http(exc: Exception) -> HTTPException:
     if isinstance(exc, UserConflict):
         return HTTPException(status.HTTP_409_CONFLICT,
                              detail={"code": exc.code, "message": exc.message, "field": exc.field})
-    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors)
+    return HTTPException(422, detail=exc.errors)
 
 
 # Las rutas fijas (/me) van ANTES que /{user_id} para que no las capture como un id.
