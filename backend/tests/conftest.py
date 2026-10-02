@@ -1,10 +1,20 @@
 """
 conftest.py — Fixtures compartidas para todos los tests del backend.
 
-Estrategia: Se usa mongomock + motor para simular MongoDB en memoria,
-sin necesidad de una instancia real de MongoDB. Cada test recibe
-una BD limpia con datos de seed mínimos.
+Estrategia: MongoDB se simula con `unittest.mock` (AsyncMock/MagicMock) sobre `db_service.db`
+o con `tests/fake_mongo.py` (colecciones en memoria). Ningún test usa una base real.
 """
+import os
+
+# T9: la app no arranca sin estas variables. Se fijan ANTES de importar `app` (la
+# configuración se lee al importar). Valores solo para pruebas; nunca son los de un despliegue.
+os.environ["JWT_SECRET"] = "test-only-jwt-secret-not-for-deployments"
+os.environ["ADMIN_PASSWORD"] = "test-only-admin-password"
+os.environ["ALLOWED_EMAIL_DOMAINS"] = "slepllanquihue.cl"
+os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "admin@slepllanquihue.cl"
+for _name in ("PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES"):
+    os.environ.pop(_name, None)
+
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch

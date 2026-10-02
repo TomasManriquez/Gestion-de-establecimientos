@@ -35,7 +35,7 @@ fi
 # shellcheck disable=SC1091
 set -a && source "${ENV_FILE}" && set +a
 
-for VAR in MONGO_ROOT_USERNAME MONGO_ROOT_PASSWORD JWT_SECRET ADMIN_PASSWORD DATABASE_NAME; do
+for VAR in MONGO_ROOT_USERNAME MONGO_ROOT_PASSWORD JWT_SECRET ADMIN_PASSWORD DATABASE_NAME BOOTSTRAP_ADMIN_EMAIL ALLOWED_EMAIL_DOMAINS; do
     if [ -z "${!VAR:-}" ]; then
         echo "❌ ERROR: Variable ${VAR} no está definida en .env"
         exit 1
