@@ -324,7 +324,7 @@ devuelve credenciales sin redactar (D4) (`04` §2). Además, el SLEP opera más 
    `AccessContext {user_id, role}`. **El service nunca recibe el usuario** (L3): sigue
    recibiendo booleanos como `include_sensitive`.
 4. Matriz de `datos` en `04` §9.3. El rol `editor` ve las credenciales en claro igual que
-   `admin`; solo `viewer` las recibe redactadas (lectura de la respuesta N10, confirmada).
+   `admin`; solo `viewer` las recibe redactadas (lectura de la respuesta N10; confirmada por el usuario el 2026-10-06: esas credenciales son de uso público).
 5. **El filtro de alcance por unidad (`ScopeFilter`) queda diferido** hasta el primer módulo que
    filtre datos por unidad. En esta feature no hay restricción de visibilidad por
    establecimiento ni por unidad: los roles limitan acciones, no filas.
@@ -532,6 +532,8 @@ C2). Que `users` emita las invitaciones (haría que `users` importe `auth`).
 ---
 
 ## ADR-014 · Auditoría y rate limiting sin infraestructura nueva
+
+> **Estado:** aprobada por el usuario el 2026-10-06. Auditoría y rate limiting **entran en F4**.
 
 **Contexto.** `04` §7 registra que no hay ninguna auditoría y que el login admite intentos
 ilimitados. Para un sistema de identidad, saber quién dio acceso a quién es un mínimo.

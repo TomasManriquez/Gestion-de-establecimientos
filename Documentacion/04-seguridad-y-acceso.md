@@ -116,9 +116,11 @@ Un usuario autenticado **sin ningún rol en `datos`** (por ejemplo, solo `sellov
 todas las rutas de datos, y `GET /api/auth/me` le devuelve `role: "none"`. Un `role` desconocido
 en `access[]` no concede nada. Ejecutada por HTTP real en `test_INT03_role_matrix_over_http`.
 
-> ⚠️ **El editor ve credenciales en claro (C20).** Antes solo las veía el admin. Si esa lectura
-> de la respuesta N10 fuera errónea, `SENSITIVE_ROLES` en `auth_entity.py` pasa a `{admin}` y el
-> resto de las garantías (incluida la protección de la sobrescritura, §3.2) sigue valiendo.
+> **El editor ve credenciales en claro (C20) — confirmado por el usuario el 2026-10-06.** Antes
+> solo las veía el admin. Las credenciales de licencias y del WiFi de los establecimientos son de
+> uso público dentro de la institución, así que el riesgo se acepta de forma explícita. Si algún día
+> dejaran de serlo, `SENSITIVE_ROLES` en `auth_entity.py` pasa a `{admin}` y el resto de las
+> garantías (incluida la protección de la sobrescritura, §3.2) sigue valiendo.
 
 > ✅ **RESUELTO (D3):** `viewer` ya no escribe nada; `editor` no borra.
 > ✅ **RESUELTO (D4):** el `PUT` respeta `include_sensitive` y nadie sin rol de escritura llega a él.
