@@ -9,7 +9,7 @@
  *   - el sidebar se colapsa a íconos accionables, recuerda el estado y mantiene el nombre accesible
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import RequireAccess from '@/components/RequireAccess';
@@ -98,22 +98,69 @@ describe('FE07: AppLayout — menú lateral', () => {
     expect(localStorage.getItem('sidebar-collapsed')).toBe('0');
   });
 
-  it('FE07-G: colapsado, los enlaces siguen siendo enlaces con nombre accesible y sin texto visible', async () => {
+  it('FE07-G: colapsado, los enlaces conservan nombre accesible, los textos quedan ocultos y la geometría no cambia', async () => {
+    const expanded = renderLayout(ADMIN);
+    const classesOpen = ['Panel General', 'Directorio de Recintos', 'Usuarios'].map((n) => screen.getByRole('link', { name: n }).className);
+    expanded.unmount();
     localStorage.setItem('sidebar-collapsed', '1');
     renderLayout(ADMIN);
-    for (const name of ['Panel General', 'Directorio de Recintos', 'Usuarios']) {
+    ['Panel General', 'Directorio de Recintos', 'Usuarios'].forEach((name, i) => {
       const link = screen.getByRole('link', { name });
       expect(link.tagName).toBe('A');
-      expect(link).toHaveTextContent('');
-      expect(link.className).toMatch(/w-12 h-12/);
-    }
+      // Misma altura y mismo slot de ícono en ambos estados (nada salta al colapsar)
+      expect(link.className).not.toMatch(/=>|isActive/);   // el className de función llegó resuelto, no como texto
+      expect(link.className).toContain('h-12');
+      expect(link.className.replace(/(?:bg|text|shadow|hover:[\w/.-]+)-[\w/.-]+/g, '')).toBe(classesOpen[i].replace(/(?:bg|text|shadow|hover:[\w/.-]+)-[\w/.-]+/g, ''));
+      const label = within(link).getByText(name);
+      expect(label).toHaveAttribute('aria-hidden', 'true');
+      expect(label.className).toContain('opacity-0');
+      expect(link.firstElementChild.className).toContain('size-12');
+    });
     expect(screen.getByRole('button', { name: 'Cerrar Sesión' })).toBeInTheDocument();
-    expect(screen.queryByText('Llanquihue')).not.toBeInTheDocument();
+    expect(screen.getByText('Llanquihue').parentElement).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('FE07-H: expandido muestra los textos', () => {
+  it('FE07-L: el enlace activo conserva su clase de activo, abierto o colapsado', () => {
+    for (const collapsed of [false, true]) {
+      localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0');
+      const { unmount } = renderLayout(ADMIN);
+      const active = screen.getByRole('link', { name: 'Panel General' });
+      expect(active).toHaveAttribute('aria-current', 'page');
+      expect(active.className).toContain('bg-sky-600');
+      expect(screen.getByRole('link', { name: 'Usuarios' }).className).not.toContain('bg-sky-600');
+      unmount();
+    }
+  });
+
+  it('FE07-H: expandido los textos son visibles para los lectores de pantalla', () => {
     renderLayout(ADMIN);
-    expect(screen.getByText('Panel General')).toBeInTheDocument();
+    const label = screen.getByText('Panel General');
+    expect(label).toHaveAttribute('aria-hidden', 'false');
+    expect(label.className).toContain('opacity-100');
     expect(screen.getByText('Llanquihue')).toBeInTheDocument();
+  });
+
+  it('FE07-I: el tirador del toggle es un botón discreto sobre el borde (oculto hasta hover o foco)', () => {
+    renderLayout(ADMIN);
+    const handle = screen.getByRole('button', { name: 'Contraer barra lateral' });
+    expect(handle.className).toContain('opacity-0');
+    expect(handle.className).toContain('group-hover/sidebar:opacity-100');
+    expect(handle.className).toContain('focus-visible:opacity-100');
+    expect(handle.className).toContain('size-6');
+  });
+
+  it('FE07-J: el ancho de la barra se anima (transition-[width]) y respeta prefers-reduced-motion', () => {
+    const { container } = renderLayout(ADMIN);
+    const cls = container.querySelector('aside').className;
+    expect(cls).toContain('transition-[width]');
+    expect(cls).toContain('motion-reduce:transition-none');
+  });
+
+  it('FE07-K: alternar no vuelve a montar los enlaces (mismos nodos antes y después)', async () => {
+    const user = userEvent.setup();
+    renderLayout(ADMIN);
+    const before = screen.getByRole('link', { name: 'Panel General' });
+    await user.click(screen.getByRole('button', { name: 'Contraer barra lateral' }));
+    expect(screen.getByRole('link', { name: 'Panel General' })).toBe(before);
   });
 });
