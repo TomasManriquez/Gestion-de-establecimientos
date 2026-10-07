@@ -47,12 +47,15 @@ los cambios sin rebuild. **Una dependencia nueva en `requirements.txt` sí exige
 > corriendo sobre el `node_modules` **viejo** — sin la dependencia nueva. El síntoma es una
 > página en blanco en el navegador (el import falla en tiempo de módulo, sin `ErrorBoundary` que
 > lo capture) mientras el backend sigue respondiendo con normalidad, porque el error es 100%
-> del lado del bundling de Vite. **Correcto:** `docker compose up -d --build frontend` (recrea
-> el contenedor, y con él el volumen anónimo) — nunca `restart` después de tocar dependencias
-> del frontend.
+> del lado del bundling de Vite. **Correcto:** `docker compose up -d --build --renew-anon-volumes frontend`.
+> Recrear el contenedor **no basta**: `docker compose` conserva los volúmenes anónimos de la
+> versión anterior, y `--renew-anon-volumes` (`-V`) es lo que los descarta y los repuebla desde la
+> imagen nueva. Verificado en F5: tras `up -d --build frontend` (sin `-V`) Vite fallaba con
+> `Failed to resolve import "@radix-ui/react-tooltip"`; con `-V` resolvió. Nunca `restart` después
+> de tocar dependencias del frontend.
 >
 > 🧭 **F5 trae dependencias nuevas** (`@radix-ui/react-{alert-dialog,avatar,checkbox,dialog,dropdown-menu,popover,select,separator,switch,tooltip}`,
-> `cmdk`, `next-themes`, `sonner`): tras actualizar el código hay que correr `docker compose up -d --build frontend`.
+> `cmdk`, `next-themes`, `sonner`): tras actualizar el código hay que correr `docker compose up -d --build --renew-anon-volumes frontend` (sin `-V` el `node_modules` viejo sigue montado).
 > Para producción, `docker compose -f docker-compose.prod.yml build frontend` ya las incluye (el build copia `package-lock.json`).
 
 ### 1.2 Sin Docker
