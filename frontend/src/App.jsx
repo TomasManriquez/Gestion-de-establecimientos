@@ -10,6 +10,9 @@ import EditFicha from './components/EditFicha';
 import AppLayout from './components/AppLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import NotFound from './components/NotFound';
+import RequireAccess from './components/RequireAccess';
+import UsersPage from './components/users/UsersPage';
+import { Toaster } from '@/components/ui/sonner';
 
 /**
  * App — FE-05
@@ -65,6 +68,8 @@ export default function App() {
   };
 
   return (
+    <>
+    <Toaster richColors closeButton position="top-right" />
     <Routes>
       {/* Ruta pública */}
       <Route
@@ -99,11 +104,18 @@ export default function App() {
           <Route path="/establecimientos"                   element={<Directory />} />
           <Route path="/establecimientos/:rbd"              element={<FichaEstablecimiento />} />
           <Route path="/establecimientos/:rbd/editar"       element={<EditFicha />} />
+
+          {/* Configuración: solo el admin global (iam/admin). El backend vuelve a verificarlo. */}
+          <Route element={<RequireAccess currentUser={currentUser} platform="iam" roles={['admin']} />}>
+            <Route path="/configuracion" element={<Navigate to="/configuracion/usuarios" replace />} />
+            <Route path="/configuracion/usuarios" element={<UsersPage currentUser={currentUser} />} />
+          </Route>
         </Route>
       </Route>
 
       {/* 404 para cualquier ruta no definida */}
       <Route path="*" element={<NotFound />} />
     </Routes>
+    </>
   );
 }

@@ -33,3 +33,18 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   };
 }
+
+// Radix (Select, Popover, Dropdown, Dialog) usa APIs de puntero y de scroll que jsdom no implementa.
+if (typeof window !== 'undefined') {
+  const proto = window.HTMLElement.prototype;
+  if (!proto.hasPointerCapture) proto.hasPointerCapture = () => false;
+  if (!proto.setPointerCapture) proto.setPointerCapture = () => {};
+  if (!proto.releasePointerCapture) proto.releasePointerCapture = () => {};
+  if (!proto.scrollIntoView) proto.scrollIntoView = () => {};
+  if (!window.matchMedia) {
+    window.matchMedia = (query) => ({
+      matches: false, media: query, onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+    });
+  }
+}

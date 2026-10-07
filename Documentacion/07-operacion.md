@@ -50,6 +50,10 @@ los cambios sin rebuild. **Una dependencia nueva en `requirements.txt` sí exige
 > del lado del bundling de Vite. **Correcto:** `docker compose up -d --build frontend` (recrea
 > el contenedor, y con él el volumen anónimo) — nunca `restart` después de tocar dependencias
 > del frontend.
+>
+> 🧭 **F5 trae dependencias nuevas** (`@radix-ui/react-{alert-dialog,avatar,checkbox,dialog,dropdown-menu,popover,select,separator,switch,tooltip}`,
+> `cmdk`, `next-themes`, `sonner`): tras actualizar el código hay que correr `docker compose up -d --build frontend`.
+> Para producción, `docker compose -f docker-compose.prod.yml build frontend` ya las incluye (el build copia `package-lock.json`).
 
 ### 1.2 Sin Docker
 
@@ -214,7 +218,10 @@ cd frontend
 npm test                # vitest run
 ```
 
-Suites `test_FE00` a `test_FE05` e `test_INT01`, en `frontend/src/tests/`.
+Suites `test_FE00` a `test_FE05`, `test_FE06` a `test_FE10`, `test_FE12`, `test_FE16`, `test_INT01` e `test_INT09`, en `frontend/src/tests/`.
+`src/tests/setup.js` agrega a jsdom las APIs que Radix usa y jsdom no implementa (`hasPointerCapture`,
+`scrollIntoView`, `matchMedia`); `usersFixtures.js` (no es un test) trae los datos y el enrutador de
+`axios.get` de las pruebas de la vista de usuarios. `npm run lint` **no se puede ejecutar** (D20).
 
 **Evidencia observable (regla 1 de `GEMINI.md`):** presentar siempre la salida real de estos
 comandos. Un código de salida sin stdout visible no cuenta como verificación. Si el entorno no

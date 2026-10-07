@@ -118,7 +118,8 @@ Frontend — `frontend/package.json`:
 React `^18.2.0` · Vite `^5.2.0` · `react-router-dom` `^7.18.3` · `axios` `^1.6.8` ·
 `recharts` `^2.12.3` (gráficos) · `maplibre-gl` `^4.7.1` (mapa de ficha) ·
 `tailwindcss` `^3.4.1` + `tailwindcss-animate` · `@radix-ui/*` + `class-variance-authority`
-+ `clsx` + `tailwind-merge` (base de shadcn/ui) · `lucide-react` (íconos) ·
++ `clsx` + `tailwind-merge` (base de shadcn/ui) · `cmdk` (búsqueda en listas) · `sonner` (avisos) ·
+`next-themes` (dependencia de `sonner`; no se usa modo oscuro) · `lucide-react` (íconos) ·
 `vitest` `^4.1.11` + Testing Library (tests).
 
 Nota: existe un `package.json` en la **raíz** del repositorio con un subconjunto duplicado
@@ -204,6 +205,37 @@ El `lifespan` llama a `db_service.connect()` (seed de establecimientos e índice
 `platforms_service.ensure_bootstrap_platforms()` y `users_service.ensure_bootstrap_admin()`, en ese
 orden. Esto reemplazó a `_seed_admin_user`. `database` sigue sin importar módulos de dominio:
 por eso `run_bootstrap` vive en `main.py` (un test lo verifica).
+
+### 4.4 ✅ Frontend de la feature de usuarios (F5)
+
+```
+frontend/src/
+├── lib/api.js, access.js, format.js, units.js   # cliente API único, permisos, fechas UTC, árbol de unidades
+├── components/RequireAccess.jsx                 # guard de rol (compone con ProtectedRoute, que no se toca)
+├── components/AppLayout.jsx                     # sidebar colapsable (localStorage `sidebar-collapsed`)
+├── components/users/                            # UsersPage, UsersFilters, UsersTable, PermissionsCell,
+│                                                #   UserRowActions, UserForm, AccessDialog, BulkBar, …
+└── components/ui/                               # primitivas shadcn agregadas con el CLI
+```
+
+Ruta `/configuracion/usuarios` (y `/configuracion` que redirige a ella), bajo
+`<RequireAccess platform="iam" roles={['admin']}>`. Es solo experiencia de usuario: el backend
+vuelve a exigir `iam/admin` (`require_access`). El menú «Configuración › Usuarios» solo se pinta
+para ese rol.
+
+La vista guarda filtros y página en la URL (`q`, `unit`, `sub`, `kind`, `platform`, `role`,
+`status`, `page`), mismo patrón que el Directorio; la paginación es del servidor (25 por página).
+Las fechas del backend son UTC **sin zona** y se interpretan como UTC (`lib/format.js`). Las
+acciones masivas se ejecutan **en el cliente**, una llamada individual por usuario, hasta que
+exista `POST /api/users/bulk` (🧭 F4): el resultado se informa por persona.
+
+Tema: `--primary`/`--ring` pasan a `200 98% 36%` y se agregan los tokens semánticos `--success` y
+`--warning` (con su variante oscura) en `index.css` y `tailwind.config.js`. Los colores crudos del
+resto de la app no se tocan (D21).
+
+🧭 Aún no construido: página de unidades, «Mi perfil», definición de contraseña por enlace,
+importación CSV, reenviar invitación y restablecer contraseña (los dos últimos, deshabilitados en
+el menú de fila hasta F4).
 
 ---
 

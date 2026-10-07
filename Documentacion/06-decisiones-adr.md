@@ -291,7 +291,7 @@ entorno y configuración de CORS real. Un módulo `src/lib/api.js` con una insta
 configurada: compatible con esta decisión y mejor que el estado actual — no se hizo, y es lo que
 convendría introducir junto con el versionado de la API.
 
-> 🧭 **Nota (F2):** la feature de usuarios crea `frontend/src/lib/api.js` solo para las
+> ✅ **Nota (F5):** la feature de usuarios creó `frontend/src/lib/api.js` solo para las
 > pantallas nuevas, sobre el `axios` global (reutiliza la cabecera `Authorization` y el
 > interceptor 401 de `App.jsx`). Los componentes existentes no se migran. Ver D19 en `05` §5.
 
