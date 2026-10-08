@@ -41,11 +41,11 @@ export default function UsersTable({
   const allChecked = items.length > 0 && items.every((u) => selected[u._id]);
   const someChecked = items.some((u) => selected[u._id]);
   return (
-    <Table className="table-fixed min-w-[720px]">
+    <Table className="table-fixed min-w-[900px]">
       <colgroup>
         <col className="w-11" />
+        <col className="w-72" />
         <col />
-        <col className="w-40" />
         <col className="w-44" />
         <col className="w-28" />
         <col className="w-28" />

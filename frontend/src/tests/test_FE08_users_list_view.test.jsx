@@ -109,6 +109,15 @@ describe('FE08: lista de usuarios', () => {
     for (const u of USERS) expect(rowOf(`${u.first_name} ${u.last_name}`).className).toMatch(/\bh-16\b/);
   });
 
+  it('FE08-R: la columna Usuario tiene ancho acotado y la de unidad se queda con el espacio libre', async () => {
+    const { container } = renderPage();
+    await screen.findByText('Ana Pérez');
+    const cols = [...container.querySelectorAll('colgroup col')];
+    expect(cols).toHaveLength(7);
+    expect(cols[1].className).toBe('w-72');   // Usuario: acotada
+    expect(cols[2].className).toBe('');        // Unidad o establecimiento: flexible
+  });
+
   it('FE08-G: mientras carga muestra el esqueleto y luego la tabla', async () => {
     let resolve;
     installGets({ '/api/users': () => new Promise((r) => { resolve = r; }) });
