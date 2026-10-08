@@ -411,6 +411,12 @@ export default function EditFicha() {
                         <option value="CONVIVENCIA_ESCOLAR">CONVIVENCIA ESCOLAR</option>
                         <option value="INSPECTOR_GENERAL">INSPECTOR GENERAL</option>
                         <option value="SIGE_ENCARGADO">ENCARGADO SIGE</option>
+                        <option value="PAME">PAME</option>
+                        <option value="PROFESIONAL_INCLUSION">PROFESIONAL INCLUSIÓN</option>
+                        <option value="PROFESIONAL_AME_NT">PROFESIONAL AME NT</option>
+                        <option value="PERSONAL_PROCESOS_ADM">PERSONAL PROCESOS ADM</option>
+                        <option value="GESTOR_INFRAESTRUCTURA">GESTOR INFRAESTRUCTURA</option>
+                        <option value="COMPRADOR">COMPRADOR</option>
                       </select>
                     </div>
                     <div>
