@@ -73,6 +73,9 @@ endpoint de borrado de establecimientos, así que el escenario no es alcanzable 
 
 `users` no tiene relación con las otras tres. Es una colección de autenticación aislada.
 
+> **Tras F3** esa colección es el modelo de identidad del módulo `users` (§6 y §9.3), y existen
+> además `units` y `platforms` (§9.4 y §9.5). Las secciones 2 a 5 y 8 no cambian.
+
 ---
 
 ## 2. Principio de modelado: qué se embebe y qué se referencia
@@ -427,27 +430,32 @@ duplicación literal de `MetricBase`, mantenida a mano.
 
 ## 6. `users`
 
-No tiene modelo Pydantic de persistencia. El documento se define inline en el seeding
-(`seed_service.py:23-29`, función `_seed_admin_user`) y se lee como `dict` crudo en
-`auth_service.py:25,57`.
+Módulo dueño: `users` (`users_entity.py`, `users_service.py`); `auth` ya no lee la colección
+directamente (C2, ADR-013). El documento y sus invariantes están en §9.3; aquí lo que importa
+para leer el código:
 
-```json
-{
-  "username": "admin",
-  "hashed_password": "$2b$12$...",
-  "full_name": "Administrador SLEP",
-  "role": "admin"
-}
-```
+- `users_entity.py` modela la **entrada** (`UserCreate`, `UserAdminUpdate`, `UserSelfUpdate`, los
+  tres con `extra="forbid"`) y la **salida** (`User`, `UserSummary`, `UserMe`), que no declaran
+  `hashed_password` ni `token_hash`. La regla «funcionario SLEP XOR usuario de establecimiento»
+  es una sola función, `check_mode`, usada por el alta y por la edición.
+- El documento almacenado guarda `unit_id`, `created_by`, `updated_by` y `access[].granted_by` como
+  `ObjectId`; los services los devuelven como `str`.
+- **Migración del admin sembrado (hecha en F3, §9.10).** El documento original
+  `{username, hashed_password, full_name, role}` se completa en el mismo `_id` y **conserva** esos
+  cuatro campos legados, de modo que volver al código anterior sigue funcionando. Los tokens con
+  `sub = "admin"` se aceptan mientras dure la compatibilidad.
+- **Índices** (`database_service.ensure_indexes`): `email` único **parcial** (el admin legado no
+  tiene correo y un índice único normal haría chocar los documentos sin el campo),
+  `auth_providers.subject` único parcial, `username` parcial, `unit_id`, `rbd`, `positions`
+  (multikey), `access.platform_id`, `status`, `last_activity_at`.
 
-`auth_entity.py` solo modela el tránsito HTTP (`LoginRequest`, `Token`, `TokenData`,
-`UserResponse`), no la persistencia.
-
-> 🔸 **BRECHA:** no existe `users_entity.py`, `users_service.py` ni endpoint de gestión de
-> usuarios. El único usuario se crea por seeding con la contraseña de `ADMIN_PASSWORD`. Crear
-> un segundo usuario requiere insertarlo a mano en MongoDB. No hay índice único sobre
-> `users.username`, pese a que `auth_service.authenticate_user` asume unicidad usando
-> `find_one`.
+> ✅ **RESUELTO:** existen `users_entity.py`, `users_service.py` y los endpoints de gestión de
+> usuarios (`03` §8). El índice sobre `username` ya existe (parcial, no único: es solo para la
+> compatibilidad del login legado).
+>
+> 🔸 **BRECHA:** el índice `username` no es único y no hay manera de impedir un segundo documento
+> con `username: "admin"`. Solo importa mientras exista la compatibilidad con el login legado;
+> se retira con ella.
 
 ---
 
@@ -466,7 +474,8 @@ Este es el inventario que cualquier cambio debe respetar. Su enforcement está e
 | `general_info.director_email`, `director_phone` | `establishments` | Datos personales | Sin redactar. Excluidos del listado solo por no estar proyectados. |
 | `counterparts[].email`, `.phone` | `counterparts` | Datos personales de funcionarios | **Sin redactar ni restringir.** Cualquier autenticado lee todas las contrapartes. |
 | `LeasedPrinter.ip_address`, `.support_*`, `.director_*` | `establishments` | Dirección IP interna y contactos | Sin redactar. Excluidos del listado por proyección. |
-| `users.hashed_password` | `users` | Hash bcrypt | Nunca sale: `UserResponse` solo expone `username`, `full_name`, `role` |
+| `users.auth_providers[].hashed_password` y el legado `users.hashed_password` | `users` | Hash bcrypt | Nunca sale: ningún modelo de respuesta lo declara y `test_INT07_*` recorre el JSON de cada ruta buscándolo |
+| `users.personal_phone` | `users` | Dato personal (Ley 19.628; Ley 21.719 desde dic-2026) | Fuera de `USERS_LISTING_PROJECTION`; solo lo reciben el admin global (detalle) y el propio usuario (`/me`) |
 
 > 🔸 **BRECHA:** la redacción es una **lista blanca de dos campos**, codificada como dos `if`
 > literales en `find_by_rbd`. Un campo sensible nuevo no queda protegido por omisión: hay que
@@ -511,3 +520,383 @@ Claves de nivel raíz por registro: `rbd`, `rbd_dv`, `name`, `comuna`, `area_typ
 No existe mecanismo de actualización incremental: cargar datos nuevos sobre una base ya
 poblada requiere hoy vaciar las colecciones y reiniciar, o escribir en Mongo a mano. Ver
 `07-operacion.md` §4.
+
+---
+
+## 9. 🧭 DISEÑO F2: colecciones de la feature de usuarios e IAM
+
+> **Estado por subsección (2026-10-02).** ✅ Implementado y verificado en F3: 9.1 (salvo
+> `auth_tokens`, `subrogations`, `audit_log`, `rate_limits` y `counterparts.user_id`), 9.2, 9.3,
+> 9.4, 9.5, 9.10 y 9.12 (salvo las transiciones por correo). 🧭 Pendiente: 9.6 `subrogations`
+> y 9.7 `auth_tokens` (F4), 9.8 `counterparts.user_id` (F4), 9.9 `audit_log` y `rate_limits` (F4).
+> La marca `🧭` se retira cuando la fase correspondiente lo implemente y un test lo verifique. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
+> y campos en inglés, igual que los cinco módulos existentes (ver D23 en `05` §5).
+
+### 9.1 Panorama
+
+```mermaid
+erDiagram
+    users {
+        ObjectId _id PK
+        string email UK "unico parcial, normalizado"
+        string first_name
+        string last_name
+        string personal_phone "SENSIBLE Ley 19.628 y 21.719"
+        string work_extension
+        bool is_slep_staff
+        ObjectId unit_id FK "idx, solo si SLEP"
+        string rbd FK "idx, solo si establecimiento"
+        array positions "idx multikey, EstablishmentPosition"
+        string status "idx, invited active disabled"
+        datetime last_login_at
+        datetime last_activity_at "idx"
+        datetime created_at
+        ObjectId created_by FK
+        datetime updated_at
+        ObjectId updated_by FK
+        datetime disabled_at
+    }
+    users_auth_providers {
+        string provider "local o google"
+        string hashed_password "SENSIBLE solo local"
+        datetime password_changed_at
+        bool must_change_password
+        string subject "unico parcial, solo google"
+        datetime linked_at
+    }
+    users_access {
+        string platform_id FK "idx"
+        string role "validado contra platforms.roles"
+        datetime granted_at
+        ObjectId granted_by FK
+    }
+    users_invitation {
+        datetime sent_at
+        datetime expires_at
+        string last_error "visible para el admin"
+    }
+    units {
+        ObjectId _id PK
+        string code UK "estable, en mayusculas"
+        string name "unico entre hermanas"
+        int level "idx, 1 a 5"
+        ObjectId parent_id FK "idx con name, unico"
+        array ancestors "idx multikey, ruta desde la raiz"
+        ObjectId head_user_id FK
+        int order
+        string status "active o inactive"
+    }
+    subrogations {
+        ObjectId _id PK
+        ObjectId unit_id FK
+        ObjectId subrogate_user_id FK
+        datetime starts_at
+        datetime ends_at "obligatorio salvo VACANCIA"
+        string reason
+        string document_ref
+        datetime cancelled_at
+    }
+    platforms {
+        string _id PK "slug: iam, datos, selloverde"
+        string name
+        string base_url
+        array roles
+        string status
+    }
+    auth_tokens {
+        ObjectId _id PK
+        ObjectId user_id FK
+        string purpose "invite o reset"
+        string token_hash "SENSIBLE sha256"
+        datetime expires_at "indice TTL"
+        datetime used_at
+    }
+    establishments {
+        string rbd PK
+        string name
+    }
+    counterparts {
+        ObjectId _id PK
+        string rbd FK
+        ObjectId user_id FK "NUEVO, opcional"
+    }
+    audit_log {
+        ObjectId _id PK "PROPUESTA pendiente de aprobacion"
+        datetime at
+        ObjectId actor_id FK
+        string action
+        string target_type
+        string target_id
+        object changes "sin hashes ni tokens"
+        string bulk_id
+    }
+    rate_limits {
+        string key PK "PROPUESTA cuenta+IP+endpoint"
+        int count
+        datetime expires_at "indice TTL"
+    }
+    users ||--o{ users_auth_providers : "embebe"
+    users ||--o{ users_access : "embebe"
+    users ||--o| users_invitation : "embebe"
+    platforms ||..o{ users_access : "platform_id"
+    units |o..o{ users : "unit_id"
+    establishments |o..o{ users : "rbd"
+    units |o..o{ units : "parent_id"
+    users |o..o{ units : "head_user_id"
+    units ||..o{ subrogations : "unit_id"
+    users ||..o{ subrogations : "subrogate_user_id"
+    users ||..o{ auth_tokens : "user_id"
+    establishments ||..o{ counterparts : "rbd"
+    users |o..o{ counterparts : "user_id"
+    users ||..o{ audit_log : "actor_id"
+```
+
+Nueve colecciones y tres subdocumentos embebidos. Las colecciones existentes son `establishments` (solo se muestran `rbd` y `name`) y
+`counterparts`, que gana `user_id` opcional. Las nuevas son `users`, `units`, `subrogations`,
+`platforms` y `auth_tokens`; `audit_log` y `rate_limits` son de la épica de endurecimiento
+(ADR-014). **Línea continua: subdocumento embebido** (`auth_providers`, `access`, `invitation`
+no existen sin su usuario). **Línea punteada: referencia lógica** entre colecciones; igual que
+hoy con `rbd`, MongoDB no impone integridad referencial y la validan los services.
+
+Un usuario tiene `unit_id` (si es funcionario SLEP) o `rbd` (si es de un establecimiento),
+**nunca ambos ni ninguno**. `units` se referencia a sí misma por `parent_id` y guarda `ancestors`,
+la ruta desde la raíz, para consultar un subárbol con un índice. `users.invitation` guarda el
+estado de la invitación (cuándo se envió, cuándo vence, último error) para que el admin vea los
+fallos del correo sin que `users` tenga que leer `auth_tokens`, que es de `auth` (ADR-013).
+`hashed_password` y `token_hash` son sensibles.
+
+### 9.2 ✅ Organigrama del SLEP
+
+```mermaid
+flowchart TD
+    DE["DE · Dirección Ejecutiva<br/>nivel 1"]:::head
+    GAB["GAB · Gabinete<br/>nivel 2"]
+    JUR["JUR · Jurídica<br/>nivel 2"]
+    COM["COM · Comunicaciones<br/>nivel 2"]
+    AUD["AUD · Auditoría<br/>nivel 2"]
+    SDGP["SD-GP · Subdirección de Gestión de Personas<br/>nivel 3"]
+    SDAF["SD-AF · Subdirección de Administración y Finanzas<br/>nivel 3"]:::head
+    SDGT["SD-GT · Subdirección de Gestión Territorial<br/>nivel 3"]
+    UATP["UATP · Unidad de Apoyo Técnico Pedagógico<br/>nivel 3"]
+    SDPC["SD-PC · Subdirección de Planificación y Control<br/>nivel 3"]
+    GPREM["GP-REM · Remuneraciones"]
+    GPPA["GP-PA · Procesos Administrativos"]
+    GPFD["GP-FD · Formación y Desarrollo"]
+    AFCL["AF-CL · Compras y Logística"]
+    AFTI["AF-TI · Tecnologías de la Información"]:::head
+    AFFIN["AF-FIN · Finanzas"]:::head
+    GTGT["GT-GT · Gestión Territorial"]
+    GTCAC["GT-CAC · Coordinación de Atención Ciudadana"]
+    ATMC["AT-MC · Mejora Continua"]
+    ATMS["AT-MS · Monitoreo y Seguimiento"]
+    PCINF["PC-INF · Infraestructura"]
+    PCMAN["PC-MAN · Mantenimiento"]
+    PCCG["PC-CG · Control de Gestión"]
+    DE --> GAB & JUR & COM & AUD
+    DE --> SDGP & SDAF & SDGT & UATP & SDPC
+    SDGP --> GPREM & GPPA & GPFD
+    SDAF --> AFCL & AFTI & AFFIN
+    SDGT --> GTGT & GTCAC
+    UATP --> ATMC & ATMS
+    SDPC --> PCINF & PCMAN & PCCG
+    AFFIN -. "subroga a SD-AF · VACACIONES · hasta 16-oct-2026 (ejemplo)" .-> SDAF
+    classDef head stroke-width:3px,stroke:#d97706
+```
+
+Son 23 unidades: 1 de nivel 1, 4 de nivel 2 (asesoras, hijas de Dirección Ejecutiva y sin hijas
+propias), 5 de nivel 3 y 13 de nivel 4. No hay unidades de nivel 5, pero el modelo las admite.
+Borde grueso: unidades con jefatura en el ejemplo; la línea punteada es una subrogancia vigente
+de ejemplo. «Gestión Territorial» aparece dos veces (`SD-GT` nivel 3 y `GT-GT` nivel 4), por eso
+el `code` es el identificador y el nombre es un dato.
+
+| Nivel | `code` | Nombre | Padre |
+|---|---|---|---|
+| 1 | `DE` | Dirección Ejecutiva | — |
+| 2 | `GAB` · `JUR` · `COM` · `AUD` | Gabinete · Jurídica · Comunicaciones · Auditoría | `DE` |
+| 3 | `SD-GP` | Subdirección de Gestión de Personas | `DE` |
+| 3 | `SD-AF` | Subdirección de Administración y Finanzas | `DE` |
+| 3 | `SD-GT` | Subdirección de Gestión Territorial | `DE` |
+| 3 | `UATP` | Unidad de Apoyo Técnico Pedagógico | `DE` |
+| 3 | `SD-PC` | Subdirección de Planificación y Control | `DE` |
+| 4 | `GP-REM` · `GP-PA` · `GP-FD` | Remuneraciones · Procesos Administrativos · Formación y Desarrollo | `SD-GP` |
+| 4 | `AF-CL` · `AF-TI` · `AF-FIN` | Compras y Logística · Tecnologías de la Información · Finanzas | `SD-AF` |
+| 4 | `GT-GT` · `GT-CAC` | Gestión Territorial · Coordinación de Atención Ciudadana | `SD-GT` |
+| 4 | `AT-MC` · `AT-MS` | Mejora Continua · Monitoreo y Seguimiento | `UATP` |
+| 4 | `PC-INF` · `PC-MAN` · `PC-CG` | Infraestructura · Mantenimiento · Control de Gestión | `SD-PC` |
+
+Los códigos son una propuesta pendiente de validación del usuario; los cuatro dados como
+referencia (`GP-REM`, `AF-TI`, `GT-GT`, `PC-INF`) se respetaron. Un nodo de nivel 4 se guarda así:
+
+```json
+{"code":"AF-TI","name":"Tecnologías de la Información","level":4,
+  "parent_id":"<_id de SD-AF>","ancestors":["<_id de DE>","<_id de SD-AF>"],
+  "head_user_id":"<_id>","status":"active"}
+```
+
+### 9.3 ✅ `users`
+
+Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente.
+
+```json
+{
+  "_id": "ObjectId",
+  "email": "nombre.apellido@slepllanquihue.cl",
+  "first_name": "…", "last_name": "…",
+  "personal_phone": "+56912345678", "work_extension": "4521",
+  "is_slep_staff": false, "unit_id": null, "rbd": "7722",
+  "positions": ["DOCENTE", "PIE_ENCARGADO"],
+  "status": "invited | active | disabled",
+  "auth_providers": [
+    {"provider": "local", "hashed_password": "…", "password_changed_at": "ISODate", "must_change_password": false},
+    {"provider": "google", "subject": "…", "linked_at": "ISODate"}
+  ],
+  "access": [{"platform_id": "datos", "role": "editor", "granted_at": "ISODate", "granted_by": "ObjectId"}],
+  "invitation": {"sent_at": "ISODate", "expires_at": "ISODate", "last_error": null},
+  "last_login_at": "ISODate", "last_activity_at": "ISODate",
+  "created_at": "ISODate", "created_by": "ObjectId", "updated_at": "ISODate", "updated_by": "ObjectId",
+  "disabled_at": null
+}
+```
+
+- `email` se normaliza (`strip` + `lower`) **antes de guardar y antes de buscar**, y su dominio debe
+  estar en `ALLOWED_EMAIL_DOMAINS` (`@slepllanquihue.cl`, también para el personal de
+  establecimientos). `work_extension` es un string de dígitos. `personal_phone` es E.164 chileno.
+- **`positions`** es una lista de `EstablishmentPosition(str, Enum)`, con **al menos un valor**
+  para usuarios de establecimiento y vacía para funcionarios SLEP. Valores cerrados:
+  `DIRECTOR`, `UTP_JEFE`, `PIE_ENCARGADO`, `CONVIVENCIA_ESCOLAR`, `INSPECTOR_GENERAL`,
+  `SIGE_ENCARGADO`, `SECRETARIO`, `ADMINISTRADOR`, `DOCENTE`, `ASISTENTE_EDUCACION`. Los seis
+  primeros coinciden con `CounterpartRole` (`counterparts_entity.py:10-15`), de modo que un
+  filtro futuro pueda cruzar ambas colecciones. **No existe `ENCARGADO_CONVIVENCIA`:** duplicaría
+  `CONVIVENCIA_ESCOLAR`, el valor al que `seed_service.py:125` mapea `convivencia_encargado`.
+- El `role` de la raíz del documento actual pasa a `access[]`, con compatibilidad hacia atrás
+  mientras dure la migración (§9.10).
+
+**Invariantes (cada uno con su test):**
+
+| Invariante | Quién lo hace cumplir |
+|---|---|
+| `is_slep_staff=true` ⇒ `unit_id` con valor, `rbd` nulo y `positions` vacía. `false` ⇒ `rbd` con valor, `positions` con ≥ 1 elemento y `unit_id` nulo | `model_validator` de Pydantic |
+| `rbd` existe en `establishments` | `users_service`, vía `establishments_service` (L5) |
+| `unit_id` existe y la unidad está activa | `users_service`, vía `units_service` |
+| `access[].role` pertenece a `platforms.roles` de esa plataforma; una entrada por plataforma | `users_service`, vía `platforms_service` |
+| Siempre queda al menos un usuario activo con `iam/admin`; no se desactiva ni degrada al último, tampoco en masa | `users_service` |
+| Un admin global no puede desactivarse a sí mismo | `users_service` |
+| `hashed_password` y `token_hash` no aparecen en ninguna respuesta | un test recorre el JSON completo, como INT02 |
+
+**Índices:** `email` único **parcial** (`{email: {$type: "string"}}`: el admin legado no tiene
+correo y dos documentos sin el campo chocarían en un índice único normal);
+`auth_providers.subject` único parcial (solo `provider: "google"`); `unit_id`; `rbd`;
+`positions` (multikey); `access.platform_id`; `status`; `last_activity_at`.
+
+### 9.4 ✅ `units`
+
+```json
+{"_id":"ObjectId","code":"SD-GT","name":"Subdirección de Gestión Territorial","level":3,
+  "parent_id":"ObjectId|null","ancestors":["ObjectId(DE)"],"head_user_id":"ObjectId|null",
+  "order":3,"status":"active|inactive","created_at":"ISODate","updated_at":"ISODate"}
+```
+
+`code` es un slug en mayúsculas, único y **estable: no cambia si la unidad se renombra**; es lo
+que el CSV usa para referirla. Invariantes: una sola unidad de nivel 1 sin padre; niveles 2 y 3
+cuelgan del nivel 1, el 4 del 3 y el 5 del 4; el nivel 2 no tiene hijas; el nombre es único entre
+hermanas; mover reescribe los `ancestors` de todo el subárbol; no se desactiva una unidad con
+usuarios activos ni con hijas activas. **Índices:** `code` único; `(parent_id, name)` único;
+`ancestors` (multikey); `level`. **Seed:** `units_service.ensure_bootstrap_units()` desde una
+constante del módulo, solo con la colección vacía.
+
+### 9.5 ✅ `platforms`
+
+```json
+{"_id":"datos","name":"Gestión de Establecimientos","base_url":"https://datos.slepllanquihue.gob.cl",
+  "roles":["admin","editor","viewer"],"status":"active"}
+```
+
+Sembradas: `iam` (roles `["admin"]`), `datos` y `selloverde` (`["admin","editor","viewer"]`).
+`_id` es un slug estable. `iam` es una plataforma lógica (ADR-009). El dominio **de correo** es
+`@slepllanquihue.cl`; el **web** es `*.slepllanquihue.gob.cl`. No son el mismo. Las credenciales
+y URLs de redirección de las plataformas consumidoras se diseñan en F7 (`04` §10).
+
+### 9.6 🧭 `subrogations` (propiedad de `units`, prioridad Could)
+
+```json
+{"_id":"ObjectId","unit_id":"ObjectId","subrogate_user_id":"ObjectId","starts_at":"ISODate",
+  "ends_at":"ISODate|null","reason":"VACACIONES|LICENCIA|COMISION|VACANCIA|OTRO",
+  "document_ref":"Resolución Exenta N° …|null","created_by":"ObjectId","created_at":"ISODate",
+  "cancelled_at":"ISODate|null"}
+```
+
+Colección aparte porque el historial crece sin límite (ADR-010). «Vigente» se calcula por fecha,
+sin jobs. Reglas: la registra el admin global; quien subroga está activo, no es la jefatura
+titular y pertenece al subárbol de la unidad; no se superponen dos vigentes en una unidad;
+`ends_at` es obligatorio salvo `VACANCIA`. **No transfiere permisos.**
+
+### 9.7 🧭 `auth_tokens` (propiedad de `auth`)
+
+```json
+{"_id":"ObjectId","user_id":"ObjectId","purpose":"invite|reset","token_hash":"sha256(…)",
+  "expires_at":"ISODate","used_at":"ISODate|null","created_by":"ObjectId","created_at":"ISODate"}
+```
+
+El token (`secrets.token_urlsafe(32)`) solo viaja en el correo; la base guarda su hash. Índice TTL
+sobre `expires_at`. Emitir uno nuevo invalida el anterior del mismo usuario y propósito.
+Vigencia propuesta: 72 h (`invite`) y 24 h (`reset`).
+
+### 9.8 🧭 `counterparts`: cambio
+
+Se agrega `user_id: Optional[str] = None`, nunca obligatorio (ADR-011). El backfill es un script
+con dry-run por defecto que empareja por correo normalizado.
+
+### 9.9 🧭 `audit_log` y `rate_limits` (ADR-014)
+
+```json
+{"_id":"ObjectId","at":"ISODate","actor_id":"ObjectId","action":"user.create|access.grant|…",
+  "target_type":"user|unit|subrogation","target_id":"…","changes":{"campo":["antes","después"]},"bulk_id":"string|null"}
+```
+
+`audit_log` es solo de agregado; `changes` jamás contiene hashes, contraseñas ni tokens.
+`rate_limits` guarda `{key, count, expires_at}` con índice TTL.
+
+### 9.10 ✅ Migración del admin sembrado
+
+Hoy el único usuario es `{username, hashed_password, full_name, role}` (§6) y no tiene correo.
+`users_service.ensure_bootstrap_admin()` (invocado por `run_bootstrap()` en `main.py`, desde el `lifespan`, **después** de
+`db_service.connect()`, que ya hace seed de establecimientos e índices) lo migra en el mismo `_id`: `email` desde
+`BOOTSTRAP_ADMIN_EMAIL` (obligatoria, sin default), `auth_providers` con el hash original,
+`access` `iam/admin` y `datos/admin`, `status: active`, y la unidad `AF-TI`. Es idempotente y
+tolera la carrera de dos workers (`DuplicateKeyError`). Con la base vacía crea el admin con
+`ADMIN_PASSWORD` y `must_change_password: true`. `seed_service._seed_admin_user` se retira, y
+`ensure_bootstrap_units()` corre antes. Rollback: el documento conserva `username`,
+`hashed_password` y `role` durante la migración, así que volver al código anterior sigue
+funcionando.
+
+### 9.11 Campos sensibles nuevos
+
+| Campo | Ubicación | Tratamiento previsto |
+|---|---|---|
+| `users.auth_providers[].hashed_password` | `users` | Nunca sale. Test que recorre el JSON. |
+| `auth_tokens.token_hash` | `auth_tokens` | Nunca sale. |
+| `users.personal_phone` | `users` | Dato personal (Ley 19.628; Ley 21.719 desde dic-2026). Fuera de la proyección del listado; solo lo ven el admin global y el propio usuario. |
+| `users.email`, nombres | `users` | Visibles solo para `iam/admin` y el propio usuario; `GET /api/units` solo expone id y nombre a mostrar de las jefaturas. |
+| `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_SECRET` | entorno | Secretos como `JWT_SECRET`. Nunca en el repo ni en logs. |
+
+### 9.12 Ciclo de vida del usuario
+
+```mermaid
+stateDiagram-v2
+    [*] --> invited : alta por admin, CSV o bulk-create (invitación enviada)
+    invited --> invited : invitación vencida o correo fallido, el admin reenvía (token nuevo)
+    invited --> active : primer acceso (canje del enlace o primer login con Google)
+    invited --> disabled : desactivación (individual o masiva)
+    active --> disabled : desactivación (individual o masiva)
+    disabled --> active : reactivación, si tiene contraseña o Google vinculado
+    disabled --> invited : reactivación sin credencial (supuesto A4)
+    active --> active : restablecimiento por el admin (enlace reset, cierra sesiones)
+```
+
+Todo usuario nace `invited` (alta individual, CSV o `bulk-create`). Si el correo falla, sigue
+`invited` y `users.invitation.last_error` lo muestra; si el enlace vence, el admin reenvía y se
+emite un token nuevo que invalida el anterior. Pasa a `active` con el primer acceso (canje del
+enlace o primer login con Google). Desactivar es el «eliminar» (soft delete): corta la sesión en
+la siguiente petición y es reversible. Reactivar deja `active` si el usuario tiene contraseña o
+Google vinculado; si nunca definió credencial, vuelve a `invited`. Restablecer la contraseña
+deja `active` y cierra las sesiones abiertas.

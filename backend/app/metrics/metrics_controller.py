@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
-from app.auth.auth_service import auth_service
+from app.auth.auth_service import require_access
+from app.auth.auth_entity import (AccessContext, PLATFORM_DATOS, DATOS_READ, DATOS_WRITE,
+                                  DATOS_DELETE, SENSITIVE_ROLES)
 from app.metrics.metrics_service import metrics_service
 from app.metrics.metrics_entity import Metric, MetricUpdate
 
@@ -9,7 +11,7 @@ router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 @router.get("/establishment/{rbd}", response_model=List[Metric])
 async def get_historical_metrics(
     rbd: str,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_READ))
 ):
     return await metrics_service.find_by_rbd(rbd)
 
@@ -17,7 +19,7 @@ async def get_historical_metrics(
 async def get_metric_by_year(
     rbd: str,
     year: int,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_READ))
 ):
     metric = await metrics_service.find_by_rbd_and_year(rbd, year)
     if not metric:
@@ -32,6 +34,6 @@ async def upsert_metric(
     rbd: str,
     year: int,
     payload: MetricUpdate,
-    current_user: dict = Depends(auth_service.get_current_user)
+    ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_WRITE))
 ):
     return await metrics_service.upsert(rbd, year, payload)

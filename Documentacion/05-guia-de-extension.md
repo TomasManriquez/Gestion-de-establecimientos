@@ -32,6 +32,14 @@ backend/app/inventario/
 └── inventario_controller.py
 ```
 
+> 🔸 **BRECHA (D23, nombre de carpeta):** esta receta dice «en español», pero el código usa
+> inglés en todos los módulos. Para los módulos nuevos de la feature de usuarios se sigue el
+> código (`users`, `units`, `platforms`, `audit`).
+>
+> 🧭 **DISEÑO F2:** dos excepciones acotadas a «exactamente tres archivos», ambas decididas en
+> ADR: `units` es dueño de dos colecciones (`units`, `subrogations`, ADR-010) y
+> `backend/app/mail/` es infraestructura con un solo archivo `mail_service.py` (ADR-012).
+
 Convenciones **no negociables**, porque son las que hacen predecible el árbol:
 carpeta en **singular o plural según el nombre del dominio, en español**, coherente con el
 resto; los tres archivos con el prefijo **exacto** del nombre de la carpeta; sufijos
@@ -378,6 +386,12 @@ Reglas que no se negocian, con la consecuencia concreta de violarlas.
 | L10 | **El `rbd` es `str` en todo el stack.** | Cambio breaking del contrato (`03` §4), invalidación del índice único y rotura de las referencias de `counterparts` y `metrics`. |
 | L11 | **La lógica compartida entre módulos vive en el módulo dueño del dato**, y se consume importando su service (L5). No hay carpeta `utils/` ni `shared/`, y no debe crearse una sin un ADR. | Una carpeta `utils/` sin dueño acumula lógica de negocio huérfana; es como se pierde la trazabilidad de qué módulo es responsable de qué regla. |
 
+> 🧭 **DISEÑO F2 (norma propuesta para L5):** el grafo de imports entre los módulos de la
+> feature está fijado en ADR-013 (`auth → users → {units, platforms, establishments, audit}`).
+> Un test recorrerá los imports y fallará ante un ciclo o una arista no declarada. Cuando una
+> regla de un módulo necesita un dato de otro que está **por encima** en el grafo, el controller
+> lo calcula y se lo pasa al service como parámetro (mismo patrón que `include_sensitive`).
+
 ---
 
 ## 4. Puntos de extensión ya previstos
@@ -414,9 +428,9 @@ Registro ordenado por consecuencia. Cada entrada apunta al documento donde está
 | # | Deuda | Ubicación | Consecuencia |
 |---|---|---|---|
 | ~~D1~~ | ✅ Resuelto: el seeding ya incluye `location` en `est_doc` | `seed_service.py:194-207` | Recrear la base ya conserva las coordenadas de los 74/78 registros que las traen. `02` §8 |
-| D2 | `JWT_SECRET` y `ADMIN_PASSWORD` con defaults funcionales en el repositorio | `config.py:9,14` | Un despliegue que los olvide arranca con secreto público y `admin123`. `04` §6 |
-| D3 | El rol `viewer` puede escribir todo | todos los controllers | El nombre del rol no corresponde a su poder. `04` §2 |
-| D4 | El `PUT` de establecimiento devuelve credenciales sin redactar a cualquier autenticado | `establishments_service.py:110,118` | Elude BE-05. Sin test. `04` §2 |
+| ~~D2~~ | ✅ Resuelto en F3: `JWT_SECRET` y `ADMIN_PASSWORD` no tienen default y la app no arranca sin ellos | `config.py` | `test_BE14_*`. `04` §6 |
+| ~~D3~~ | ✅ Resuelto en F3: `viewer` solo lee; `editor` no borra | todos los controllers (`require_access`) | `test_BE12_*`, `test_INT03_*`. `04` §2 |
+| ~~D4~~ | ✅ Resuelto en F3: el `PUT` respeta `include_sensitive` y el marcador `[REDACTED]` no sobrescribe secretos | `establishments_controller.py`, `establishments_service.py` | `test_BE13_*`, `test_INT04_*`. `04` §3.2 |
 | D5 | `$regex` construido con valores sin escapar | `establishments_service.py:35-58` | ReDoS por petición autenticada. `03` §3.4 |
 
 ### 5.2 Acoplamiento temporal y duplicación
@@ -439,14 +453,29 @@ Registro ordenado por consecuencia. Cada entrada apunta al documento donde está
 | D14 | El healthcheck no consulta MongoDB | `main.py:50` | Un backend sin base pasa como sano. `03` §5.1 |
 | D15 | El seeding **no es una migración**: solo corre con la colección vacía | `seed_service.py:9` | No hay forma reproducible de cargar datos nuevos. `07` §4 |
 | D16 | Sin pines de versión en `requirements.txt`; tres dependencias declaradas sin uso | `requirements.txt` | Builds no reproducibles. `01` §3 |
-| D17 | `Documentacion/` está en `.gitignore` | `.gitignore:4` | **Esta documentación no se versiona ni viaja con el repositorio.** Ver abajo. |
+| ~~D17~~ | ✅ Resuelto: `.gitignore` ya solo ignora `Documentacion/*.xlsx`, `Documentacion/*.json` y `Documentacion/establishments.json` | `.gitignore:5-7` | Los `.md` de `Documentacion/` están versionados (`git ls-files Documentacion`). Ver abajo. |
 
-> 🔸 **BRECHA (D17, atención):** `.gitignore:4` excluye `Documentacion/` completa. Todo este
-> conjunto de documentos vive solo en el disco local: no llega a otro desarrollador por `git
-> clone`, no tiene historial y se pierde con la máquina. La exclusión probablemente se agregó
-> por las planillas `.xlsx` y el `establishments.json` con datos reales que también están en esa
-> carpeta. La corrección natural es ignorar esos archivos por extensión y versionar los `.md`,
-> pero **no se aplicó**: este documento registra el estado, no lo cambia.
+> ✅ **RESUELTO (D17):** `.gitignore:5-7` ignora por extensión los `.xlsx` y `.json` de
+> `Documentacion/` y deja versionar los `.md`. Verificado con `git ls-files Documentacion`
+> (nueve archivos `.md`, incluido `historico/`). Cumple la política de versionado del estándar
+> de documentación (`.agents/skills/project-documentation-standard.md` §3).
+
+### 5.3b Deuda registrada al diseñar la feature de usuarios (F2)
+
+Brechas encontradas al verificar el prompt de la feature contra el repositorio el 2026-10-02.
+Son un registro, no un plan: ninguna se corrigió al documentarla (salvo que una historia de la
+feature lo diga, indicada en la última columna).
+
+| # | Deuda | Ubicación | Consecuencia | Se atiende en |
+|---|---|---|---|---|
+| ~~D18~~ | ✅ Resuelto en F5: `components.json` sin BOM, `tsx: false` (el proyecto es JSX) y `baseColor: "slate"`. El color de marca no sale del `baseColor`, sino de los tokens `--primary`/`--ring` de `index.css` | `frontend/components.json`, `frontend/src/index.css` | `npx shadcn@latest add …` vuelve a funcionar. Test `FE16-L` impide reintroducir el BOM | US-39 (F5) |
+| ~~D19~~ | ✅ Resuelto en F5 solo para pantallas nuevas: existe `frontend/src/lib/api.js` (`usersApi`, `unitsApi`, `platformsApi`, `establishmentsApi`, `parseApiError`) sobre el `axios` global. Las ~14 llamadas de los componentes antiguos **siguen dispersas** a propósito | `frontend/src/lib/api.js` | Un único lugar para el prefijo y para normalizar errores en lo nuevo. Test `FE06` verifica rutas relativas y que ningún componente nuevo importa `axios` | US-40 (F5) |
+| D20 | `npm run lint` no se puede ejecutar: el script existe, `eslint` no está en `devDependencies` ni instalado, y no hay configuración | `frontend/package.json:9` | CLAUDE.md §2 lista el lint como verificación, pero no hay forma de correrlo. No se declara nunca que el lint pasó. Reconfirmado en F5 (`eslint: not found`); los componentes nuevos se cubren con el escaneo estático `FE16` | sin historia (decisión pendiente) |
+| D21 | 513 clases de color crudas (`bg-slate-900`, `text-sky-500`…) y 57 líneas con `space-x/y-*` en los nueve componentes | `frontend/src/components/*.jsx` | Viola la regla de estilos de la skill de shadcn. Las pantallas nuevas no lo replican (test `FE16-B/C/D` lo vigila en `components/users/` y `RequireAccess`); las existentes —incluido `AppLayout.jsx`, que conserva su paleta slate/sky— **no se refactorizan** en la feature | fuera de alcance |
+| ~~D22~~ | ✅ Resuelto en F3: `backend/requirements-dev.txt` declara `pytest`, `pytest-asyncio` y `httpx`; el docstring de `conftest.py` describe la estrategia real (mocks y `tests/fake_mongo.py`) | `backend/requirements-dev.txt`, `backend/tests/conftest.py` | `pip install -r requirements-dev.txt` instala lo necesario para correr la suite. `07` §3 |
+| D23 | El paso 1 de la receta (§1) pide carpetas en español, pero los cinco módulos existentes usan inglés (`establishments`, `counterparts`, `metrics`, `analytics`, `auth`) | `05` §1 «Paso 1»; `backend/app/*` | Los módulos nuevos (`users`, `units`, `platforms`, `audit`) siguen el **código** (inglés). Esta es la 🔸 **BRECHA** de documentación: la receta debe decir inglés | US-60 |
+| ~~D24~~ | ✅ Resuelto en F3: las 4 pruebas de INT02 recibían `401` (parchear `auth_service.get_current_user` no surte efecto porque el controller ya capturó la dependencia) y sus aserciones quedaban dentro de `if response.status_code == 200`, es decir, **no verificaban nada**. Ahora autentican con un JWT real (`authenticated_as`) y afirman el `200` | `backend/tests/test_INT02_no_sensitive_data_leak.py` | La garantía de `04` §4 sobre INT02 era nominal. Probado: con la redacción rota a propósito, el test ahora falla | F3 (preparación) |
+| ~~D25~~ | ✅ Resuelto en F3: los tests que usan `TestClient(app)` ejecutaban el `lifespan` real (`db_service.connect()`: seed e índices) contra `MONGODB_URL`. Con la MongoDB de desarrollo levantada en `localhost:27017`, pytest escribía en la base real. `conftest.py` ahora reemplaza `app.main.db_service` en todos los tests | `backend/tests/conftest.py` | Sin esto, los bootstraps de la feature habrían migrado el admin de desarrollo al correr pytest | F3 (preparación) |
 
 ### 5.4 Qué escala mal a partir de aquí
 

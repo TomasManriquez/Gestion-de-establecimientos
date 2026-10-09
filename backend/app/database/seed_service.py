@@ -1,35 +1,16 @@
 import os
 import json
 import logging
-import bcrypt
-from app.config import settings
 
 logger = logging.getLogger("database.seed")
 
 
 async def seed_if_empty(db):
-    """Siembra el usuario admin y los establecimientos (+ counterparts, metrics)
-    solo si sus colecciones están vacías. No es una migración: no actualiza una
-    base ya poblada — ver Documentacion/07-operacion.md §4.1."""
-    await _seed_admin_user(db)
+    """Siembra los establecimientos (+ counterparts, metrics) solo si su colección está
+    vacía. No es una migración: no actualiza una base ya poblada — ver
+    Documentacion/07-operacion.md §4.1. El admin y las unidades ya no se siembran aquí: los
+    siembran sus módulos dueños (users, units) desde el lifespan (ADR-013)."""
     await _seed_establishments(db)
-
-
-async def _seed_admin_user(db):
-    user_count = await db.users.count_documents({})
-    if user_count != 0:
-        return
-
-    logger.info("Seeding default admin user...")
-    salt = bcrypt.gensalt()
-    hashed_pw = bcrypt.hashpw(settings.ADMIN_PASSWORD.encode('utf-8'), salt).decode('utf-8')
-    await db.users.insert_one({
-        "username": "admin",
-        "hashed_password": hashed_pw,
-        "full_name": "Administrador SLEP",
-        "role": "admin"
-    })
-    logger.info("Admin user seeded successfully with credentials from ADMIN_PASSWORD env var.")
 
 
 async def _seed_establishments(db):

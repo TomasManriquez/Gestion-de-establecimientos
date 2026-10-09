@@ -13,7 +13,8 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 199 89% 48%;
+    /* Primario oscurecido de 199 89% 48% (2,85:1 con texto blanco) a 200 98% 36% (>= 4,5:1) */
+    --primary: 200 98% 36%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96.1%;
@@ -30,7 +31,13 @@
 
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 199 89% 48%;
+    --ring: 200 98% 36%;
+
+    /* Estados de la interfaz (contraste >= 4,5:1 sobre blanco) */
+    --success: 160 84% 26%;
+    --success-foreground: 0 0% 100%;
+    --warning: 30 90% 30%;
+    --warning-foreground: 0 0% 100%;
 
     --radius: 0.75rem;
   }
@@ -63,6 +70,11 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 199 89% 48%;
+
+    --success: 160 70% 45%;
+    --success-foreground: 222.2 84% 4.9%;
+    --warning: 35 92% 55%;
+    --warning-foreground: 222.2 84% 4.9%;
   }
 
   * {

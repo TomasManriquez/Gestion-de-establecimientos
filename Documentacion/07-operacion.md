@@ -31,8 +31,8 @@ Documentación interactiva de la API en `http://localhost:8000/docs`.
 **Prerrequisito no evidente:** `backend/establishments.json` debe existir. Está **git-ignored**
 (`.gitignore:2-3`) porque contiene datos reales del servicio, así que un `git clone` limpio no
 lo trae. Sin ese archivo el backend arranca igual, registra
-`Seeding source file not found at ...` (`seed_service.py:44`) y la base queda vacía salvo
-el usuario admin. Hay que pedirlo a quien mantiene el proyecto.
+`Seeding source file not found at ...` (`seed_service.py`) y los establecimientos quedan vacíos;
+las unidades, las plataformas y el admin sí se crean (los siembran sus módulos). Hay que pedirlo a quien mantiene el proyecto.
 
 El código del backend está montado como volumen (`./backend:/app`), así que `--reload` recoge
 los cambios sin rebuild. **Una dependencia nueva en `requirements.txt` sí exige rebuild**
@@ -47,9 +47,16 @@ los cambios sin rebuild. **Una dependencia nueva en `requirements.txt` sí exige
 > corriendo sobre el `node_modules` **viejo** — sin la dependencia nueva. El síntoma es una
 > página en blanco en el navegador (el import falla en tiempo de módulo, sin `ErrorBoundary` que
 > lo capture) mientras el backend sigue respondiendo con normalidad, porque el error es 100%
-> del lado del bundling de Vite. **Correcto:** `docker compose up -d --build frontend` (recrea
-> el contenedor, y con él el volumen anónimo) — nunca `restart` después de tocar dependencias
-> del frontend.
+> del lado del bundling de Vite. **Correcto:** `docker compose up -d --build --renew-anon-volumes frontend`.
+> Recrear el contenedor **no basta**: `docker compose` conserva los volúmenes anónimos de la
+> versión anterior, y `--renew-anon-volumes` (`-V`) es lo que los descarta y los repuebla desde la
+> imagen nueva. Verificado en F5: tras `up -d --build frontend` (sin `-V`) Vite fallaba con
+> `Failed to resolve import "@radix-ui/react-tooltip"`; con `-V` resolvió. Nunca `restart` después
+> de tocar dependencias del frontend.
+>
+> 🧭 **F5 trae dependencias nuevas** (`@radix-ui/react-{alert-dialog,avatar,checkbox,dialog,dropdown-menu,popover,select,separator,switch,tooltip}`,
+> `cmdk`, `next-themes`, `sonner`): tras actualizar el código hay que correr `docker compose up -d --build --renew-anon-volumes frontend` (sin `-V` el `node_modules` viejo sigue montado).
+> Para producción, `docker compose -f docker-compose.prod.yml build frontend` ya las incluye (el build copia `package-lock.json`).
 
 ### 1.2 Sin Docker
 
@@ -60,6 +67,9 @@ cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 # MongoDB debe estar corriendo en localhost:27017 (default de config.py)
+# La app NO arranca sin las variables obligatorias de §2 (JWT_SECRET, ADMIN_PASSWORD,
+# BOOTSTRAP_ADMIN_EMAIL, ALLOWED_EMAIL_DOMAINS). Exportarlas antes, por ejemplo:
+export JWT_SECRET=... ADMIN_PASSWORD=... BOOTSTRAP_ADMIN_EMAIL=admin@slepllanquihue.cl ALLOWED_EMAIL_DOMAINS=slepllanquihue.cl
 python run.py        # uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -77,32 +87,93 @@ npm run dev
 > de no comitear ese cambio. Una variable de entorno con default resolvería ambos casos; hoy no
 > existe (ADR-008).
 
-### 1.3 Credenciales iniciales
+### 1.3 Credenciales iniciales y migración del admin
 
-Usuario `admin`, contraseña `ADMIN_PASSWORD` — que en desarrollo cae al default `admin123`
-(`config.py:14`). El usuario se siembra **solo si la colección `users` está vacía**
-(`seed_service.py:19-20`, función `_seed_admin_user`). Cambiar `ADMIN_PASSWORD` después del primer arranque **no** cambia
-la contraseña: hay que borrar el documento de `users` y reiniciar.
+Al arrancar, el `lifespan` ejecuta `run_bootstrap()` (`main.py`): primero las unidades, luego las
+plataformas y por último el admin global. Todo es idempotente y tolera que dos workers de Gunicorn
+corran a la vez.
+
+| Situación de la base | Qué ocurre con el admin |
+|---|---|
+| **Vacía** | Se crea `BOOTSTRAP_ADMIN_EMAIL` con la contraseña `ADMIN_PASSWORD`, `must_change_password: true`, en la unidad `AF-TI`, con `iam/admin` y `datos/admin`. |
+| **Con el admin de la versión anterior** (`username: "admin"`, sin correo) | Se **migra en el mismo `_id`**: recibe el correo, la unidad y los accesos; conserva su hash, así que la contraseña de siempre sigue funcionando. Entra con el correo o con `admin`. Los campos `username`, `hashed_password`, `role` y `full_name` se conservan (rollback). |
+| **Ya migrada** | No hace nada. |
+
+`ADMIN_PASSWORD` solo se usa si hay que **crear** el admin. Cambiarla después **no** cambia su
+contraseña (cambiarla desde el perfil: `POST /api/auth/password`).
+
+**Primer arranque tras actualizar un entorno existente (F3):**
+
+1. Agregar las variables nuevas a tu entorno (§2). En desarrollo ya están en `docker-compose.yml`.
+2. **Recrear el contenedor**, no solo reiniciarlo: `docker compose up -d --build backend`. Con el
+   código montado y `--reload`, el contenedor *ya creado* recarga el código nuevo pero conserva el
+   entorno viejo y falla con `Variable de entorno obligatoria sin definir: ADMIN_PASSWORD`. Es el
+   comportamiento buscado (T9), no un fallo. `--build` instala `email-validator`.
+3. Antes de desplegar en producción: backup (`scripts/backup-mongo.sh`) y verificar que `.env` tiene
+   `BOOTSTRAP_ADMIN_EMAIL` y `ALLOWED_EMAIL_DOMAINS` (`deploy.sh` lo valida).
+
+**Rollback:** volver al commit `pre-usuarios-f3` y redesplegar. El documento del admin conserva los
+campos legados, y el código anterior ignora los campos nuevos. Los usuarios creados con el
+código nuevo no existen para el código viejo (solo autentica al admin). Si hay que deshacer
+también los datos: borrar las colecciones `units` y `platforms`, quitar de `users` los documentos
+con `email`, y los campos nuevos del admin.
 
 ---
 
 ## 2. Variables de entorno
 
-Todas se leen en `backend/app/config.py` con `os.getenv`. **Todas tienen default**, lo que
-significa que ninguna omisión impide el arranque — ver la brecha de `04-seguridad-y-acceso.md` §6.
+Todas se leen en `backend/app/config.py` (`Settings`) al arrancar. **Las de identidad y secreto no
+tienen default: si falta una, la app no arranca** y el mensaje nombra la variable (T9; `04` §6).
 
 | Variable | Default | Significado | Dónde se define en prod |
 |---|---|---|---|
 | `MONGODB_URL` | `mongodb://localhost:27017` | Cadena de conexión completa. En producción incluye usuario, contraseña y `?authSource=admin` | `docker-compose.prod.yml`, compuesta |
 | `DATABASE_NAME` | `slep_llanquihue` | Nombre de la base | `.env` |
-| `JWT_SECRET` | *(valor público en el código)* | **Clave de firma HS256.** Debe ser único y secreto por despliegue. Generar con `python -c "import secrets; print(secrets.token_hex(64))"` | `.env` |
+| `JWT_SECRET` | **ninguno** | **Clave de firma HS256.** Obligatoria. Debe ser única y secreta por despliegue. Generar con `python -c "import secrets; print(secrets.token_hex(64))"` | `.env` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `180` | Vigencia del token en minutos. No hay refresh: al expirar hay que reautenticarse | `.env` (default `180` en el compose) |
-| `ADMIN_PASSWORD` | `admin123` | Contraseña del usuario admin **solo en el primer arranque**. Ignorada después | `.env` |
+| `ADMIN_PASSWORD` | **ninguno** | Contraseña del admin **solo si hay que crearlo** (§1.3). Obligatoria | `.env` |
+| `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | Correo del admin global sembrado o migrado. Debe pertenecer a `ALLOWED_EMAIL_DOMAINS` | `.env` |
+| `ALLOWED_EMAIL_DOMAINS` | **ninguno** | Dominios de correo permitidos, separados por comas (`slepllanquihue.cl`) | `.env` |
+| `PASSWORD_MIN_LENGTH` | `15` | Largo mínimo (NIST SP 800-63B-4: 15 como único factor). ≥ 8 | `.env` (default `15` en el compose) |
+| `PASSWORD_MAX_LENGTH` | `64` | Largo máximo permitido (≥ 64). Además se rechaza lo que pase de 72 bytes (límite de bcrypt) | `.env` (default `64`) |
+| `PASSWORD_REQUIRE_CHAR_CLASSES` | `0` | Tipos de caracteres exigidos, 0 a 4. NIST recomienda 0 | `.env` (default `0`) |
 | `MONGO_ROOT_USERNAME` | — | Usuario root de MongoDB. **Solo producción**, no lo lee `config.py` | `.env` |
 | `MONGO_ROOT_PASSWORD` | — | Contraseña root. **Solo producción** | `.env` |
 | `BACKUP_RETENTION_DAYS` | `7` | Días de retención de los dumps. **Solo producción**, lo lee `backup-mongo.sh` | `.env` |
 
 El frontend **no tiene variables de entorno** (ADR-008).
+
+### 2.1 Variables de la feature de usuarios: estado por fase
+
+**Ya implementadas en F3** (tabla de arriba): `JWT_SECRET`, `ADMIN_PASSWORD`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS` y la política de contraseñas. **Las demás son 🧭 de F4 y F6** y no existen todavía en `config.py`. Cada una debe declararse en **los cuatro archivos** (`config.py`, `docker-compose.yml`,
+`docker-compose.prod.yml`, `.env.production.template`; un test lo verifica) y evaluarse para el
+paso 1 de `scripts/deploy.sh`. **Las de identidad y secreto no tienen default: si falta una, la app
+no arranca.**
+
+| Variable | Default | Significado |
+|---|---|---|
+| `ALLOWED_EMAIL_DOMAINS` | **ninguno** | Lista separada por comas (`slepllanquihue.cl`). Valida las altas y el claim `hd` de Google |
+| `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | Correo del admin sembrado o migrado |
+| `PUBLIC_BASE_URL` | **ninguno** | URL pública base (https, salvo `localhost`); forma el enlace de los correos |
+| `MAIL_MODE` | **ninguno** | `gmail` (envío real) o `console` (escribe el mensaje en el log; solo desarrollo, el arranque lo rechaza si `PUBLIC_BASE_URL` no es `localhost` o `127.0.0.1`). Con `console` no hacen falta las cuatro variables de Gmail/Google siguientes |
+| `GMAIL_SENDER_ADDRESS` | **ninguno** | Casilla remitente dedicada, no personal |
+| `GMAIL_REFRESH_TOKEN` | **ninguno** | **Secreto.** Token de la casilla remitente, obtenido una vez (§9). Trátese como `JWT_SECRET` |
+| `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Hoy está en el `.env` de la raíz pero **no llega al contenedor** (ningún compose lo nombra) |
+| `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Lo usa el refresco del token de Gmail |
+| `PASSWORD_MIN_LENGTH` | `15` | Mínimo ≥ 8 (NIST SP 800-63B-4: 15 sin MFA) |
+| `PASSWORD_MAX_LENGTH` | `64` | Mínimo permitido 64; la política también rechaza lo que pase de 72 bytes (límite de bcrypt) |
+| `PASSWORD_REQUIRE_CHAR_CLASSES` | `0` | De 0 a 4. NIST recomienda 0 |
+| `JWT_SECRET`, `ADMIN_PASSWORD` | **ninguno** (hoy tienen default, D2) | Pasan a ser obligatorias; `docker-compose.yml` (desarrollo) debe definir `ADMIN_PASSWORD` |
+
+**Cada variable pasa a ser obligatoria en la fase que la usa**, no antes: F3 exige
+`BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `JWT_SECRET`, `ADMIN_PASSWORD` y la política de
+contraseñas; F4 agrega `MAIL_MODE` y `PUBLIC_BASE_URL` (y las de Gmail/Google si `MAIL_MODE=gmail`);
+F6 agrega `GOOGLE_CLIENT_ID`. Mientras la cuenta remitente no exista se trabaja con
+`MAIL_MODE=console`.
+
+Un valor de la política fuera de rango impide el arranque con un mensaje claro. Los vencimientos
+de los enlaces (72 h invitación, 24 h restablecimiento) y el tope de 200 ítems por lote son
+constantes de código, no variables.
 
 `.env.production.template` es la plantilla a copiar como `.env` en el servidor. `.env` está
 git-ignored.
@@ -123,14 +194,25 @@ python -m pytest -k "INT02" -v                         # por patrón
 ```
 
 `pytest.ini` ya incluye `-v --tb=short` en `addopts`. Nomenclatura:
-`test_BE0x` = backend unitario, `test_INT0x` = integración con `TestClient`.
+`test_BE<NN>` = backend unitario, `test_INT<NN>` = integración con `TestClient` (BE09 a BE41 e INT03 a INT08 son de la feature de usuarios), `test_FM01` = el doble de MongoDB.
 
-> 🔸 **BRECHA:** `pytest-asyncio`, `pytest`, `mongomock` y `httpx` **no están en
-> `requirements.txt`**, pese a que `conftest.py` importa `pytest_asyncio` y `httpx`. No existe
-> `requirements-dev.txt`. Un entorno limpio instalado desde `requirements.txt` no puede correr
-> los tests: hay que instalar esas dependencias a mano. El docstring de `conftest.py` menciona
-> `mongomock`, pero el código real usa `unittest.mock` — la estrategia descrita y la
-> implementada no coinciden.
+**Dependencias de test:** `pip install -r backend/requirements-dev.txt` (`pytest`,
+`pytest-asyncio`, `httpx`). Con el venv del proyecto sin `pip`, `uv pip install -r requirements-dev.txt`.
+
+**Estrategia (`tests/conftest.py`):**
+- **Ningún test toca una base real.** Un fixture automático reemplaza `app.main.db_service` y
+  `run_bootstrap`, de modo que `TestClient(app)` no ejecuta el `lifespan` contra la MongoDB de
+  desarrollo (D25).
+- Las variables obligatorias de §2 se fijan al inicio de `conftest.py` con valores de prueba.
+- Los tests de reglas de negocio de la feature usan `tests/fake_mongo.py`: una MongoDB en memoria
+  con índices únicos (incluidos los parciales) que lanza el `DuplicateKeyError` real. Se verifica
+  a sí misma en `test_FM01_*`. Fixtures: `fake_db`, `seed_users`, `bearer_for`, `prepare_org`.
+- Los usuarios de prueba (`ADMIN_USER`, `DATOS_ADMIN_USER`, `EDITOR_USER`, `VIEWER_USER`,
+  `NO_DATOS_USER`) tienen el modelo nuevo. `authenticated_as(user)` emite un JWT real.
+- bcrypt corre con costo 4 en los tests (`_fast_bcrypt`).
+- El doble no es MongoDB: lo que no simula lanza `NotImplementedError`. Para cambios de
+  índices o consultas nuevas, verificar además contra un MongoDB real desechable
+  (`docker run --rm -p 127.0.0.1:27018:27017 mongo:latest`).
 
 **Frontend** — vitest + Testing Library con jsdom:
 
@@ -139,7 +221,10 @@ cd frontend
 npm test                # vitest run
 ```
 
-Suites `test_FE00` a `test_FE05` e `test_INT01`, en `frontend/src/tests/`.
+Suites `test_FE00` a `test_FE05`, `test_FE06` a `test_FE10`, `test_FE12`, `test_FE16`, `test_INT01` e `test_INT09`, en `frontend/src/tests/`.
+`src/tests/setup.js` agrega a jsdom las APIs que Radix usa y jsdom no implementa (`hasPointerCapture`,
+`scrollIntoView`, `matchMedia`); `usersFixtures.js` (no es un test) trae los datos y el enrutador de
+`axios.get` de las pruebas de la vista de usuarios. `npm run lint` **no se puede ejecutar** (D20).
 
 **Evidencia observable (regla 1 de `GEMINI.md`):** presentar siempre la salida real de estos
 comandos. Un código de salida sin stdout visible no cuenta como verificación. Si el entorno no
@@ -165,8 +250,8 @@ docker compose restart backend
 ```
 
 **Esto destruye toda edición hecha desde la aplicación.** No ejecutarlo en producción sin backup
-previo (§6.2). Nótese que `users` se deja intacta a propósito: borrarla re-sembraría el admin
-con `ADMIN_PASSWORD`.
+previo (§6.2). Nótese que `users`, `units` y `platforms` se dejan intactas a propósito: son datos de la
+feature de usuarios y no vienen de `establishments.json`.
 
 > ✅ El seeding ya incluye `location` en `est_doc` (`02` §8, D1 resuelto), así que una recarga
 > conserva las coordenadas de los 74/78 registros que las traen en `establishments.json`. El
@@ -220,9 +305,9 @@ bash scripts/deploy.sh
 
 Seis pasos, con `set -euo pipefail`:
 
-1. **Validación** — `.env` presente, Docker corriendo, y las cinco variables críticas
-   (`MONGO_ROOT_USERNAME`, `MONGO_ROOT_PASSWORD`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATABASE_NAME`)
-   definidas y no vacías. Aborta si falta alguna.
+1. **Validación** — `.env` presente, Docker corriendo, y las siete variables críticas
+   (`MONGO_ROOT_USERNAME`, `MONGO_ROOT_PASSWORD`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATABASE_NAME`,
+   `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`) definidas y no vacías. Aborta si falta alguna.
 2. **Backup preventivo** — ejecuta `backup-mongo.sh` dentro del contenedor `backup`, si está
    corriendo. No aborta si falla (contempla el primer deploy).
 3. `git pull --ff-only`.
@@ -309,6 +394,9 @@ lo evidencia.
 | Agrega un archivo estático o una ruta del frontend | El `try_files $uri $uri/ /index.html` de `nginx.conf` ya cubre el fallback de React Router. Sin cambios. |
 | Cambia el endpoint de healthcheck | `Dockerfile.prod` (backend), `docker-compose.prod.yml` (los tres healthchecks), `nginx.conf` (`/health`). |
 | Toca `auth/`, `ProtectedRoute` o `database_service` | Punto único de falla: rama aislada, punto de restauración, y tests de autenticación pasando antes y después (regla 3 de `GEMINI.md`). |
+| 🧭 Agrega un componente de shadcn | `npx shadcn@latest add …` (nunca descargar a mano ni usar `--overwrite` sin aprobación); revisar con `--dry-run` las dependencias `@radix-ui/*` que trae, porque obligan a reconstruir la imagen del frontend. Requiere corregir antes `components.json` (D18). |
+| 🧭 Envía correo desde el backend | `GMAIL_*` y `GOOGLE_*` en los cuatro archivos; el consentimiento inicial de la casilla es una tarea manual (§9). |
+| 🧭 Agrega un contador o una colección con TTL | `ensure_indexes()` con `expireAfterSeconds`; comprobar que sigue siendo idempotente. |
 
 ---
 
@@ -317,10 +405,40 @@ lo evidencia.
 | Síntoma | Causa probable | Verificación |
 |---|---|---|
 | La base queda vacía al arrancar | Falta `backend/establishments.json` (git-ignored) | `docker compose logs backend \| grep "Seeding source file not found"` |
-| El login falla con `admin` / `admin123` | `users` ya existía, así que `ADMIN_PASSWORD` se ignoró | `db.users.findOne({username:"admin"})` |
+| El backend no arranca: `Variable de entorno obligatoria sin definir: …` | Falta una variable de §2 (contenedor creado con el compose anterior) | `docker compose up -d --build backend`; §1.3 |
+| El login del admin falla | El admin ya existía: `ADMIN_PASSWORD` solo se usa para crearlo. Entrar con el correo o con `admin` y la contraseña vigente | `db.users.findOne({email:"<BOOTSTRAP_ADMIN_EMAIL>"})` · §1.3 |
+| Un usuario recién creado no puede entrar | Queda `invited` y aún no hay envío de correo (F4) | `invitation.last_error == "mail_not_configured"` en `GET /api/users/{id}` |
 | Todas las llamadas a `/api` fallan en dev | Frontend fuera de Docker con el proxy apuntando a `backend:8000` | §1.2 |
 | El mapa de la ficha dice "Ubicación no disponible" | La base se re-sembró y se perdió `location` | `db.establishments.countDocuments({location:{$exists:true}})` · §4.1 |
 | El dashboard muestra ceros | No hay métricas del año 2026, que está hardcodeado | `db.metrics.countDocuments({year:2026})` · `03` §5.16 |
-| Sesión que se cierra sola | Token expirado (180 min) o un `401` que disparó el interceptor | `04` §1 |
+| Sesión que se cierra sola | Token expirado (180 min), usuario desactivado, contraseña cambiada, o un `401` que disparó el interceptor | `04` §1 |
 | El backend pasa el healthcheck pero la app no funciona | `GET /` no consulta MongoDB | `03` §5.1 |
 | El arranque falla al crear un índice | Se cambió la definición de un índice existente | `docker compose logs backend` · §7 |
+
+---
+
+## 9. 🧭 DISEÑO F2: casilla remitente de Gmail (checklist manual)
+
+> **Estado: sin implementar.** Son tareas de la consola de Google Cloud y de Google Workspace
+> que **ni el código ni un agente pueden hacer**: las ejecuta una persona con permisos de
+> administrador. Decisión y riesgos: ADR-012.
+
+1. [ ] **Elegir o pedir a TI la casilla remitente**: `@slepllanquihue.cl`, dedicada
+   (notificaciones o no-reply), no personal. Si fuera personal, al irse su dueño o cambiar su
+   contraseña se corta el envío para todos.
+2. [ ] En el proyecto de Google Cloud del cliente OAuth existente, abrir la **pantalla de
+   consentimiento** y confirmar que es de tipo **Internal**. Si fuera *External* en estado
+   *Testing*, Google caduca el refresh token a los **7 días**.
+3. [ ] Agregar el scope `https://www.googleapis.com/auth/gmail.send` (y ningún otro) al cliente.
+4. [ ] Con la casilla remitente, ejecutar **una sola vez** el script
+   `backend/scripts/gmail_consent.py` (instala `google-auth-oauthlib` solo donde se ejecute; no
+   va en la imagen). Imprime el **refresh token** por pantalla; no lo escribe en ningún archivo.
+5. [ ] Guardar el token como secreto en el `.env` del servidor (`GMAIL_REFRESH_TOKEN`) junto con
+   `GMAIL_SENDER_ADDRESS`. **Nunca** en el repositorio ni en un chat.
+6. [ ] Agregar `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` al `.env` del servidor y a los dos
+   compose (hoy no llegan al contenedor).
+7. [ ] **Si cambia la contraseña de la casilla remitente**, Google revoca los tokens con scopes de
+   Gmail: repetir los pasos 4 y 5. Mientras tanto los usuarios quedan `invited` y el error se ve
+   en `users.invitation.last_error`; al restablecer el envío, el admin reenvía las invitaciones.
+8. [ ] Confirmar con TI que el filtro de salida o de spam del dominio no bloquea los correos de la
+   casilla remitente antes de la primera alta masiva.

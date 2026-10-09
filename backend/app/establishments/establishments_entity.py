@@ -144,3 +144,11 @@ class EstablishmentListResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class RedactedPlaceholderError(Exception):
+    """Llegó "[REDACTED]" en un campo secreto y no hay un valor almacenado equivalente al que
+    corresponda. El backend no adivina: rechaza (422) en vez de guardar el marcador."""
+    def __init__(self, field: str):
+        super().__init__(f"El valor de {field} es el marcador [REDACTED] y no hay un valor almacenado equivalente")
+        self.field = field
