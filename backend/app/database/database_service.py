@@ -80,6 +80,10 @@ class DatabaseService:
         await self.db.auth_tokens.create_index("token_hash", unique=True, background=True)
         await self.db.auth_tokens.create_index("expires_at", expireAfterSeconds=0, background=True)
 
+        # rate_limits (ADR-014): una clave por contador y TTL que cierra la ventana sola
+        await self.db.rate_limits.create_index("key", unique=True, background=True)
+        await self.db.rate_limits.create_index("expires_at", expireAfterSeconds=0, background=True)
+
         # audit_log (solo de agregado): la consulta habitual es "lo más reciente" y por objeto/actor/lote
         await self.db.audit_log.create_index([("at", -1)], background=True)
         await self.db.audit_log.create_index([("target_type", 1), ("target_id", 1), ("at", -1)], background=True)

@@ -1,11 +1,12 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
-from app.auth.auth_service import auth_service, require_access
+from app.auth.auth_service import auth_service, client_ip, rate_limited_http, require_access
 from app.auth.auth_entity import (AccessContext, AccessSummary, ChangePasswordRequest, InvalidLink, LoginRequest,
-                                  PLATFORM_DATOS, PasswordPolicy, PasswordPolicyError, SetPasswordRequest, Token,
-                                  UserResponse)
+                                  LOGIN_ACCOUNT_LIMIT, LOGIN_IP_LIMIT, LOGIN_WINDOW_SECONDS, PLATFORM_DATOS, PasswordPolicy,
+                                  PasswordPolicyError, REDEEM_IP_LIMIT, REDEEM_WINDOW_SECONDS, RateLimited,
+                                  SetPasswordRequest, Token, UserResponse)
 from app.users.users_entity import UserNotFound
 from app.users.users_service import users_service
 
@@ -34,26 +35,40 @@ def _unauthorized() -> HTTPException:
     )
 
 
+async def _limited_login(request: Request, login: str, password: str) -> dict:
+    """Login con límite por (cuenta + IP) y por IP (ADR-014). Cuenta inexistente, desactivada o con
+    clave errónea cuentan igual y responden igual, así que el límite no revela qué cuentas existen.
+    El límite incluye la IP a propósito: un tercero no puede dejar inutilizable la cuenta de otro."""
+    ip = client_ip(request)
+    account_key = auth_service.rate_key("login-account", ip, login.strip().lower())
+    ip_key = auth_service.rate_key("login-ip", ip)
+    try:
+        await auth_service.rate_guard([(account_key, LOGIN_ACCOUNT_LIMIT), (ip_key, LOGIN_IP_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
+    user = await auth_service.authenticate_user(login, password)
+    if not user:
+        await auth_service.rate_hit(account_key, LOGIN_WINDOW_SECONDS)
+        await auth_service.rate_hit(ip_key, LOGIN_WINDOW_SECONDS)
+        raise _unauthorized()
+    await auth_service.rate_clear(account_key)
+    return user
+
+
 @router.post("/login", response_model=Token)
-async def login_for_access_token(payload: LoginRequest):
+async def login_for_access_token(payload: LoginRequest, request: Request):
     """
     JSON Login endpoint. `username` acepta el correo o, mientras dure la compatibilidad, el
-    username legado.
+    username legado. Responde 429 con `Retry-After` al superar el límite de intentos fallidos.
     """
-    user = await auth_service.authenticate_user(payload.username, payload.password)
-    if not user:
-        raise _unauthorized()
-    return _issue_token(user)
+    return _issue_token(await _limited_login(request, payload.username, payload.password))
 
 @router.post("/login-form", response_model=Token)
-async def login_for_access_token_form(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login_for_access_token_form(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     """
     Form-url-encoded Login endpoint (standard for Swagger UI)
     """
-    user = await auth_service.authenticate_user(form_data.username, form_data.password)
-    if not user:
-        raise _unauthorized()
-    return _issue_token(user)
+    return _issue_token(await _limited_login(request, form_data.username, form_data.password))
 
 @router.post("/logout")
 async def logout():
@@ -114,15 +129,21 @@ async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext
 
 
 @router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
-async def set_password(payload: SetPasswordRequest):
+async def set_password(payload: SetPasswordRequest, request: Request):
     """Canje del enlace de invitación o de restablecimiento (pública: aún no hay sesión).
 
     Todo fallo del enlace responde el mismo 400, sin distinguir usado, vencido o inexistente. Una
     contraseña que incumple la política responde 422 y NO consume el enlace. No devuelve token:
     la persona entra después con su correo y la contraseña recién definida."""
+    ip_key = auth_service.rate_key("redeem-ip", client_ip(request))
+    try:
+        await auth_service.rate_guard([(ip_key, REDEEM_IP_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
     try:
         await auth_service.redeem_link(payload.token, payload.password)
     except InvalidLink:
+        await auth_service.rate_hit(ip_key, REDEEM_WINDOW_SECONDS)       # adivinar enlaces cuesta intentos
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={
             "code": "invalid_or_expired_link",
             "message": "El enlace no es válido o ya venció. Pide a un administrador que te envíe uno nuevo."})

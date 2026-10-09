@@ -3,7 +3,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth.auth_entity import AccessContext, IAM_ADMIN, PLATFORM_IAM
-from app.auth.auth_service import auth_service, require_access
+from app.auth.auth_entity import RateLimited, SEND_ACTOR_LIMIT, SEND_TARGET_LIMIT, SEND_WINDOW_SECONDS
+from app.auth.auth_service import auth_service, rate_limited_http, require_access
 from app.mail.mail_service import MailError
 from app.users.users_entity import (AccessGrant, EstablishmentPosition, User, UserAdminUpdate,
                                     UserConflict, UserCreate, UserInvalid, UserListResponse, UserMe,
@@ -15,6 +16,19 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 # Todo `/api/users/*` es del admin global, salvo `/me` (cualquier usuario autenticado).
 _ANY_USER = Depends(require_access(None))
 _IAM_ADMIN = Depends(require_access(PLATFORM_IAM, IAM_ADMIN))
+
+
+async def _guard_send(actor_id: str, target_id: str) -> None:
+    """Reenvío y restablecimiento: tope por destinatario (su bandeja) y por administrador (ADR-014).
+    Cada intento cuenta, haya salido el correo o no."""
+    target_key = auth_service.rate_key("send-target", target_id)
+    actor_key = auth_service.rate_key("send-actor", actor_id)
+    try:
+        await auth_service.rate_guard([(target_key, SEND_TARGET_LIMIT), (actor_key, SEND_ACTOR_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
+    await auth_service.rate_hit(target_key, SEND_WINDOW_SECONDS)
+    await auth_service.rate_hit(actor_key, SEND_WINDOW_SECONDS)
 
 
 def _http(exc: Exception) -> HTTPException:
@@ -134,6 +148,7 @@ async def resend_invitation(user_id: str, ctx: AccessContext = _IAM_ADMIN):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
     if user["status"] != "invited":
         raise _http(UserConflict("Solo se puede reenviar la invitación a un usuario invitado", "not_invited"))
+    await _guard_send(ctx.user_id, user_id)
     await auth_service.send_invitation(user, ctx.user_id)
     return await users_service.find_by_id(user_id)
 
@@ -147,6 +162,7 @@ async def request_password_reset(user_id: str, ctx: AccessContext = _IAM_ADMIN):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
     if user["status"] != "active":
         raise _http(UserConflict("Solo se puede restablecer la contraseña de un usuario activo", "not_active"))
+    await _guard_send(ctx.user_id, user_id)
     try:
         expires = await auth_service.send_password_reset(user, ctx.user_id)
     except MailError as exc:

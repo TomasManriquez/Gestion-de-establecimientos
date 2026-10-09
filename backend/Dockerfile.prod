@@ -19,11 +19,15 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/')" || exit 1
 
-# Gunicorn with Uvicorn workers — no hot-reload, multiple workers for concurrency
+# Gunicorn with Uvicorn workers — no hot-reload, multiple workers for concurrency.
+# --forwarded-allow-ips "*": el rate limiting (ADR-014) necesita la IP real del cliente, que nginx
+# deja en X-Forwarded-For. Es seguro solo porque el backend NO publica puerto en
+# docker-compose.prod.yml (`expose`): lo alcanzan únicamente los contenedores de la red interna.
 CMD ["gunicorn", "app.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--workers", "2", \
      "--bind", "0.0.0.0:8000", \
+     "--forwarded-allow-ips", "*", \
      "--timeout", "120", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

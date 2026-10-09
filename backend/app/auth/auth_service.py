@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import math
 import re
 import secrets
 import time
@@ -18,7 +19,7 @@ from pymongo.errors import DuplicateKeyError
 from app.audit.audit_entity import AuditAction, AuditTarget
 from app.audit.audit_service import audit_service
 from app.auth.auth_entity import (AccessContext, COMMON_PASSWORDS, CONTEXT_WORDS, INVITE_TTL_HOURS, InvalidLink,
-                                  PURPOSE_INVITE, PURPOSE_RESET, PasswordPolicyError, RESET_TTL_HOURS, SEQUENCES,
+                                  PURPOSE_INVITE, PURPOSE_RESET, PasswordPolicyError, RESET_TTL_HOURS, RateLimited, SEQUENCES,
                                   SET_PASSWORD_PATH, render_invitation, render_password_reset)
 from app.config import settings
 from app.database.database_service import db_service
@@ -137,6 +138,58 @@ class AuthService:
             return None
         await users_service.touch_login(user["_id"])
         return user
+
+    # ══ Rate limiting (ADR-014) ═════════════════════════════════════════════════════════════
+    # Ventana fija con contadores en `rate_limits` (índice único por `key` y TTL en `expires_at`),
+    # compartidos entre los workers de Gunicorn. Sin Redis. Si el almacén falla, el limitador no
+    # bloquea (fail-open) y lo deja en ERROR: la autenticación depende de esa misma base.
+    @staticmethod
+    def rate_key(scope: str, *parts: str) -> str:
+        """Clave opaca: lo que escribió el cliente (correo, token) se guarda solo como hash."""
+        digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
+        return f"{scope}:{digest}"
+
+    async def rate_guard(self, checks: list) -> None:
+        """`checks` = [(clave, límite)]. Lanza `RateLimited` si alguno ya llegó a su límite."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        worst = 0
+        try:
+            for key, limit in checks:
+                doc = await db_service.db.rate_limits.find_one({"key": key, "expires_at": {"$gt": now}})
+                if doc is not None and doc.get("count", 0) >= limit:
+                    worst = max(worst, math.ceil((doc["expires_at"] - now).total_seconds()))
+        except Exception:  # noqa: BLE001
+            logger.error("rate_limits no disponible: el límite no se aplicó", exc_info=True)
+            return
+        if worst:
+            raise RateLimited(max(worst, 1))
+
+    async def rate_hit(self, key: str, window_seconds: int) -> int:
+        """Suma 1 al contador de la clave (abre la ventana si no hay una vigente). Devuelve el conteo."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        col = None
+        try:
+            col = db_service.db.rate_limits
+            doc = await col.find_one_and_update({"key": key, "expires_at": {"$gt": now}}, {"$inc": {"count": 1}},
+                                                return_document=ReturnDocument.AFTER)
+            if doc is not None:
+                return doc["count"]
+            try:
+                await col.update_one({"key": key}, {"$set": {"count": 1, "expires_at": now + timedelta(seconds=window_seconds)}},
+                                     upsert=True)
+            except DuplicateKeyError:            # otro worker abrió la ventana a la vez: sumar a la suya
+                doc = await col.find_one_and_update({"key": key}, {"$inc": {"count": 1}}, return_document=ReturnDocument.AFTER)
+                return doc["count"] if doc else 1
+            return 1
+        except Exception:  # noqa: BLE001
+            logger.error("rate_limits no disponible: el intento no se contó", exc_info=True)
+            return 0
+
+    async def rate_clear(self, key: str) -> None:
+        try:
+            await db_service.db.rate_limits.delete_many({"key": key})
+        except Exception:  # noqa: BLE001
+            logger.error("rate_limits no disponible: no se pudo limpiar el contador", exc_info=True)
 
     # ══ Enlaces de un solo uso: invitación y restablecimiento (ADR-012) ═══════════════════
     @staticmethod
@@ -277,6 +330,22 @@ class AuthService:
 
 
 auth_service = AuthService()
+
+
+def rate_limited_http(exc: RateLimited) -> HTTPException:
+    """429 con `Retry-After`. El mismo mensaje exista o no la cuenta."""
+    minutes = max(1, math.ceil(exc.retry_after / 60))
+    return HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={"code": "rate_limited", "message": f"Demasiados intentos. Espera {minutes} min e inténtalo de nuevo."},
+        headers={"Retry-After": str(exc.retry_after)})
+
+
+def client_ip(request) -> str:
+    """IP del cliente según el servidor ASGI. En producción Gunicorn aplica `--forwarded-allow-ips`
+    y `request.client.host` ya es la dirección real que nginx puso en X-Forwarded-For. Nunca se lee
+    la cabecera a mano: cualquiera puede enviarla."""
+    return request.client.host if request.client else "unknown"
 
 
 def require_access(platform: Optional[str], roles: Optional[Iterable[str]] = None):

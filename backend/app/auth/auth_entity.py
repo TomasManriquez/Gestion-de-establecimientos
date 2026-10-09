@@ -91,12 +91,29 @@ RESET_TTL_HOURS = 24
 PURPOSE_INVITE = "invite"
 PURPOSE_RESET = "reset"
 SET_PASSWORD_PATH = "/definir-contrasena"
+# Rate limiting (ADR-014). Ventana fija; el contador vive en `rate_limits` con TTL.
+LOGIN_ACCOUNT_LIMIT = 5        # fallos por (cuenta + IP) en la ventana: no bloquea la cuenta para todo el mundo
+LOGIN_IP_LIMIT = 30            # fallos por IP, para frenar el recorrido de muchas cuentas
+LOGIN_WINDOW_SECONDS = 15 * 60
+REDEEM_IP_LIMIT = 10           # canjes fallidos por IP (adivinar enlaces)
+REDEEM_WINDOW_SECONDS = 15 * 60
+SEND_TARGET_LIMIT = 5          # envíos (reenvío o restablecimiento) por usuario destinatario: no llenar su bandeja
+SEND_ACTOR_LIMIT = 60          # envíos por administrador
+SEND_WINDOW_SECONDS = 60 * 60
 INVITE_BATCH_LIMIT = 200       # cuota de Gmail: el envío masivo se parte en lotes de 200, en serie
 
 
 class InvalidLink(Exception):
     """El enlace no se puede canjear. Usado, vencido, inexistente o de un usuario en otro estado
     responden igual: no se distingue el motivo hacia afuera."""
+
+
+class RateLimited(Exception):
+    """Se superó un límite. `retry_after` son los segundos hasta que se libera la ventana."""
+
+    def __init__(self, retry_after: int):
+        super().__init__("rate limited")
+        self.retry_after = retry_after
 
 
 class PasswordPolicyError(Exception):
