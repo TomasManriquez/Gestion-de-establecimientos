@@ -18,7 +18,7 @@ async def list_platforms(ctx: AccessContext = Depends(require_access(PLATFORM_IA
 @router.patch("/{platform_id}", response_model=Platform)
 async def update_platform(platform_id: str, payload: PlatformUpdate,
                           ctx: AccessContext = Depends(require_access(PLATFORM_IAM, IAM_ADMIN))):
-    updated = await platforms_service.update(platform_id, payload)
+    updated = await platforms_service.update(platform_id, payload, ctx.user_id)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Platform {platform_id} not found")
     return updated

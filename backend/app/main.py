@@ -5,6 +5,8 @@ import logging
 
 from app.config import settings
 from app.database.database_service import db_service
+from app.audit.audit_controller import router as audit_router
+from app.audit.audit_service import AuditStatusMiddleware
 from app.auth.auth_controller import router as auth_router
 from app.auth.auth_service import auth_service
 from app.users.users_controller import router as users_router
@@ -57,7 +59,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Audit-Status", "Retry-After"],
 )
+# Avisa en la respuesta si una escritura de auditoría falló (ADR-014). Pure ASGI, ver audit_service.
+app.add_middleware(AuditStatusMiddleware)
 
 # Include Routers
 app.include_router(auth_router)
@@ -68,6 +73,7 @@ app.include_router(analytics_router)
 app.include_router(users_router)
 app.include_router(units_router)
 app.include_router(platforms_router)
+app.include_router(audit_router)
 
 @app.get("/")
 async def root():

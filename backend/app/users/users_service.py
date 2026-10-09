@@ -9,6 +9,8 @@ from bson import ObjectId
 from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
+from app.audit.audit_entity import AuditAction, AuditTarget
+from app.audit.audit_service import audit_service, diff
 from app.config import settings
 from app.database.database_service import db_service
 from app.establishments.establishments_service import establishments_service
@@ -35,6 +37,11 @@ USERS_LISTING_PROJECTION = {
     "is_slep_staff": 1, "unit_id": 1, "rbd": 1, "positions": 1, "status": 1,
     "access": 1, "invitation": 1, "last_login_at": 1, "last_activity_at": 1,
 }
+
+
+# Campos de la persona que se auditan como {campo: [antes, después]}
+AUDITED_FIELDS = ("first_name", "last_name", "email", "personal_phone", "work_extension",
+                  "is_slep_staff", "unit_id", "rbd", "positions")
 
 
 def _utcnow() -> datetime:
@@ -183,7 +190,9 @@ class UsersService:
         """normalizar -> validar -> resolver referencias en lote -> detectar duplicados
         (dentro del lote y contra la base) -> insertar. `status` y `local_password_hash` son
         opciones internas (las usa el bootstrap): ningún body HTTP las puede fijar."""
+        explicit_bulk = bulk_id
         bulk_id = bulk_id or uuid.uuid4().hex
+        audit_bulk = explicit_bulk or (bulk_id if len(items) > 1 else None)   # una alta suelta no es una operación masiva
         results: List[dict] = [{"index": i, "status": "pending", "id": None, "errors": []} for i in range(len(items))]
         parsed: Dict[int, UserCreate] = {}
 
@@ -243,6 +252,11 @@ class UsersService:
                     "field": "email", "code": "duplicate", "message": "Ya existe un usuario con ese correo"}])
                 continue
             results[i].update(status="created", id=str(inserted.inserted_id))
+            await audit_service.record(
+                actor_id, AuditAction.USER_CREATE, AuditTarget.USER, str(inserted.inserted_id),
+                {"email": [None, u.email], "is_slep_staff": [None, u.is_slep_staff],
+                 "unit_id": [None, u.unit_id], "rbd": [None, u.rbd], "positions": [None, [p.value if hasattr(p, "value") else p for p in u.positions]]},
+                audit_bulk)
 
         created = sum(1 for r in results if r["status"] in ("created", "ok"))
         return {"bulk_id": bulk_id, "dry_run": dry_run, "total": len(items), "created": created,
@@ -320,7 +334,15 @@ class UsersService:
             await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": to_set})
         except DuplicateKeyError:
             raise UserConflict("Ya existe un usuario con ese correo", "duplicate", field="email")
-        return await self.find_by_id(user_id)
+        updated = await self.find_by_id(user_id)
+        await self._audit_changes(actor_id, AuditAction.USER_UPDATE, current, updated)
+        return updated
+
+    async def _audit_changes(self, actor_id, action, current: dict, updated: dict, fields=AUDITED_FIELDS) -> None:
+        before = _stringify({f: current.get(f) for f in fields})
+        changes = diff(before, {f: updated.get(f) for f in fields}, fields)
+        if changes:
+            await audit_service.record(actor_id, action, AuditTarget.USER, str(current["_id"]), changes)
 
     async def update_self(self, user_id: str, data: UserSelfUpdate) -> dict:
         """C19: solo teléfono y anexo. El tipo `UserSelfUpdate` ya hace imposible tocar otra cosa."""
@@ -330,7 +352,10 @@ class UsersService:
             changes["updated_at"] = _utcnow()
             changes["updated_by"] = current["_id"]
             await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": changes})
-        return await self.find_by_id(user_id)
+        updated = await self.find_by_id(user_id)
+        await self._audit_changes(user_id, AuditAction.USER_UPDATE, current, updated,
+                                  fields=("personal_phone", "work_extension"))
+        return updated
 
     # ══ Estado (soft delete, C9) ═══════════════════════════════════════════════
     async def _count_other_active_iam_admins(self, exclude_id) -> int:
@@ -351,6 +376,8 @@ class UsersService:
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "status": "disabled", "disabled_at": now, "updated_at": now, "updated_by": _oid(actor_id)}})
         await units_service.clear_head_for_user(str(current["_id"]))     # Q8
+        await audit_service.record(actor_id, AuditAction.USER_DISABLE, AuditTarget.USER, str(current["_id"]),
+                                   {"status": [current["status"], "disabled"]})
         return await self.find_by_id(user_id)
 
     async def enable(self, user_id: str, actor_id: Optional[str]) -> dict:
@@ -362,6 +389,8 @@ class UsersService:
         now = _utcnow()
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "status": new_status, "disabled_at": None, "updated_at": now, "updated_by": _oid(actor_id)}})
+        await audit_service.record(actor_id, AuditAction.USER_ENABLE, AuditTarget.USER, str(current["_id"]),
+                                   {"status": ["disabled", new_status]})
         return await self.find_by_id(user_id)
 
     # ══ Accesos por plataforma ═════════════════════════════════════════════════
@@ -378,6 +407,10 @@ class UsersService:
         access = [a for a in current.get("access", []) if a.get("platform_id") != platform_id] + [entry]
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "access": access, "updated_at": now, "updated_by": _oid(actor_id)}})
+        previous = next((a.get("role") for a in current.get("access", []) if a.get("platform_id") == platform_id), None)
+        if previous != role:
+            await audit_service.record(actor_id, AuditAction.ACCESS_GRANT, AuditTarget.USER, str(current["_id"]),
+                                       {"platform_id": platform_id, "role": [previous, role]})
         return await self.find_by_id(user_id)
 
     async def revoke_access(self, user_id: str, platform_id: str, actor_id: Optional[str]) -> dict:
@@ -389,6 +422,10 @@ class UsersService:
         now = _utcnow()
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "access": access, "updated_at": now, "updated_by": _oid(actor_id)}})
+        previous = next((a.get("role") for a in current.get("access", []) if a.get("platform_id") == platform_id), None)
+        if previous is not None:
+            await audit_service.record(actor_id, AuditAction.ACCESS_REVOKE, AuditTarget.USER, str(current["_id"]),
+                                       {"platform_id": platform_id, "role": [previous, None]})
         return await self.find_by_id(user_id)
 
     # ══ Sesión y credenciales (las usa `auth`, nunca al revés) ═════════════════

@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
+from app.audit.audit_entity import AuditAction, AuditTarget
+from app.audit.audit_service import audit_service, diff
 from app.database.database_service import db_service
 from app.units.units_entity import (CANNOT_HAVE_CHILDREN, PARENT_LEVEL, UNITS_SEED, HeadCandidate,
                                     UnitConflict, UnitCreate, UnitNotFound, UnitUpdate)
@@ -116,7 +118,7 @@ class UnitsService:
         return [str(d["_id"]) async for d in cursor]
 
     # ── escritura ─────────────────────────────────────────────────────────────
-    async def create(self, data: UnitCreate) -> dict:
+    async def create(self, data: UnitCreate, actor_id: Optional[str] = None) -> dict:
         parent = None
         if PARENT_LEVEL[data.level] is None:
             if data.parent_id is not None:
@@ -149,9 +151,12 @@ class UnitsService:
         except DuplicateKeyError:
             raise UnitConflict("Ya existe una unidad con ese code o con ese nombre bajo el mismo padre", "duplicate")
         doc["_id"] = result.inserted_id
+        await audit_service.record(actor_id, AuditAction.UNIT_CREATE, AuditTarget.UNIT, str(result.inserted_id), {
+            "code": [None, doc["code"]], "name": [None, doc["name"]], "level": [None, doc["level"]],
+            "parent_id": [None, str(doc["parent_id"]) if doc["parent_id"] else None]})
         return _public(doc)
 
-    async def update(self, unit_id: str, data: UnitUpdate) -> dict:
+    async def update(self, unit_id: str, data: UnitUpdate, actor_id: Optional[str] = None) -> dict:
         oid = _oid(unit_id)
         current = await db_service.db.units.find_one({"_id": oid}) if oid else None
         if current is None:
@@ -162,9 +167,13 @@ class UnitsService:
                 await db_service.db.units.update_one({"_id": oid}, {"$set": changes})
             except DuplicateKeyError:
                 raise UnitConflict("Ya existe una unidad con ese nombre bajo el mismo padre", "duplicate")
-        return await self.find_by_id(unit_id)
+        updated = await self.find_by_id(unit_id)
+        changed = diff(current, updated, list(changes))
+        if changed:
+            await audit_service.record(actor_id, AuditAction.UNIT_UPDATE, AuditTarget.UNIT, unit_id, changed)
+        return updated
 
-    async def move(self, unit_id: str, new_parent_id: str) -> dict:
+    async def move(self, unit_id: str, new_parent_id: str, actor_id: Optional[str] = None) -> dict:
         """Mueve una unidad y reescribe los `ancestors` de todo su subárbol."""
         oid = _oid(unit_id)
         unit = await db_service.db.units.find_one({"_id": oid}) if oid else None
@@ -194,9 +203,11 @@ class UnitsService:
             idx = child["ancestors"].index(oid)
             tail = child["ancestors"][idx + 1:]
             await db_service.db.units.update_one({"_id": child["_id"]}, {"$set": {"ancestors": [*new_anc, oid, *tail]}})
+        await audit_service.record(actor_id, AuditAction.UNIT_MOVE, AuditTarget.UNIT, unit_id, {
+            "parent_id": [str(unit["parent_id"]) if unit.get("parent_id") else None, str(parent["_id"])]})
         return await self.find_by_id(unit_id)
 
-    async def deactivate(self, unit_id: str, active_users: int) -> dict:
+    async def deactivate(self, unit_id: str, active_users: int, actor_id: Optional[str] = None) -> dict:
         """`active_users` lo calcula el controller con `users_service` (ADR-013)."""
         oid = _oid(unit_id)
         unit = await db_service.db.units.find_one({"_id": oid}) if oid else None
@@ -207,9 +218,11 @@ class UnitsService:
         if await db_service.db.units.count_documents({"parent_id": oid, "status": "active"}) > 0:
             raise UnitConflict("La unidad tiene unidades hijas activas", "has_active_children")
         await db_service.db.units.update_one({"_id": oid}, {"$set": {"status": "inactive"}})
+        await audit_service.record(actor_id, AuditAction.UNIT_DEACTIVATE, AuditTarget.UNIT, unit_id,
+                                   {"status": [unit.get("status"), "inactive"]})
         return await self.find_by_id(unit_id)
 
-    async def activate(self, unit_id: str) -> dict:
+    async def activate(self, unit_id: str, actor_id: Optional[str] = None) -> dict:
         oid = _oid(unit_id)
         unit = await db_service.db.units.find_one({"_id": oid}) if oid else None
         if unit is None:
@@ -219,9 +232,11 @@ class UnitsService:
             if parent is None or parent["status"] != "active":
                 raise UnitConflict("No se puede reactivar una unidad cuyo padre está inactivo", "inactive_parent")
         await db_service.db.units.update_one({"_id": oid}, {"$set": {"status": "active"}})
+        await audit_service.record(actor_id, AuditAction.UNIT_ACTIVATE, AuditTarget.UNIT, unit_id,
+                                   {"status": [unit.get("status"), "active"]})
         return await self.find_by_id(unit_id)
 
-    async def set_head(self, unit_id: str, candidate: Optional[HeadCandidate]) -> dict:
+    async def set_head(self, unit_id: str, candidate: Optional[HeadCandidate], actor_id: Optional[str] = None) -> dict:
         """Fija o quita la jefatura. El candidato lo resuelve el controller (ADR-013).
         Regla (Q7): funcionario SLEP activo y miembro de la propia unidad."""
         oid = _oid(unit_id)
@@ -238,6 +253,8 @@ class UnitsService:
             if candidate.unit_id != str(oid):
                 raise UnitConflict("La jefatura debe pertenecer a la propia unidad", "head_not_member")
             await db_service.db.units.update_one({"_id": oid}, {"$set": {"head_user_id": ObjectId(candidate.id)}})
+        await audit_service.record(actor_id, AuditAction.UNIT_HEAD, AuditTarget.UNIT, unit_id, {
+            "head_user_id": [str(unit["head_user_id"]) if unit.get("head_user_id") else None, candidate.id if candidate else None]})
         return await self.find_by_id(unit_id)
 
     async def clear_head_for_user(self, user_id: str) -> int:

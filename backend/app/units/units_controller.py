@@ -73,7 +73,7 @@ async def get_unit(unit_id: str, ctx: AccessContext = _ANY_USER):
 @router.post("", response_model=Unit, status_code=status.HTTP_201_CREATED)
 async def create_unit(payload: UnitCreate, ctx: AccessContext = _IAM_ADMIN):
     try:
-        return await units_service.create(payload)
+        return await units_service.create(payload, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)
 
@@ -81,7 +81,7 @@ async def create_unit(payload: UnitCreate, ctx: AccessContext = _IAM_ADMIN):
 @router.patch("/{unit_id}", response_model=Unit)
 async def update_unit(unit_id: str, payload: UnitUpdate, ctx: AccessContext = _IAM_ADMIN):
     try:
-        return await units_service.update(unit_id, payload)
+        return await units_service.update(unit_id, payload, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)
 
@@ -89,7 +89,7 @@ async def update_unit(unit_id: str, payload: UnitUpdate, ctx: AccessContext = _I
 @router.post("/{unit_id}/move", response_model=Unit)
 async def move_unit(unit_id: str, payload: UnitMove, ctx: AccessContext = _IAM_ADMIN):
     try:
-        return await units_service.move(unit_id, payload.parent_id)
+        return await units_service.move(unit_id, payload.parent_id, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)
 
@@ -99,7 +99,7 @@ async def deactivate_unit(unit_id: str, ctx: AccessContext = _IAM_ADMIN):
     # El conteo lo calcula el controller para que `units` no importe `users` (ADR-013).
     active_users = await users_service.count_active_in_unit(unit_id)
     try:
-        return await units_service.deactivate(unit_id, active_users)
+        return await units_service.deactivate(unit_id, active_users, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)
 
@@ -107,7 +107,7 @@ async def deactivate_unit(unit_id: str, ctx: AccessContext = _IAM_ADMIN):
 @router.post("/{unit_id}/activate", response_model=Unit)
 async def activate_unit(unit_id: str, ctx: AccessContext = _IAM_ADMIN):
     try:
-        return await units_service.activate(unit_id)
+        return await units_service.activate(unit_id, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)
 
@@ -120,6 +120,6 @@ async def set_unit_head(unit_id: str, payload: UnitHead, ctx: AccessContext = _I
         if candidate is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"User {payload.user_id} not found")
     try:
-        return await units_service.set_head(unit_id, candidate)
+        return await units_service.set_head(unit_id, candidate, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)

@@ -74,6 +74,12 @@ class DatabaseService:
         await self.db.units.create_index("ancestors", background=True)      # multikey: subárbol sin recursión
         await self.db.units.create_index("level", background=True)
 
+        # audit_log (solo de agregado): la consulta habitual es "lo más reciente" y por objeto/actor/lote
+        await self.db.audit_log.create_index([("at", -1)], background=True)
+        await self.db.audit_log.create_index([("target_type", 1), ("target_id", 1), ("at", -1)], background=True)
+        await self.db.audit_log.create_index([("actor_id", 1), ("at", -1)], background=True)
+        await self.db.audit_log.create_index("bulk_id", background=True, sparse=True)
+
         logger.info("MongoDB indexes ensured.")
 
 db_service = DatabaseService()
