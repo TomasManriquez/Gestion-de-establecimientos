@@ -10,7 +10,7 @@ Verifica que:
   - Toda variable que lee Settings está declarada en la plantilla y en los dos compose
   - JWT_SECRET y ADMIN_PASSWORD ya no tienen default
 
-PUBLIC_BASE_URL y MAIL_MODE se validan en F4, cuando se implementa el envío de correo.
+MAIL_MODE y PUBLIC_BASE_URL (F4) se validan en test_BE42_mail_settings.py.
 """
 from pathlib import Path
 import pytest
@@ -23,6 +23,8 @@ VALID_ENV = {
     "ADMIN_PASSWORD": "una-clave-de-prueba",
     "ALLOWED_EMAIL_DOMAINS": "slepllanquihue.cl",
     "BOOTSTRAP_ADMIN_EMAIL": "admin@slepllanquihue.cl",
+    "MAIL_MODE": "console",
+    "PUBLIC_BASE_URL": "http://localhost:5173",
 }
 
 
@@ -34,7 +36,7 @@ def test_BE14_valid_env_builds_settings_with_nist_defaults():
     assert s.ACCESS_TOKEN_EXPIRE_MINUTES == 180
 
 
-@pytest.mark.parametrize("missing", ["JWT_SECRET", "ADMIN_PASSWORD", "ALLOWED_EMAIL_DOMAINS", "BOOTSTRAP_ADMIN_EMAIL"])
+@pytest.mark.parametrize("missing", ["JWT_SECRET", "ADMIN_PASSWORD", "ALLOWED_EMAIL_DOMAINS", "BOOTSTRAP_ADMIN_EMAIL", "MAIL_MODE", "PUBLIC_BASE_URL"])
 def test_BE14_missing_required_env_fails_fast(missing):
     env = {k: v for k, v in VALID_ENV.items() if k != missing}
     with pytest.raises(ConfigError, match=missing):
