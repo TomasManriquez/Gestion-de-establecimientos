@@ -141,7 +141,7 @@ class UsersService:
                          kind: Optional[str] = None, rbd: Optional[str] = None,
                          position: Optional[str] = None, platform: Optional[str] = None,
                          role: Optional[str] = None, status: Optional[str] = None,
-                         page: int = 1, page_size: int = 100) -> dict:
+                         only_ids: Optional[List[str]] = None, page: int = 1, page_size: int = 100) -> dict:
         query: Dict = {}
         and_clauses: List[dict] = []
         if q:
@@ -172,6 +172,8 @@ class UsersService:
             query["access.role"] = role
         if status:
             query["status"] = status
+        if only_ids is not None:            # p. ej. «subrogando ahora»: los ids los calcula el controller (ADR-013)
+            and_clauses.append({"_id": {"$in": [o for o in map(_oid, only_ids) if o is not None]}})
         if and_clauses:
             query["$and"] = and_clauses
 

@@ -80,6 +80,10 @@ class DatabaseService:
         await self.db.auth_tokens.create_index("token_hash", unique=True, background=True)
         await self.db.auth_tokens.create_index("expires_at", expireAfterSeconds=0, background=True)
 
+        # subrogations (propiedad de `units`): por unidad (superposición y listado) y por subrogante («acting»)
+        await self.db.subrogations.create_index([("unit_id", 1), ("cancelled_at", 1), ("starts_at", -1)], background=True)
+        await self.db.subrogations.create_index("subrogate_user_id", background=True)
+
         # rate_limits (ADR-014): una clave por contador y TTL que cierra la ventana sola
         await self.db.rate_limits.create_index("key", unique=True, background=True)
         await self.db.rate_limits.create_index("expires_at", expireAfterSeconds=0, background=True)

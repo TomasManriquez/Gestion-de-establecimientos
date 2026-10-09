@@ -25,6 +25,10 @@ class CounterpartRole(str, Enum):
     GESTOR_INFRAESTRUCTURA = "GESTOR_INFRAESTRUCTURA"
     COMPRADOR = "COMPRADOR"
 
+class CounterpartUserNotFound(Exception):
+    """`user_id` no corresponde a ningún usuario. El controller lo traduce a 422 (el service no importa fastapi)."""
+
+
 class CounterpartBase(BaseModel):
     rbd: str
     role: CounterpartRole
@@ -32,6 +36,8 @@ class CounterpartBase(BaseModel):
     name: str
     email: Optional[str] = ""
     phone: Optional[str] = ""
+    # Vínculo OPCIONAL con un usuario del sistema (ADR-011): nunca obligatorio. Se valida contra `users`.
+    user_id: Optional[str] = Field(None, min_length=24, max_length=24)
 
 class CounterpartCreate(CounterpartBase):
     pass
@@ -42,6 +48,8 @@ class CounterpartUpdate(BaseModel):
     phone: Optional[str] = None
     role: Optional[CounterpartRole] = None
     origin: Optional[CounterpartOrigin] = None
+    # "" desvincula al usuario (None se ignora, como en el resto de los campos de este PUT)
+    user_id: Optional[str] = Field(None, min_length=0, max_length=24)
 
 class Counterpart(CounterpartBase):
     id: str = Field(..., alias="_id")

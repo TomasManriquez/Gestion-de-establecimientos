@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth.auth_entity import AccessContext, IAM_ADMIN, PLATFORM_IAM
 from app.auth.auth_service import require_access
-from app.units.units_entity import (Unit, UnitConflict, UnitCreate, UnitHead, UnitMove, UnitNode,
-                                    UnitNotFound, UnitStatus, UnitUpdate)
+from app.units.units_entity import (Subrogation, SubrogationCreate, Unit, UnitConflict, UnitCreate, UnitHead, UnitMove,
+                                    UnitNode, UnitNotFound, UnitStatus, UnitUpdate)
 from app.units.units_service import units_service
 from app.users.users_service import users_service
 
@@ -121,5 +121,33 @@ async def set_unit_head(unit_id: str, payload: UnitHead, ctx: AccessContext = _I
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"User {payload.user_id} not found")
     try:
         return await units_service.set_head(unit_id, candidate, ctx.user_id)
+    except (UnitNotFound, UnitConflict) as exc:
+        raise _http(exc)
+
+
+# ── Subrogancias (E1b). «Vigente» se calcula por fecha; registrar una NO transfiere permisos. ──────
+
+@router.post("/subrogations/{subrogation_id}/cancel", response_model=Subrogation)
+async def cancel_subrogation(subrogation_id: str, ctx: AccessContext = _IAM_ADMIN):
+    try:
+        return await units_service.cancel_subrogation(subrogation_id, ctx.user_id)
+    except (UnitNotFound, UnitConflict) as exc:
+        raise _http(exc)
+
+
+@router.get("/{unit_id}/subrogations", response_model=List[Subrogation])
+async def list_subrogations(unit_id: str, current: bool = Query(False, description="Solo las vigentes hoy"),
+                            ctx: AccessContext = _ANY_USER):
+    try:
+        return await units_service.list_subrogations(unit_id, only_current=current)
+    except UnitNotFound as exc:
+        raise _http(exc)
+
+
+@router.post("/{unit_id}/subrogations", response_model=Subrogation, status_code=status.HTTP_201_CREATED)
+async def create_subrogation(unit_id: str, payload: SubrogationCreate, ctx: AccessContext = _IAM_ADMIN):
+    candidate = await users_service.head_candidate(payload.subrogate_user_id)    # lo resuelve el controller (ADR-013)
+    try:
+        return await units_service.create_subrogation(unit_id, payload, candidate, ctx.user_id)
     except (UnitNotFound, UnitConflict) as exc:
         raise _http(exc)

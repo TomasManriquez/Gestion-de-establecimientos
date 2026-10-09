@@ -11,6 +11,7 @@ from app.users.users_entity import (AccessGrant, BulkCreateRequest, BulkRequest,
                                     EstablishmentPosition, ImportPreview, MAX_CSV_BYTES, User, UserAdminUpdate,
                                     UserConflict, UserCreate, UserInvalid, UserListResponse, UserMe,
                                     UserNotFound, UserSelfUpdate, UserStatus)
+from app.units.units_service import units_service
 from app.users.users_service import users_service
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -72,14 +73,16 @@ async def list_users(
     platform: Optional[str] = Query(None, max_length=30),
     role: Optional[str] = Query(None, max_length=20),
     status_filter: Optional[UserStatus] = Query(None, alias="status"),
+    acting: bool = Query(False, description="Solo quienes subrogan una jefatura hoy"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=200, description="Items por página (máx 200)"),
     ctx: AccessContext = _IAM_ADMIN,
 ):
+    acting_ids = await units_service.acting_user_ids() if acting else None
     return await users_service.list_users(
         q=q, unit_id=unit_id, include_descendants=include_descendants, level=level, kind=kind,
         rbd=rbd, position=position.value if position else None, platform=platform, role=role,
-        status=status_filter.value if status_filter else None, page=page, page_size=page_size)
+        status=status_filter.value if status_filter else None, only_ids=acting_ids, page=page, page_size=page_size)
 
 
 @router.post("", response_model=User, status_code=status.HTTP_201_CREATED)

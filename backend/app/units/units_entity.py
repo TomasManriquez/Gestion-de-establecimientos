@@ -1,9 +1,10 @@
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ─── Errores de dominio (el service no importa fastapi, L2; el controller los traduce) ───
 
@@ -102,6 +103,59 @@ class UnitUpdate(BaseModel):
 class UnitMove(BaseModel):
     model_config = ConfigDict(extra="forbid")
     parent_id: str = Field(..., min_length=24, max_length=24)
+
+
+class SubrogationReason(str, Enum):
+    VACACIONES = "VACACIONES"
+    LICENCIA = "LICENCIA"
+    COMISION = "COMISION"
+    VACANCIA = "VACANCIA"        # no hay titular: el único motivo que admite un término abierto
+    OTRO = "OTRO"
+
+
+def _utc_naive(value: Optional[datetime]) -> Optional[datetime]:
+    """Las fechas se guardan en UTC sin zona (como el resto de la base)."""
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+class SubrogationCreate(BaseModel):
+    """Registro de una subrogancia (C18). NO transfiere permisos: solo dice quién reemplaza a la jefatura."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    subrogate_user_id: str = Field(..., min_length=24, max_length=24)
+    starts_at: datetime
+    ends_at: Optional[datetime] = None
+    reason: SubrogationReason
+    document_ref: Optional[str] = Field(None, max_length=120)      # "Resolución Exenta N° …"
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def _utc(cls, v):
+        return _utc_naive(v)
+
+    @model_validator(mode="after")
+    def _dates(self):
+        if self.ends_at is None and self.reason != SubrogationReason.VACANCIA:
+            raise ValueError("ends_at es obligatorio salvo en una VACANCIA")
+        if self.ends_at is not None and self.ends_at <= self.starts_at:
+            raise ValueError("ends_at debe ser posterior a starts_at")
+        return self
+
+
+class Subrogation(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    id: str = Field(..., alias="_id")
+    unit_id: str
+    subrogate_user_id: str
+    starts_at: datetime
+    ends_at: Optional[datetime] = None
+    reason: str
+    document_ref: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    current: bool = False         # calculado por fecha al leer: no hay jobs (ADR-010)
 
 
 class UnitHead(BaseModel):

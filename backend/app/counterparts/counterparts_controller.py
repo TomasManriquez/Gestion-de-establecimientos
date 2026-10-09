@@ -4,9 +4,13 @@ from app.auth.auth_service import require_access
 from app.auth.auth_entity import (AccessContext, PLATFORM_DATOS, DATOS_READ, DATOS_WRITE,
                                   DATOS_DELETE, SENSITIVE_ROLES)
 from app.counterparts.counterparts_service import counterparts_service
-from app.counterparts.counterparts_entity import Counterpart, CounterpartCreate, CounterpartUpdate
+from app.counterparts.counterparts_entity import Counterpart, CounterpartCreate, CounterpartUpdate, CounterpartUserNotFound
 
 router = APIRouter(prefix="/api/counterparts", tags=["counterparts"])
+
+
+def _user_not_found(exc: Exception) -> HTTPException:
+    return HTTPException(422, detail=[{"field": "user_id", "code": "user_not_found", "message": "El usuario indicado no existe"}])
 
 @router.get("/establishment/{rbd}", response_model=List[Counterpart])
 async def get_counterparts_by_establishment(
@@ -20,7 +24,10 @@ async def create_counterpart(
     payload: CounterpartCreate,
     ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_WRITE))
 ):
-    return await counterparts_service.create(payload)
+    try:
+        return await counterparts_service.create(payload)
+    except CounterpartUserNotFound as exc:
+        raise _user_not_found(exc)
 
 @router.put("/{cp_id}", response_model=Counterpart)
 async def update_counterpart(
@@ -28,7 +35,10 @@ async def update_counterpart(
     payload: CounterpartUpdate,
     ctx: AccessContext = Depends(require_access(PLATFORM_DATOS, DATOS_WRITE))
 ):
-    updated = await counterparts_service.update(cp_id, payload)
+    try:
+        updated = await counterparts_service.update(cp_id, payload)
+    except CounterpartUserNotFound as exc:
+        raise _user_not_found(exc)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

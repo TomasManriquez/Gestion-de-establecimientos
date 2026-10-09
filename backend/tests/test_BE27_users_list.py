@@ -120,7 +120,7 @@ def test_BE27_user_indexes_idempotent():
     from app.database.database_service import DatabaseService
     svc = DatabaseService()
     svc.db = MagicMock()
-    for name in ("establishments", "counterparts", "metrics", "users", "units", "audit_log", "auth_tokens", "rate_limits"):
+    for name in ("establishments", "counterparts", "metrics", "users", "units", "audit_log", "auth_tokens", "rate_limits", "subrogations"):
         setattr(svc.db, name, MagicMock(create_index=AsyncMock()))
     asyncio.run(svc.ensure_indexes()); asyncio.run(svc.ensure_indexes())
     keys = [str(c.args[0]) for c in svc.db.users.create_index.call_args_list[:9]]

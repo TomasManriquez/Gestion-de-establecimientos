@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from bson import ObjectId
@@ -8,7 +9,7 @@ from app.audit.audit_entity import AuditAction, AuditTarget
 from app.audit.audit_service import audit_service, diff
 from app.database.database_service import db_service
 from app.units.units_entity import (CANNOT_HAVE_CHILDREN, PARENT_LEVEL, UNITS_SEED, HeadCandidate,
-                                    UnitConflict, UnitCreate, UnitNotFound, UnitUpdate)
+                                    SubrogationCreate, UnitConflict, UnitCreate, UnitNotFound, UnitUpdate)
 
 logger = logging.getLogger("units")
 
@@ -256,6 +257,82 @@ class UnitsService:
         await audit_service.record(actor_id, AuditAction.UNIT_HEAD, AuditTarget.UNIT, unit_id, {
             "head_user_id": [str(unit["head_user_id"]) if unit.get("head_user_id") else None, candidate.id if candidate else None]})
         return await self.find_by_id(unit_id)
+
+    # ══ Subrogancias (E1b, ADR-010): colección propia, «vigente» se calcula por fecha ═════════
+    @staticmethod
+    def _subrogation_public(doc: dict, now: Optional[datetime] = None) -> dict:
+        now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+        out = dict(doc)
+        for key in ("_id", "unit_id", "subrogate_user_id", "created_by"):
+            out[key] = str(doc[key]) if doc.get(key) else None
+        out["current"] = (doc.get("cancelled_at") is None and doc["starts_at"] <= now
+                          and (doc.get("ends_at") is None or now < doc["ends_at"]))
+        return out
+
+    async def create_subrogation(self, unit_id: str, data: SubrogationCreate, candidate: Optional[HeadCandidate],
+                                 actor_id: Optional[str] = None) -> dict:
+        """`candidate` lo resuelve el controller con `users_service` (ADR-013). Reglas: la unidad existe y
+        está activa; el subrogante es un funcionario SLEP activo, de la unidad o de su subárbol, y no es la
+        jefatura titular; no se superponen dos vigentes en la misma unidad."""
+        oid = _oid(unit_id)
+        unit = await db_service.db.units.find_one({"_id": oid}) if oid else None
+        if unit is None:
+            raise UnitNotFound(f"Unit {unit_id} not found")
+        if unit.get("status") != "active":
+            raise UnitConflict("La unidad está inactiva", "inactive_unit")
+        if candidate is None:
+            raise UnitNotFound(f"User {data.subrogate_user_id} not found")
+        if not candidate.active:
+            raise UnitConflict("El subrogante debe ser un usuario activo", "subrogate_inactive")
+        if not candidate.is_slep_staff:
+            raise UnitConflict("El subrogante debe ser funcionario SLEP", "head_not_slep_staff")
+        if candidate.unit_id not in await self.subtree_ids(unit_id):
+            raise UnitConflict("El subrogante debe pertenecer a la unidad o a su subárbol", "subrogate_not_member")
+        if unit.get("head_user_id") and str(unit["head_user_id"]) == candidate.id:
+            raise UnitConflict("El subrogante no puede ser la jefatura titular", "subrogate_is_head")
+        async for other in db_service.db.subrogations.find({"unit_id": oid, "cancelled_at": None}):
+            starts_before_other_ends = other.get("ends_at") is None or data.starts_at < other["ends_at"]
+            ends_after_other_starts = data.ends_at is None or data.ends_at > other["starts_at"]
+            if starts_before_other_ends and ends_after_other_starts:
+                raise UnitConflict("Ya hay una subrogancia que se superpone en esas fechas", "subrogation_overlap")
+        doc = {
+            "unit_id": oid, "subrogate_user_id": ObjectId(candidate.id), "starts_at": data.starts_at,
+            "ends_at": data.ends_at, "reason": data.reason.value, "document_ref": data.document_ref,
+            "created_by": _oid(actor_id), "created_at": datetime.now(timezone.utc).replace(tzinfo=None), "cancelled_at": None,
+        }
+        result = await db_service.db.subrogations.insert_one(doc)
+        doc["_id"] = result.inserted_id
+        await audit_service.record(actor_id, AuditAction.SUBROGATION_CREATE, AuditTarget.SUBROGATION, str(result.inserted_id), {
+            "unit_id": [None, unit_id], "subrogate_user_id": [None, candidate.id], "reason": [None, doc["reason"]],
+            "starts_at": [None, doc["starts_at"]], "ends_at": [None, doc["ends_at"]]})
+        return self._subrogation_public(doc)
+
+    async def list_subrogations(self, unit_id: str, only_current: bool = False) -> List[dict]:
+        oid = _oid(unit_id)
+        if oid is None or await db_service.db.units.find_one({"_id": oid}) is None:
+            raise UnitNotFound(f"Unit {unit_id} not found")
+        cursor = db_service.db.subrogations.find({"unit_id": oid}).sort([("starts_at", -1)])
+        items = [self._subrogation_public(d) async for d in cursor]
+        return [i for i in items if i["current"]] if only_current else items
+
+    async def cancel_subrogation(self, subrogation_id: str, actor_id: Optional[str] = None) -> dict:
+        oid = _oid(subrogation_id)
+        doc = await db_service.db.subrogations.find_one({"_id": oid}) if oid else None
+        if doc is None:
+            raise UnitNotFound(f"Subrogation {subrogation_id} not found")
+        if doc.get("cancelled_at") is None:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            await db_service.db.subrogations.update_one({"_id": oid}, {"$set": {"cancelled_at": now}})
+            doc["cancelled_at"] = now
+            await audit_service.record(actor_id, AuditAction.SUBROGATION_CANCEL, AuditTarget.SUBROGATION, subrogation_id,
+                                       {"cancelled_at": [None, now]})
+        return self._subrogation_public(doc)
+
+    async def acting_user_ids(self) -> List[str]:
+        """Usuarios que subrogan HOY (filtro `acting` del listado de usuarios)."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        cursor = db_service.db.subrogations.find({"cancelled_at": None, "starts_at": {"$lte": now}})
+        return sorted({str(d["subrogate_user_id"]) async for d in cursor if d.get("ends_at") is None or now < d["ends_at"]})
 
     async def clear_head_for_user(self, user_id: str) -> int:
         """Lo llama `users` al desactivar a alguien (Q8): quita su jefatura si la tenía."""
