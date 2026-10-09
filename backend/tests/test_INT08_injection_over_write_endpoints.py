@@ -39,6 +39,8 @@ def table(ids):
         ("POST", "/api/auth/login", {"username": "a@slepllanquihue.cl", "password": "x"}, ["username", "password"]),
         ("POST", "/api/auth/password", {"current_password": "x", "new_password": "y"}, ["current_password", "new_password"]),
         ("POST", "/api/auth/set-password", {"token": "t" * 43, "password": "y"}, ["token", "password"]),
+        ("POST", "/api/users/bulk-create", {"items": [u], "dry_run": False}, ["items", "dry_run"]),
+        ("POST", "/api/users/bulk", {"user_ids": [UID], "operation": {"op": "disable"}}, ["user_ids", "operation"]),
     ]
 
 
@@ -78,7 +80,10 @@ def test_INT08_every_write_route_of_the_feature_is_in_the_table(ctx):
         ("PUT", "/api/users/{user_id}/access/{platform_id}"), ("POST", "/api/units"), ("PATCH", "/api/units/{unit_id}"),
         ("POST", "/api/units/{unit_id}/move"), ("PUT", "/api/units/{unit_id}/head"), ("PATCH", "/api/platforms/{platform_id}"),
         ("POST", "/api/auth/login"), ("POST", "/api/auth/password"), ("POST", "/api/auth/set-password"),
+        ("POST", "/api/users/bulk-create"), ("POST", "/api/users/bulk"),
     }
+    # multipart (CSV): sin body JSON; sus pruebas de entrada hostil están en test_BE48
+    multipart = {("POST", "/api/users/import")}
     # escrituras SIN body (acciones): no tienen campos que inyectar
     bodyless = {
         ("POST", "/api/users/{user_id}/disable"), ("POST", "/api/users/{user_id}/enable"),
@@ -88,7 +93,7 @@ def test_INT08_every_write_route_of_the_feature_is_in_the_table(ctx):
     }
     actual = {(m, r.path) for r in _api_routes(app) for m in r.methods
               if m in ("POST", "PUT", "PATCH", "DELETE") and r.path.startswith(feature_prefixes)}
-    unknown = actual - templates - bodyless
+    unknown = actual - templates - bodyless - multipart
     assert unknown == set(), f"Rutas de escritura sin revisar contra inyección (T1): {sorted(unknown)}"
     assert len(covered) == len(templates)
 

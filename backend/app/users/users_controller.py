@@ -1,17 +1,21 @@
-from typing import Optional
+import logging
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile, status
 
 from app.auth.auth_entity import AccessContext, IAM_ADMIN, PLATFORM_IAM
-from app.auth.auth_entity import RateLimited, SEND_ACTOR_LIMIT, SEND_TARGET_LIMIT, SEND_WINDOW_SECONDS
+from app.auth.auth_entity import INVITE_BATCH_LIMIT, RateLimited, SEND_ACTOR_LIMIT, SEND_TARGET_LIMIT, SEND_WINDOW_SECONDS
 from app.auth.auth_service import auth_service, rate_limited_http, require_access
 from app.mail.mail_service import MailError
-from app.users.users_entity import (AccessGrant, EstablishmentPosition, User, UserAdminUpdate,
+from app.users.users_entity import (AccessGrant, BulkCreateRequest, BulkRequest, BulkResult, CSV_COLUMNS,
+                                    EstablishmentPosition, ImportPreview, MAX_CSV_BYTES, User, UserAdminUpdate,
                                     UserConflict, UserCreate, UserInvalid, UserListResponse, UserMe,
                                     UserNotFound, UserSelfUpdate, UserStatus)
 from app.users.users_service import users_service
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+logger = logging.getLogger("users")
 
 # Todo `/api/users/*` es del admin global, salvo `/me` (cualquier usuario autenticado).
 _ANY_USER = Depends(require_access(None))
@@ -89,6 +93,69 @@ async def create_user(payload: UserCreate, ctx: AccessContext = _IAM_ADMIN):
     # queda `invited` y `invitation.last_error` dice por qué. La respuesta ya refleja el resultado.
     await auth_service.send_invitation(created, ctx.user_id)
     return await users_service.find_by_id(created["_id"])
+
+
+async def _invite_created(user_ids: List[str], actor_id: str, bulk_id: str) -> None:
+    """Invitaciones de un alta masiva: salen DESPUÉS de responder (BackgroundTasks, que corre en el
+    proceso y no es una cola) y en serie, en lotes de INVITE_BATCH_LIMIT por la cuota de Gmail."""
+    try:
+        for start in range(0, len(user_ids), INVITE_BATCH_LIMIT):
+            users = await users_service.find_many(user_ids[start:start + INVITE_BATCH_LIMIT])
+            await auth_service.invite_many(users, actor_id, bulk_id)
+    except Exception:  # noqa: BLE001 — el alta ya está hecha; el motivo queda en el log
+        logger.exception("Falló el envío en segundo plano de las invitaciones (bulk_id=%s)", bulk_id)
+
+
+@router.get("/import/template")
+async def import_template(ctx: AccessContext = _IAM_ADMIN):
+    """Plantilla CSV generada por el servidor (no es un archivo versionado). UTF-8 con BOM y `;`,
+    que es lo que abre bien Excel en español."""
+    sample = [
+        ["ana.perez@slepllanquihue.cl", "Ana", "Pérez", "+56912345678", "4521", "AF-TI", "", ""],
+        ["luis.soto@slepllanquihue.cl", "Luis", "Soto", "", "", "", "7722", "DOCENTE|PIE_ENCARGADO"],
+    ]
+    lines = [";".join(CSV_COLUMNS)] + [";".join(r) for r in sample]
+    body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+    return Response(content=body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="plantilla-usuarios.csv"'})
+
+
+@router.post("/import", response_model=ImportPreview)
+async def import_users(file: UploadFile = File(...), ctx: AccessContext = _IAM_ADMIN):
+    """CSV → JSON con vista previa. NO escribe: cada fila trae su `data` (un ítem de `bulk-create`)
+    y sus `errors`. Máximo 1 MiB y 200 filas."""
+    raw = await file.read(MAX_CSV_BYTES + 1)
+    if len(raw) > MAX_CSV_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail={
+            "code": "file_too_large", "message": f"El archivo supera {MAX_CSV_BYTES // 1024} KiB"})
+    try:
+        return await users_service.preview_import(raw, ctx.user_id)
+    except UserInvalid as exc:
+        raise _http(exc)
+
+
+@router.post("/bulk-create", response_model=BulkResult)
+async def bulk_create_users(payload: BulkCreateRequest, background: BackgroundTasks, ctx: AccessContext = _IAM_ADMIN):
+    """Alta masiva PARCIAL: los ítems inválidos o repetidos se informan por fila y no frenan al resto.
+    Con `dry_run` valida todo y no escribe ni envía nada. Las invitaciones salen después de responder."""
+    result = await users_service.create_many(payload.items, ctx.user_id, dry_run=payload.dry_run)
+    created = [r["id"] for r in result["items"] if r["status"] == "created"]
+    for row in result["items"]:
+        if row["status"] == "created":
+            row["invitation"] = "queued"
+    if created:
+        background.add_task(_invite_created, created, ctx.user_id, result["bulk_id"])
+    return result
+
+
+@router.post("/bulk", response_model=BulkResult)
+async def bulk_users(payload: BulkRequest, ctx: AccessContext = _IAM_ADMIN):
+    """Una operación (`assign_unit`, `grant_access`, `revoke_access`, `disable`, `enable`) sobre hasta 200
+    usuarios. Resultado por usuario; las invariantes de admin se aplican a medida que avanza el lote."""
+    try:
+        return await users_service.bulk(payload, ctx.user_id)
+    except (UserNotFound, UserInvalid) as exc:
+        raise _http(exc)
 
 
 @router.get("/{user_id}", response_model=User)
