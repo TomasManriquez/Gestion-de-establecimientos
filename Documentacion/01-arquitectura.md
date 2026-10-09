@@ -182,21 +182,21 @@ dependencia que FastAPI resuelve por `Depends()` es `auth_service.get_current_us
 ruta vive en el `APIRouter(prefix=...)` de cada controller, no en `main.py`. Un módulo nuevo
 requiere exactamente dos líneas en `main.py`: el import y el `include_router`.
 
-### 4.3 Módulos de la feature de usuarios (✅ `users`, `units`, `platforms` y `mail` pendiente de F4; 🧭 `audit`)
+### 4.3 Módulos de la feature de usuarios (✅ `users`, `units`, `platforms`, `audit` y `mail`)
 
 ```
 backend/app/
-├── auth/            # verifica credenciales, emite tokens, require_access, auth_tokens
-├── users/           # ✅ dueño de la colección users
-├── units/           # ✅ units (subrogations 🧭 F4)
+├── auth/            # ✅ credenciales, tokens, require_access; dueño de auth_tokens y rate_limits (F4)
+├── users/           # ✅ dueño de la colección users (+ CSV y operaciones masivas, F4)
+├── units/           # ✅ units y subrogations (F4)
 ├── platforms/       # ✅ registro de plataformas y sus roles
-├── audit/           # 🧭 F4 (propuesta): audit_log, solo de agregado
-├── mail/            # 🧭 F4, infraestructura: mail_service.py (un solo archivo)
+├── audit/           # ✅ F4: audit_log, solo de agregado (entity/service/controller)
+├── mail/            # ✅ F4, infraestructura: mail_service.py (un solo archivo, modos gmail y console)
 └── …                # establishments, counterparts, metrics, analytics sin cambios de estructura
 ```
 
 Dirección de imports (ADR-013): `auth → users → {units, platforms, establishments, audit}` y
-`counterparts → users`, sin ciclos. Dos controllers componen servicios de dos módulos para
+`counterparts → users`, sin ciclos (un test lo verifica desde F4: `test_BE45_*`). Dos controllers componen servicios de dos módulos para
 evitar los ciclos `users ↔ units` y `users ↔ auth`. `mail` es infraestructura, al nivel de
 `database/`: los módulos de dominio no saben que existe Gmail.
 
@@ -227,15 +227,16 @@ La vista guarda filtros y página en la URL (`q`, `unit`, `sub`, `kind`, `platfo
 `status`, `page`), mismo patrón que el Directorio; la paginación es del servidor (25 por página).
 Las fechas del backend son UTC **sin zona** y se interpretan como UTC (`lib/format.js`). Las
 acciones masivas se ejecutan **en el cliente**, una llamada individual por usuario, hasta que
-exista `POST /api/users/bulk` (🧭 F4): el resultado se informa por persona.
+exista `POST /api/users/bulk` (✅ ya existe en el backend desde F4; 🧭 la vista aún no lo usa): el resultado se informa por persona.
 
 Tema: `--primary`/`--ring` pasan a `200 98% 36%` y se agregan los tokens semánticos `--success` y
 `--warning` (con su variante oscura) en `index.css` y `tailwind.config.js`. Los colores crudos del
 resto de la app no se tocan (D21).
 
-🧭 Aún no construido: página de unidades, «Mi perfil», definición de contraseña por enlace,
-importación CSV, reenviar invitación y restablecer contraseña (los dos últimos, deshabilitados en
-el menú de fila hasta F4).
+🧭 Aún no construido en el frontend: página de unidades, «Mi perfil», **la pantalla `/definir-contrasena`**
+(el enlace de los correos ya apunta a ella), importación CSV y los botones «Reenviar invitación» y
+«Restablecer contraseña» (deshabilitados en el menú de fila). **Su backend ya existe desde F4**
+(`03` §8.1): falta solo la interfaz.
 
 ---
 

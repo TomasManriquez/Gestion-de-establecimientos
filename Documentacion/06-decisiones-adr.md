@@ -425,7 +425,9 @@ sistema no envía correo hoy. El cliente OAuth de Google (`GOOGLE_CLIENT_ID`,
    (propiedad de `auth`) con `purpose` `invite` o `reset`. El token es
    `secrets.token_urlsafe(32)`, viaja solo en el correo y en la base se guarda su
    `sha256`. Un índice TTL sobre `expires_at` borra los vencidos. Emitir un token nuevo
-   invalida el anterior del mismo usuario y propósito. El canje es una actualización condicional
+   invalida el anterior del mismo usuario y propósito (✅ F4: **un único documento por
+   `(user_id, purpose)`, reemplazado con un `upsert`**, de modo que invalidar y emitir son una sola operación
+   atómica). El canje es una actualización condicional
    atómica (`used_at: null` y `expires_at > ahora`). Todo fallo de canje responde igual.
 2. El enlace lleva el token en el **fragmento** (`/definir-contrasena#token=…`) para que no
    llegue a logs de servidor ni a la cabecera `Referer`.
@@ -442,10 +444,14 @@ sistema no envía correo hoy. El cliente OAuth de Google (`GOOGLE_CLIENT_ID`,
    nivel de `database/`, con un único método `send(to, subject, html, text)`. No sigue la regla
    de los tres archivos. Ningún módulo de dominio sabe que existe Gmail; en los tests se
    mockea `mail_service`, como hoy se mockea `db_service`.
-6. Dependencias: `google-auth` para refrescar el access token y `httpx` (asíncrono) para la
-   llamada REST a `users.messages.send`. El mensaje se arma con `email.message.EmailMessage`.
-   **No se agrega `google-api-python-client`**: es una dependencia grande para una llamada.
-   El refresco síncrono de `google-auth` corre fuera del event loop.
+6. Dependencias: `httpx` (asíncrono) para la llamada REST a `users.messages.send` **y** para renovar el access
+   token. El mensaje se arma con `email.message.EmailMessage`. **No se agrega `google-api-python-client`**: es una
+   dependencia grande para una llamada.
+   > ✅ **Enmienda (F4, 2026-10-09).** El borrador decía `google-auth` para el refresco. Se implementó con
+   > `httpx` directamente contra `oauth2.googleapis.com/token`: `google.auth.transport.requests` exige además
+   > `requests` y un hilo aparte (el refresco es síncrono), y aquí es una sola petición POST. El access token
+   > se cachea hasta su vencimiento y un `401` de Gmail lo renueva una vez. `google-auth` entra en F6, donde
+   > sí hace falta (verificar el `id_token`).
 
 7. **Se desarrolla antes de tener credenciales (decisión del 2026-10-02).** El remitente será
    una cuenta aparte que se configura después. Por eso `mail_service` tiene dos modos,
@@ -518,7 +524,10 @@ mail (infraestructura) ← auth
 3. `users` importa `platforms` (validar roles), `establishments` (validar `rbd`) y `audit`.
    `audit` no importa a nadie. `counterparts → users` valida `user_id`.
 4. Un test recorre los imports de `backend/app` y falla ante un ciclo o una arista no
-   declarada aquí.
+   declarada aquí. ✅ **F4:** `test_BE45_module_dependency_graph.py` (no existía hasta F4). Se aplica a
+   services y entities; los controllers sí pueden importar `auth` (para `require_access`) y los services de
+   otros módulos. Excepción conocida desde F3: `auth_service.py` importa `fastapi`, porque `require_access`
+   (una dependencia de FastAPI) vive ahí; el test la declara explícitamente.
 
 **Consecuencias.** Dos controllers (`units`, `auth`/`users`) componen la llamada a dos services
 en lecturas simples; es el costo de no tener ciclos. Cada nuevo módulo de dominio debe
@@ -533,7 +542,8 @@ C2). Que `users` emita las invitaciones (haría que `users` importe `auth`).
 
 ## ADR-014 · Auditoría y rate limiting sin infraestructura nueva
 
-> **Estado:** aprobada por el usuario el 2026-10-06. Auditoría y rate limiting **entran en F4**.
+> **Estado:** aprobada por el usuario el 2026-10-06. ✅ **Implementada y verificada en F4** (2026-10-09),
+> también contra una MongoDB real desechable.
 
 **Contexto.** `04` §7 registra que no hay ninguna auditoría y que el login admite intentos
 ilimitados. Para un sistema de identidad, saber quién dio acceso a quién es un mínimo.
@@ -554,6 +564,16 @@ ilimitados. Para un sistema de identidad, saber quién dio acceso a quién es un
 
 **Consecuencias.** Dos colecciones nuevas. Un cambio en `Dockerfile.prod` (regla 3). Los límites
 efectivos son por cuenta+IP; una IP compartida (por ejemplo, la de una oficina) comparte contador.
+
+> ✅ **Valores y decisiones de implementación (F4).** Ventana fija. Login: 5 fallos por (cuenta + IP) y 30 por
+> IP en 15 min; canje: 10 fallos por IP en 15 min; reenvío y restablecimiento: 5 por destinatario y 60 por
+> administrador en 1 h. El límite se evalúa antes de verificar la contraseña. **Fail-open:** si `rate_limits`
+> no responde, el limitador no bloquea y deja un `ERROR` (la autenticación depende de esa misma base).
+> `--forwarded-allow-ips "*"` en Gunicorn es seguro solo porque el backend **no publica puerto** en
+> `docker-compose.prod.yml` (un test lo fija). La auditoría se escribe desde los *services* (`users`, `units`,
+> `platforms`, `auth`), que ya conocen el antes y el después; su aviso de fallo viaja en la cabecera
+> `X-Audit-Status` mediante un middleware ASGI puro, porque `BaseHTTPMiddleware` ejecuta el endpoint en otra
+> tarea y no vería la marca.
 
 **Alternativas descartadas.** Redis (prohibido para esta feature, una pieza más que operar).
 Contadores en memoria de cada worker (el límite efectivo se multiplica por el número de

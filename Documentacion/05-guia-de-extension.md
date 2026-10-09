@@ -477,6 +477,20 @@ feature lo diga, indicada en la última columna).
 | ~~D24~~ | ✅ Resuelto en F3: las 4 pruebas de INT02 recibían `401` (parchear `auth_service.get_current_user` no surte efecto porque el controller ya capturó la dependencia) y sus aserciones quedaban dentro de `if response.status_code == 200`, es decir, **no verificaban nada**. Ahora autentican con un JWT real (`authenticated_as`) y afirman el `200` | `backend/tests/test_INT02_no_sensitive_data_leak.py` | La garantía de `04` §4 sobre INT02 era nominal. Probado: con la redacción rota a propósito, el test ahora falla | F3 (preparación) |
 | ~~D25~~ | ✅ Resuelto en F3: los tests que usan `TestClient(app)` ejecutaban el `lifespan` real (`db_service.connect()`: seed e índices) contra `MONGODB_URL`. Con la MongoDB de desarrollo levantada en `localhost:27017`, pytest escribía en la base real. `conftest.py` ahora reemplaza `app.main.db_service` en todos los tests | `backend/tests/conftest.py` | Sin esto, los bootstraps de la feature habrían migrado el admin de desarrollo al correr pytest | F3 (preparación) |
 
+### 5.3c Límites y deuda registrados al implementar F4 (2026-10-09)
+
+Son decisiones conscientes o condiciones del entorno, no errores pendientes de corregir en la feature.
+
+| # | Límite | Ubicación | Consecuencia | Mitigación |
+|---|---|---|---|---|
+| D26 | El modo `MAIL_MODE=console` escribe el mensaje **con el enlace completo** en el log | `mail_service.py` | Quien lea el log de desarrollo puede canjear la invitación de otro. Solo desarrollo: el arranque rechaza `console` si `PUBLIC_BASE_URL` no es `localhost` | No compartir logs de desarrollo; pasar a `gmail` en cuanto exista la casilla (`07` §9) |
+| D27 | El límite de login es por (cuenta + IP), no por cuenta | `auth_controller._limited_login` | Un atacante repartido en muchas IPs prueba 5 contraseñas por IP contra una cuenta. Es el costo de no bloquear cuentas (ADR-014: evita el DoS dirigido) | Política NIST de 15+ caracteres y lista de bloqueo; MFA o Google (F6) |
+| D28 | Tests de sesión intermitentes: el reloj de pared de WSL2 salta hacia atrás | `tests/` (BE12, BE32, BE46) · `auth_service.get_current_user` | ~1 de cada 30 corridas falla un test (`ImmatureSignatureError`: `iat` en el futuro; evidencia en `07` §3). En producción afectaría a un token recién emitido durante un salto de reloj | `leeway` de unos segundos en `jwt.decode`. **Pendiente de aprobación** (toca `auth`, punto único de falla) |
+| D29 | La IP real depende de un proxy del host que no está en el repositorio | `nginx.conf`, `Dockerfile.prod`, proxy delante de `127.0.0.1:8080` | Si no reenvía `X-Forwarded-For`, el límite por IP se comparte entre todos y un usuario legítimo puede quedar bloqueado | Verificar en el primer despliegue (`07` §7) |
+| D30 | Las invitaciones masivas salen con `BackgroundTasks`, que no es una cola | `users_controller._invite_created` | Si el proceso se reinicia durante el envío, los usuarios restantes quedan `invited` con `invitation.sent: false` y sin error; no hay reintento automático | El admin reenvía (`POST /api/users/{id}/invitation`); se ve en la lista como «Sin enviar» |
+| D31 | `auth_service.py` importa `fastapi` (rompe L2 para ese archivo) | `auth_service.py` | `require_access` es una dependencia de FastAPI y vive junto a la lógica de auth | Excepción declarada en `test_BE45_*`; moverla a `auth_controller` exige tocar todos los controllers |
+| D32 | La plantilla CSV trae dos filas de ejemplo con correos válidos | `users_controller.import_template` | Importarla sin editar crearía dos usuarios de ejemplo (la vista previa los muestra antes) | Borrar las filas de ejemplo; está dicho en `03` §8.3 |
+
 ### 5.4 Qué escala mal a partir de aquí
 
 A 78 establecimientos todo lo siguiente es correcto. Estos son los puntos que hay que revisar

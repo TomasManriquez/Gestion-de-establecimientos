@@ -1,10 +1,10 @@
 # 04 · Seguridad y control de acceso
 
-> **Estado (2026-10-02, rama `feature/usuarios-f3`).** Las secciones 1 a 8 describen el código
-> **tal como queda tras la fase F3** (identidad en el módulo `users`, `require_access`, sesión
-> revocable, política de contraseñas). La §9 conserva el diseño completo y marca con ✅ lo ya
-> implementado y con 🧭 lo que sigue pendiente (primer acceso por correo, Google, auditoría y
-> límites de intentos). La §10 es el marco de interconexión (F7), solo diseño.
+> **Estado (2026-10-09, rama `feature/usuarios-f4`).** Las secciones 1 a 8 describen el código
+> **tal como queda tras las fases F3 y F4** (identidad en el módulo `users`, `require_access`, sesión
+> revocable, política de contraseñas, primer acceso por enlace, auditoría y límite de intentos). La §9
+> conserva el diseño completo y marca con ✅ lo implementado y con 🧭 lo pendiente (login con Google, F6).
+> La §10 es el marco de interconexión (F7), solo diseño.
 
 ---
 
@@ -289,17 +289,20 @@ siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATA
 |---|---|
 | TLS | Fuera del repositorio. Nginx escucha en `:80` y se publica en `127.0.0.1:8080` |
 | MongoDB en producción | No publicada al host; auth root habilitada |
-| Rate limiting | **No existe** — el login admite intentos ilimitados |
-| Bloqueo por intentos fallidos | **No existe** |
-| Auditoría de accesos | **No existe** — ningún registro de quién leyó o modificó qué |
+| Rate limiting | ✅ Login, canje de enlaces, reenvío y restablecimiento (§9.5). Sin Redis: colección `rate_limits` con TTL |
+| Bloqueo por intentos fallidos | **Deliberadamente no hay bloqueo de cuenta**: el límite es por (cuenta + IP), para que un tercero no pueda dejar inutilizable la cuenta de otro |
+| Auditoría de cambios | ✅ `audit_log` de solo agregado: quién cambió qué en usuarios, accesos, unidades, plataformas y subrogancias. **Las lecturas no se auditan** (ADR-014) |
 | Validación de entrada | Pydantic con `extra="forbid"` y tipos escalares en toda la feature de usuarios (`test_INT08_*`). En establecimientos, `$regex` sin escapar (D5, ver `03` §3.4); en la búsqueda de usuarios sí se escapa con `re.escape` |
 | Cabeceras de seguridad (CSP, HSTS, X-Frame-Options) | **No configuradas** en `nginx.conf` |
 | `/openapi.json`, `/docs` | **Públicos** — exponen el esquema completo a cualquiera |
 | Secretos en el repositorio | `establishments.json` y los `.xlsx`/`.json` de `Documentacion/` están git-ignored. `config.py` ya no contiene ningún secreto (D2 resuelta); `docker-compose.yml` de desarrollo sí tiene valores literales solo-desarrollo |
 
-> 🔸 **BRECHA:** sin rate limiting ni bloqueo, `POST /api/auth/login` admite fuerza bruta
-> ilimitada. El default `admin123` ya no existe (D2), pero el límite de intentos sigue pendiente:
-> es la épica de endurecimiento de la feature (ADR-014, F4).
+> ✅ **Cerrado en F4:** el login ya no admite fuerza bruta ilimitada (5 fallos por cuenta e IP, 30 por IP, en
+> 15 minutos; `429` con `Retry-After`). Queda una condición operativa: **la IP real del cliente debe llegar
+> al backend**. nginx la deja en `X-Forwarded-For` y Gunicorn la aplica con `--forwarded-allow-ips`, pero
+> **hay un proxy del host delante** (`127.0.0.1:8080`) cuya configuración no está en el repositorio: si no
+> reenvía `X-Forwarded-For`, todas las peticiones parecerían venir de una misma IP y el límite por IP se
+> compartiría entre todos. Verificarlo en el primer despliegue (`07` §7).
 
 ---
 
@@ -318,12 +321,12 @@ siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATA
 
 ---
 
-## 9. 🧭 DISEÑO F2: modelo de acceso por plataforma
+## 9. Modelo de acceso por plataforma (✅ F3 y F4; 🧭 Google en F6)
 
-> **Estado por subsección.** ✅ Implementado y verificado en F3: 9.1 (flujo, sin las partes de
-> correo y Google), 9.2, 9.3, 9.4 y de 9.5 la política de contraseñas, el cambio propio y el
-> bootstrap del admin. 🧭 Pendiente: de 9.5 la invitación y el restablecimiento por correo (F4);
-> 9.6 login con Google (F6); y la auditoría y el rate limiting de ADR-014 (F4).
+> **Estado por subsección.** ✅ Implementado y verificado: 9.1 (flujo, sin la parte de Google), 9.2, 9.3,
+> 9.4, 9.5 completa (F3: política, cambio propio y bootstrap; F4: invitación, reenvío, restablecimiento y
+> canje por enlace, rate limiting), 9.7 y 9.8. La auditoría de ADR-014 también (F4). 🧭 Pendiente: 9.6 login
+> con Google (F6).
 > Decisiones: ADR-009 (acceso y roles), ADR-012 (primer acceso),
 > ADR-013 (dependencias) y ADR-014 (auditoría y límites) en `06`. Modelo de datos en `02` §9;
 > contrato en `03` §8. **Documento obligatorio antes de tocar `auth/`:** F3 y F6 tocan un punto
@@ -426,7 +429,22 @@ en todas las rutas de datos, aunque el usuario esté autenticado.
   atomicidad del canje: ADR-012 y `02` §9.7. Todo fallo de canje responde igual, sin distinguir
   usado, vencido o inexistente.
 - **Restablecer** (solo `iam/admin`) usa el mismo mecanismo con `purpose: reset`. El admin nunca
-  ve ni define la contraseña.
+  ve ni define la contraseña. El enlace anterior sigue sirviendo hasta que se canjee el nuevo; al canjearlo
+  se fija `password_changed_at` y **se cierran todas las sesiones abiertas** (`test_BE46_*`, y verificado
+  contra MongoDB real).
+- **Enlaces (ADR-012):** el token va en el fragmento y el enlace se arma con `PUBLIC_BASE_URL`, nunca con la
+  cabecera `Host` (`test_BE46_link_uses_public_base_url_not_the_request_host`). Usado, vencido, inexistente o de
+  un usuario que ya no está en el estado esperado devuelven **el mismo `400`**. Una contraseña que incumple la
+  política da `422` y no consume el enlace. No hay ningún endpoint que envíe un correo arbitrario.
+- **Límites de intentos (ADR-014).** Ventana fija de 15 min salvo los envíos (1 h). Login: **5 fallos por
+  (cuenta + IP)** y **30 por IP**; el acierto limpia el contador de la cuenta. Canje de enlaces: 10 fallos por
+  IP. Reenvío y restablecimiento: 5 por usuario destinatario y 60 por administrador. Responde `429` con
+  `Retry-After` y se evalúa **antes** de verificar la contraseña (un bloqueado no paga bcrypt). Cuenta
+  inexistente, desactivada o con clave errónea cuentan y responden igual. La IP sale de `request.client`
+  (nunca de la cabecera a mano). Si `rate_limits` falla, **el limitador no bloquea** (fail-open) y deja un
+  `ERROR` en el log: la autenticación depende de esa misma base.
+- **Auditoría (ADR-014).** Ver `02` §9.9. Si la escritura del registro falla, el cambio **no** se revierte:
+  queda un `CRITICAL` y la respuesta lleva `X-Audit-Status: failed`.
 - **Política (variables de entorno, C17).** `PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH` y
   `PASSWORD_REQUIRE_CHAR_CLASSES` (0 a 4); un valor fuera de rango impide el arranque.
   Los defaults siguen **NIST SP 800-63B-4** (rev. 4, 26-ago-2025), §3.1.1.2: mínimo **15**
@@ -465,24 +483,35 @@ Los IDs siguen la numeración real (último existente: BE08, INT02, FE05).
 | `sub = str(_id)`; sesiones cortadas por desactivación y por cambio de contraseña | `test_BE11_*` |
 | `hashed_password`, `token_hash` y `personal_phone` (a terceros) no aparecen en ninguna respuesta | `test_INT07_*` (recorre el JSON, patrón INT02) |
 | Siempre queda un `iam/admin` activo, también en masa; nadie se desactiva a sí mismo | `test_BE29_*`, `test_BE41_*`, `test_BE44_*` |
-| Inyección de operadores, regex sin escapar (D5) y asignación masiva | `test_INT08_*` y los `422` de cada historia |
-| Variables de identidad y secretos sin default; todas declaradas en compose y plantilla | `test_BE14_*` |
+| Inyección de operadores, regex sin escapar (D5) y asignación masiva | `test_INT08_*` (toda ruta de escritura nueva debe estar en su tabla) y los `422` de cada historia |
+| Variables de identidad y secretos sin default; todas declaradas en compose y plantilla | `test_BE14_*`, `test_BE42_*` |
+| Enlace de un solo uso; solo el hash en la base; el token no aparece en la base, el audit ni los logs | `test_BE46_*` |
+| El correo no es un relay: no existe ningún endpoint de envío; el link no usa `Host`; sin inyección de cabeceras | `test_BE46_*`, `test_BE43_*` |
+| Límite de intentos por cuenta+IP y por IP, sin DoS dirigido, sin evadirlo con `X-Forwarded-For` | `test_BE47_*` |
+| El audit es solo de agregado, sin credenciales, y un fallo no revierte ni se oculta | `test_BE44_*` |
+| El CSV no escribe en la vista previa; el lote es parcial; las invariantes de admin valen dentro del lote | `test_BE48_*` |
+| La subrogancia no concede permisos | `test_BE49_a_subrogation_grants_no_permission` |
+| El script de consentimiento no escribe el token a disco ni a un log | `test_BE50_*` |
+| Los módulos respetan el grafo de dependencias (ADR-013) | `test_BE45_*` |
 
 ### 9.8 Configuración
 
-Variables nuevas, sin default en las de identidad y secreto (la norma de D2): `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `PUBLIC_BASE_URL`, `GMAIL_SENDER_ADDRESS`,
-`GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; y, por decisión de la fase F3,
+Variables nuevas, sin default en las de identidad y secreto (la norma de D2): `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_SENDER_ADDRESS`,
+`GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (las cuatro últimas solo son obligatorias con `MAIL_MODE=gmail`); y, por decisión de la fase F3,
 `JWT_SECRET` y `ADMIN_PASSWORD` también pierden su default. `MAIL_MODE` (`gmail` o `console`) decide si hacen falta las credenciales de Gmail; ver ADR-012 y `07` §2.1. Con defaults razonables y validación
 de rango: la política de contraseñas. Detalle y archivos a actualizar: `07` §2.
 
 ### 9.9 Brechas que este diseño cierra y las que deja abiertas
 
 **Cierra:** D2 (defaults de `JWT_SECRET` y `ADMIN_PASSWORD`), D3 (`viewer` escribe), D4 (`PUT` sin
-redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting (si se
-implementa E9), y el login ilimitado.
+redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting, y el login ilimitado.
 **Sigue abierta:** token en `localStorage` (§1), CORS `*` (§5), cabeceras de seguridad (§7),
 `/docs` y `/openapi.json` públicos, redacción de `licenses[].email` y de los datos de
 contrapartes (§3), y MFA.
+**Límites conocidos de F4** (registrados en `05` §5.3c): el modo `console` escribe el enlace completo en el
+log (solo desarrollo); un atacante distribuido en muchas IPs puede probar 5 contraseñas por IP contra una
+cuenta (el diseño evita el bloqueo de cuenta a propósito); el reloj de pared del entorno de desarrollo
+(WSL2) puede saltar hacia atrás y hacer fallar un token recién emitido o un test de sesión.
 
 ---
 

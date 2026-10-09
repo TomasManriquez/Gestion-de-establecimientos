@@ -546,7 +546,7 @@ declaran **antes** de `/{id}` para que no las capture.
 | POST | `/api/auth/google` 🧭 F6 | pública | `Token` (verifica el `id_token`; sin auto-provisión) |
 | GET | `/api/auth/config` 🧭 F6 | pública | `{google_client_id}` (el frontend no tiene variables de entorno, ADR-008) |
 | GET | `/api/auth/password-policy` ✅ | pública | `{min_length, max_length, require_char_classes}` |
-| POST | `/api/auth/set-password` 🧭 F4 | pública | `204` (canje del enlace; mismo error genérico `400` ante token usado, vencido o inexistente) |
+| POST | `/api/auth/set-password` ✅ | pública | `204` (canje del enlace; mismo error genérico `400` ante token usado, vencido, inexistente o de un usuario en otro estado; `422` si la contraseña incumple la política y **no** consume el enlace; `429` con `Retry-After`) |
 | POST | `/api/auth/password` ✅ | autenticado | `Token` nuevo (cambio de contraseña propia) |
 
 **`/api/users`** (módulo `users`; todo `iam/admin` salvo `/me`)
@@ -562,12 +562,12 @@ declaran **antes** de `/{id}` para que no las capture.
 | POST | `/api/users/{id}/disable` · `/enable` ✅ | `iam/admin` | `User` |
 | PUT | `/api/users/{id}/access/{platform_id}` ✅ | `iam/admin` | `User` (`{role}`) |
 | DELETE | `/api/users/{id}/access/{platform_id}` ✅ | `iam/admin` | `User` |
-| POST | `/api/users/{id}/invitation` 🧭 F4 | `iam/admin` | `User` + `invitation` (reenvío; solo `invited`) |
-| POST | `/api/users/{id}/password-reset` 🧭 F4 | `iam/admin` | `202` (solo `active`) |
-| POST | `/api/users/import` 🧭 F4 | `iam/admin` | `ImportPreview` (CSV multipart → JSON con dry-run; no escribe) |
-| GET | `/api/users/import/template` 🧭 F4 | `iam/admin` | `text/csv` con BOM |
-| POST | `/api/users/bulk-create` 🧭 F4 | `iam/admin` | `BulkResult` (`dry_run` opcional) |
-| POST | `/api/users/bulk` 🧭 F4 | `iam/admin` | `BulkResult` (unión discriminada por `op`) |
+| POST | `/api/users/{id}/invitation` ✅ | `iam/admin` | `User` + `invitation` (reenvío; solo `invited`, si no `409 not_invited`; si el correo falla responde `200` con `invitation.last_error`; `429` con `Retry-After`) |
+| POST | `/api/users/{id}/password-reset` ✅ | `iam/admin` | `202` `{sent, expires_at}` (solo `active`, si no `409 not_active`; `502 {code}` si el correo no sale; `429`) |
+| POST | `/api/users/import` ✅ | `iam/admin` | `ImportPreview` (CSV multipart, campo `file` → JSON con dry-run; **no escribe**; `413` sobre 1 MiB; `422` con `code` por error de archivo) |
+| GET | `/api/users/import/template` ✅ | `iam/admin` | `text/csv` UTF-8 con BOM y `;`, generado por el servidor (`plantilla-usuarios.csv`) |
+| POST | `/api/users/bulk-create` ✅ | `iam/admin` | `BulkResult`. Body `{items: [≤200], dry_run}`. Parcial: cada ítem se valida solo; las invitaciones salen **después** de responder |
+| POST | `/api/users/bulk` ✅ | `iam/admin` | `BulkResult`. Body `{user_ids: [1..200 únicos], operation}` con `operation` = `{op: assign_unit, unit_id}` \| `{op: grant_access, platform_id, role}` \| `{op: revoke_access, platform_id}` \| `{op: disable}` \| `{op: enable}` |
 
 No existe `DELETE /api/users/{id}`: eliminar es desactivar (C9).
 
@@ -588,13 +588,13 @@ una plantilla HTML y de texto (ADR-012).
 | POST | `/api/units/{id}/move` ✅ | `iam/admin` | `Unit` (reescribe `ancestors` del subárbol) |
 | POST | `/api/units/{id}/deactivate` · `/activate` ✅ | `iam/admin` | `Unit` |
 | PUT | `/api/units/{id}/head` ✅ | `iam/admin` | `Unit` (`{user_id}` o `null`) |
-| POST | `/api/units/{id}/subrogations` · GET igual ruta 🧭 F4 | `iam/admin` · autenticado | `201` `Subrogation` · lista (Could) |
-| POST | `/api/units/subrogations/{sid}/cancel` 🧭 F4 | `iam/admin` | `Subrogation` (Could) |
+| POST | `/api/units/{id}/subrogations` · GET igual ruta ✅ | `iam/admin` · autenticado | `201` `Subrogation` · lista más reciente primero (`?current=true` solo las vigentes hoy) |
+| POST | `/api/units/subrogations/{sid}/cancel` ✅ | `iam/admin` | `Subrogation` (idempotente) |
 | GET | `/api/platforms` ✅ | `iam/admin` | `Platform[]` |
 | PATCH | `/api/platforms/{id}` ✅ | `iam/admin` | `Platform` (solo `name`, `status`) |
-| GET | `/api/audit` 🧭 F4 | `iam/admin` | paginado (`page_size ≤ 200`) |
+| GET | `/api/audit` ✅ | `iam/admin` | `{items,total,page,page_size,total_pages}` (`page_size ≤ 200`), más reciente primero. Filtros: `actor_id`, `action`, `target_type`, `target_id`, `bulk_id`, `since`, `until` (UTC) |
 
-### 8.2 Cambios a endpoints existentes (✅ todos implementados en F3, salvo `user_id` de contrapartes 🧭 F4)
+### 8.2 Cambios a endpoints existentes (✅ todos implementados: F3 y, de F4, `user_id` de contrapartes y `acting`)
 
 | Endpoint | Cambio | ¿Breaking? |
 |---|---|---|
@@ -602,7 +602,10 @@ una plantilla HTML y de texto (ADR-012).
 | `POST /api/auth/login` | El campo `username` acepta el correo (normalizado) o el username legado. Un usuario `invited` o `disabled` recibe el mismo `401` que una credencial errónea. El token lleva `sub = str(_id)` e `iat`. | No para clientes que tratan el token como opaco |
 | Los 12 endpoints de datos | `Depends(get_current_user)` pasa a `require_access("datos", …)`. **`viewer` recibe `403` en toda escritura; `editor` no puede `DELETE`; quien no tiene acceso a `datos` recibe `403`.** | **Sí, de comportamiento** (intencional: cierra D3 y D4) |
 | `PUT /api/establishments/{rbd}` | Un `licenses[].password` o `connectivity.ssid_password` igual a `"[REDACTED]"` conserva el valor almacenado; si no hay valor equivalente → `422`. | No |
-| `POST/PUT /api/counterparts` | Campo opcional `user_id` (validado contra `users`). | No |
+| `POST/PUT /api/counterparts` | Campo opcional `user_id` (validado contra `users`; `422 user_not_found`; en `PUT`, `""` desvincula). La respuesta lo incluye (`null` si no hay vínculo). | No |
+| `GET /api/users` | Filtro `acting=true`: solo quienes subrogan una unidad hoy. | No |
+| `POST /api/users` | Además de crear, **envía la invitación** y responde con el usuario ya con `invitation`. Un fallo de correo no cambia el `201`. | No |
+| `POST /api/auth/login`, `/login-form` | `429` con `Retry-After` tras 5 fallos por (cuenta + IP) o 30 por IP en 15 min; aun con la contraseña correcta. | **Sí, de comportamiento** (intencional, ADR-014) |
 
 El token ya no se considera válido si `iat < password_changed_at` del usuario (`04` §9.4). Los
 tokens legados con `sub = username` se aceptan mientras dure la compatibilidad.
@@ -613,9 +616,16 @@ tokens legados con `sub = username` se aceptan mientras dure la compatibilidad.
   Los `User` nunca incluyen `hashed_password` ni `token_hash`; `personal_phone` solo lo reciben
   `iam/admin` y el propio usuario.
 - **`invitation`** (en todo `User`): `{sent_at, expires_at, last_error, sent}`. `sent` es
-  verdadero solo si hay `sent_at` y no hay `last_error`. Mientras no exista el envío de correo (F4)
-  un usuario recién creado trae `last_error: "mail_not_configured"` y `sent: false`: se dice la
-  verdad en vez de simular un envío. Si el correo falla en F4, el alta igual responde `201`.
+  verdadero solo si hay `sent_at` y no hay `last_error`. `last_error` es un código estable de
+  `mail_service`: `mail_auth_failed` (consentimiento revocado o credencial inválida), `mail_send_failed`,
+  `mail_timeout` o `invalid_message`; `null` si no hubo intento o salió bien. Si el correo falla el alta
+  igual responde `201` y el usuario queda `invited`. En una alta masiva, entre la respuesta y el envío la
+  invitación figura sin enviar (`sent: false`, `last_error: null`).
+- **Cabecera `X-Audit-Status: failed`:** se agrega a la respuesta si la escritura de auditoría de esa petición
+  falló. El cambio ya hecho **no** se revierte (ADR-014) y el fallo queda en el log en nivel CRITICAL. CORS la
+  expone junto con `Retry-After`.
+- **`429`:** `detail: {code: "rate_limited", message}` y la cabecera `Retry-After` (segundos). Mismo mensaje
+  exista o no la cuenta. Límites en `04` §9.5.
 - **Errores de las rutas nuevas:** `409` lleva `detail: {code, message, field}` (`field` es el
   campo en conflicto, por ejemplo `email`, para que el formulario lo marque); `422` por una
   referencia o combinación inválida que detecta el service lleva `detail: [{field, code, message}]`
@@ -633,16 +643,33 @@ tokens legados con `sub = username` se aceptan mientras dure la compatibilidad.
 - **`BulkResult`:**
 
 ```json
-{"bulk_id": "…", "dry_run": false, "total": 5, "created": 3, "failed": 2,
+{"bulk_id": "…", "dry_run": false, "total": 5, "created": 3, "succeeded": 3, "failed": 2,
  "items": [{"index": 0, "status": "created", "id": "…", "errors": [], "invitation": "queued"},
            {"index": 3, "status": "invalid", "errors": [{"field": "email", "code": "duplicate", "message": "…"}]}]}
 ```
 
   `status` posibles: `created`, `invalid`, `duplicate`, `ok`, `not_found`, `last_admin`, `self`,
-  `mode_mismatch`. El `index` coincide con el número de fila del CSV menos la cabecera.
+  `mode_mismatch`. `index` es la posición (desde 0) en `items` / `user_ids`. `created` cuenta las altas
+  creadas (o válidas, en un `dry_run`); `succeeded` agrega las operaciones masivas aplicadas (`ok`) y
+  coincide con `created` en un alta (campo aditivo). `invitation: "queued"` marca las altas cuyo correo sale
+  después de responder.
+- **`bulk`:** se ejecuta **en serie y en el orden recibido** y cada ítem pasa por el mismo método que la
+  operación individual, así que las invariantes se evalúan sobre el estado real: con dos únicos admins
+  globales, quitarles `iam` a ambos deja al primero en `ok` y al segundo en `last_admin`. Quien llama nunca
+  puede desactivarse (`self`). `assign_unit` sobre un usuario de establecimiento da `mode_mismatch`; un id
+  inexistente o mal formado, `not_found`. Una operación inválida en sí misma (plataforma o rol que no existe,
+  unidad inactiva) responde `404`/`422` **antes** de tocar a nadie. Todo el lote comparte un `bulk_id` en el
+  audit.
 - **CSV:** `POST /api/users/import` recibe `multipart` (≤ 1 MiB, ≤ 200 filas), decodifica
-  `utf-8-sig` y luego `cp1252`, detecta `;` o `,`, y devuelve una **lista** `[{row, data,
-  errors}]` que es exactamente el body de `bulk-create`. Columnas: `email`, `first_name`,
+  `utf-8-sig` y luego `cp1252`, detecta `;` o `,`, y devuelve `{total, valid, invalid, rows: [{row, data,
+  errors}]}`: cada `data` es exactamente un ítem de `bulk-create`. `row` es el número de fila de la planilla
+  (la cabecera es la 1; las filas vacías se saltan pero cuentan). Las cabeceras no distinguen mayúsculas ni
+  espacios; una columna desconocida o repetida, o una obligatoria ausente, es un error de archivo. La vista
+  previa ejecuta el mismo pipeline del alta en `dry_run`: detecta duplicados dentro del archivo («ya aparece en
+  la fila N», con el número del archivo) y contra la base, y **no escribe nada**. Códigos de archivo (`422`):
+  `empty_file`, `not_csv`, `bad_encoding`, `duplicate_columns`, `unknown_columns`, `missing_columns`,
+  `too_many_rows`; `413 file_too_large`. Por fila: `unit_not_found`, `invalid_combination`, `too_many_columns`
+  y los de `create_many`. La plantilla trae dos filas de ejemplo: **hay que borrarlas** antes de cargar. Columnas: `email`, `first_name`,
   `last_name`, `personal_phone`, `work_extension`, `unit_code`, `rbd`, `positions` (varios valores
   separados por `|`). La unidad se referencia por `code`.
 - **Límites:** 200 ítems por lote (CSV, `bulk-create` y `bulk`), una sola constante.

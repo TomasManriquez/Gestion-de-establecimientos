@@ -145,7 +145,7 @@ El frontend **no tiene variables de entorno** (ADR-008).
 
 ### 2.1 Variables de la feature de usuarios: estado por fase
 
-**Ya implementadas en F3** (tabla de arriba): `JWT_SECRET`, `ADMIN_PASSWORD`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS` y la política de contraseñas. **Las demás son 🧭 de F4 y F6** y no existen todavía en `config.py`. Cada una debe declararse en **los cuatro archivos** (`config.py`, `docker-compose.yml`,
+**Ya implementadas** (tabla de abajo): en F3 `JWT_SECRET`, `ADMIN_PASSWORD`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS` y la política de contraseñas; en F4 `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_SENDER_ADDRESS`, `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` (✅). **🧭 De F6:** el uso de `GOOGLE_CLIENT_ID` para verificar el `id_token`. Cada una debe declararse en **los cuatro archivos** (`config.py`, `docker-compose.yml`,
 `docker-compose.prod.yml`, `.env.production.template`; un test lo verifica) y evaluarse para el
 paso 1 de `scripts/deploy.sh`. **Las de identidad y secreto no tienen default: si falta una, la app
 no arranca.**
@@ -154,11 +154,11 @@ no arranca.**
 |---|---|---|
 | `ALLOWED_EMAIL_DOMAINS` | **ninguno** | Lista separada por comas (`slepllanquihue.cl`). Valida las altas y el claim `hd` de Google |
 | `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | Correo del admin sembrado o migrado |
-| `PUBLIC_BASE_URL` | **ninguno** | URL pública base (https, salvo `localhost`); forma el enlace de los correos |
+| `PUBLIC_BASE_URL` | **ninguno** | Origen público **sin ruta ni barra final**; forma el enlace de los correos. Con `MAIL_MODE=gmail` debe ser `https` (salvo `localhost`) |
 | `MAIL_MODE` | **ninguno** | `gmail` (envío real) o `console` (escribe el mensaje en el log; solo desarrollo, el arranque lo rechaza si `PUBLIC_BASE_URL` no es `localhost` o `127.0.0.1`). Con `console` no hacen falta las cuatro variables de Gmail/Google siguientes |
 | `GMAIL_SENDER_ADDRESS` | **ninguno** | Casilla remitente dedicada, no personal |
 | `GMAIL_REFRESH_TOKEN` | **ninguno** | **Secreto.** Token de la casilla remitente, obtenido una vez (§9). Trátese como `JWT_SECRET` |
-| `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Hoy está en el `.env` de la raíz pero **no llega al contenedor** (ningún compose lo nombra) |
+| `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Desde F4 los dos compose la pasan al contenedor (`${GOOGLE_CLIENT_ID:-}`); obligatoria con `MAIL_MODE=gmail` |
 | `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Lo usa el refresco del token de Gmail |
 | `PASSWORD_MIN_LENGTH` | `15` | Mínimo ≥ 8 (NIST SP 800-63B-4: 15 sin MFA) |
 | `PASSWORD_MAX_LENGTH` | `64` | Mínimo permitido 64; la política también rechaza lo que pase de 72 bytes (límite de bcrypt) |
@@ -168,8 +168,12 @@ no arranca.**
 **Cada variable pasa a ser obligatoria en la fase que la usa**, no antes: F3 exige
 `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `JWT_SECRET`, `ADMIN_PASSWORD` y la política de
 contraseñas; F4 agrega `MAIL_MODE` y `PUBLIC_BASE_URL` (y las de Gmail/Google si `MAIL_MODE=gmail`);
-F6 agrega `GOOGLE_CLIENT_ID`. Mientras la cuenta remitente no exista se trabaja con
-`MAIL_MODE=console`.
+F6 agrega el uso de `GOOGLE_CLIENT_ID` para el login. Mientras la cuenta remitente no exista se trabaja con
+`MAIL_MODE=console`: el mensaje, **con el enlace completo**, sale por el log del backend
+(`docker compose logs backend | grep "MAIL console"`), que es como se prueba el alta en desarrollo.
+En desarrollo `docker-compose.yml` usa `MAIL_MODE=${MAIL_MODE:-console}` y
+`PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:5173}`; en producción ambas son obligatorias
+(`deploy.sh` las exige) y el arranque rechaza `console` fuera de `localhost`.
 
 Un valor de la política fuera de rango impide el arranque con un mensaje claro. Los vencimientos
 de los enlaces (72 h invitación, 24 h restablecimiento) y el tope de 200 ítems por lote son
@@ -194,7 +198,17 @@ python -m pytest -k "INT02" -v                         # por patrón
 ```
 
 `pytest.ini` ya incluye `-v --tb=short` en `addopts`. Nomenclatura:
-`test_BE<NN>` = backend unitario, `test_INT<NN>` = integración con `TestClient` (BE09 a BE41 e INT03 a INT08 son de la feature de usuarios), `test_FM01` = el doble de MongoDB.
+`test_BE<NN>` = backend unitario, `test_INT<NN>` = integración con `TestClient` (BE09 a BE50 e INT03 a INT08 son de la feature de usuarios; F4 aporta BE42 a BE50), `test_FM01` = el doble de MongoDB.
+`conftest.py` reemplaza `mail_service.send` en **todos** los tests por un buzón falso (`mailbox`), así que
+ninguna prueba envía correo; `mailbox.fail_with` simula un fallo y `mailbox.last_token()` extrae el token del
+último enlace.
+
+> 🔸 **BRECHA (tests de sesión intermitentes en WSL2):** se observó que ~1 de cada 30 corridas de la suite
+> falla un test de sesión (`BE12`, `BE32` o un test de `BE46` que usa un token recién emitido). Se
+> instrumentó `get_current_user` y se capturó un `ImmatureSignatureError` («token aún no válido, `iat`»):
+> **el reloj de pared del entorno salta hacia atrás** entre dos instantes del mismo test, y el token queda con
+> `iat` en el futuro. No es un defecto de F4 ni de F3. Mitigación posible, **no aplicada** porque toca `auth`
+> (punto único de falla): `leeway` de unos segundos en `jwt.decode`. Ver `05` §5.3c (D28).
 
 **Dependencias de test:** `pip install -r backend/requirements-dev.txt` (`pytest`,
 `pytest-asyncio`, `httpx`). Con el venv del proyecto sin `pip`, `uv pip install -r requirements-dev.txt`.
@@ -395,8 +409,10 @@ lo evidencia.
 | Cambia el endpoint de healthcheck | `Dockerfile.prod` (backend), `docker-compose.prod.yml` (los tres healthchecks), `nginx.conf` (`/health`). |
 | Toca `auth/`, `ProtectedRoute` o `database_service` | Punto único de falla: rama aislada, punto de restauración, y tests de autenticación pasando antes y después (regla 3 de `GEMINI.md`). |
 | 🧭 Agrega un componente de shadcn | `npx shadcn@latest add …` (nunca descargar a mano ni usar `--overwrite` sin aprobación); revisar con `--dry-run` las dependencias `@radix-ui/*` que trae, porque obligan a reconstruir la imagen del frontend. Requiere corregir antes `components.json` (D18). |
-| 🧭 Envía correo desde el backend | `GMAIL_*` y `GOOGLE_*` en los cuatro archivos; el consentimiento inicial de la casilla es una tarea manual (§9). |
-| 🧭 Agrega un contador o una colección con TTL | `ensure_indexes()` con `expireAfterSeconds`; comprobar que sigue siendo idempotente. |
+| Envía correo desde el backend (✅ F4) | `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_*` y `GOOGLE_*` en los cuatro archivos y en `deploy.sh`; el consentimiento inicial de la casilla es una tarea manual (§9). **La imagen del backend se reconstruye** (`httpx` entra en `requirements.txt`). |
+| Agrega un contador o una colección con TTL (✅ F4) | `ensure_indexes()` con `expireAfterSeconds`; comprobar que sigue siendo idempotente. Los índices nuevos de F4 (`auth_tokens`, `rate_limits`, `audit_log`, `subrogations`) se crean al arrancar. |
+| Depende de la IP del cliente (rate limiting) | `--forwarded-allow-ips` en `Dockerfile.prod` y `X-Forwarded-For` en `nginx.conf`. **Verificar en el primer despliegue** que el proxy del host (delante de `127.0.0.1:8080`) reenvía `X-Forwarded-For`: de lo contrario el límite por IP se comparte entre todos. Prueba: dos fallos de login desde equipos distintos no deben sumarse en `db.rate_limits`. |
+| Actualiza un entorno existente a F4 | Backup (`scripts/backup-mongo.sh`); `.env` con `MAIL_MODE` y `PUBLIC_BASE_URL`; `docker compose up -d --build backend` (dependencia nueva). Los usuarios `invited` creados antes de F4 tienen `invitation.last_error: "mail_not_configured"`: reenviarles la invitación. Rollback: tag `pre-usuarios-f4`; las colecciones nuevas las ignora el código anterior. |
 
 ---
 
@@ -407,7 +423,9 @@ lo evidencia.
 | La base queda vacía al arrancar | Falta `backend/establishments.json` (git-ignored) | `docker compose logs backend \| grep "Seeding source file not found"` |
 | El backend no arranca: `Variable de entorno obligatoria sin definir: …` | Falta una variable de §2 (contenedor creado con el compose anterior) | `docker compose up -d --build backend`; §1.3 |
 | El login del admin falla | El admin ya existía: `ADMIN_PASSWORD` solo se usa para crearlo. Entrar con el correo o con `admin` y la contraseña vigente | `db.users.findOne({email:"<BOOTSTRAP_ADMIN_EMAIL>"})` · §1.3 |
-| Un usuario recién creado no puede entrar | Queda `invited` y aún no hay envío de correo (F4) | `invitation.last_error == "mail_not_configured"` en `GET /api/users/{id}` |
+| Un usuario recién creado no puede entrar | Queda `invited` hasta definir su contraseña con el enlace del correo | `invitation` en `GET /api/users/{id}`: `last_error` indica por qué no salió el correo (`mail_auth_failed`, `mail_send_failed`, `mail_timeout`); reenviar con `POST /api/users/{id}/invitation` |
+| `429` al iniciar sesión | Rate limiting (5 fallos por cuenta+IP o 30 por IP en 15 min) | Cabecera `Retry-After`. Si **todos** los usuarios chocan a la vez, la IP no llega al backend: ver §7 |
+| `MAIL_MODE=console solo se permite con PUBLIC_BASE_URL en localhost` | Se dejó `console` en un entorno con URL pública | Usar `MAIL_MODE=gmail` y completar las variables de §2.1 |
 | Todas las llamadas a `/api` fallan en dev | Frontend fuera de Docker con el proxy apuntando a `backend:8000` | §1.2 |
 | El mapa de la ficha dice "Ubicación no disponible" | La base se re-sembró y se perdió `location` | `db.establishments.countDocuments({location:{$exists:true}})` · §4.1 |
 | El dashboard muestra ceros | No hay métricas del año 2026, que está hardcodeado | `db.metrics.countDocuments({year:2026})` · `03` §5.16 |
@@ -417,11 +435,11 @@ lo evidencia.
 
 ---
 
-## 9. 🧭 DISEÑO F2: casilla remitente de Gmail (checklist manual)
+## 9. Casilla remitente de Gmail (checklist manual)
 
-> **Estado: sin implementar.** Son tareas de la consola de Google Cloud y de Google Workspace
-> que **ni el código ni un agente pueden hacer**: las ejecuta una persona con permisos de
-> administrador. Decisión y riesgos: ADR-012.
+> **Estado: el código está implementado (F4); falta la parte manual.** Son tareas de la consola de Google
+> Cloud y de Google Workspace que **ni el código ni un agente pueden hacer**: las ejecuta una persona con
+> permisos de administrador. Hasta completarlas se trabaja con `MAIL_MODE=console`. Decisión y riesgos: ADR-012.
 
 1. [ ] **Elegir o pedir a TI la casilla remitente**: `@slepllanquihue.cl`, dedicada
    (notificaciones o no-reply), no personal. Si fuera personal, al irse su dueño o cambiar su
@@ -430,9 +448,14 @@ lo evidencia.
    consentimiento** y confirmar que es de tipo **Internal**. Si fuera *External* en estado
    *Testing*, Google caduca el refresh token a los **7 días**.
 3. [ ] Agregar el scope `https://www.googleapis.com/auth/gmail.send` (y ningún otro) al cliente.
-4. [ ] Con la casilla remitente, ejecutar **una sola vez** el script
-   `backend/scripts/gmail_consent.py` (instala `google-auth-oauthlib` solo donde se ejecute; no
-   va en la imagen). Imprime el **refresh token** por pantalla; no lo escribe en ningún archivo.
+4. [ ] Con la sesión de la casilla remitente abierta en el navegador, ejecutar **una sola vez**, desde
+   cualquier equipo con el repositorio y Python (usa solo `httpx`, que ya está en `requirements.txt`):
+   `cd backend && GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… python scripts/gmail_consent.py`
+   (con `--no-browser` imprime la URL). El cliente OAuth debe ser de tipo **«Aplicación de escritorio»**, o
+   web con `http://127.0.0.1:8765/` como URI de redirección autorizada (`--port` cambia el puerto). Pide
+   solo el scope `gmail.send`, usa PKCE y verifica `state`. Imprime el **refresh token** por pantalla; no lo
+   escribe en ningún archivo ni log (un test lo fija). Si Google no devuelve token (la cuenta ya consintió),
+   revocar el acceso en `myaccount.google.com/permissions` y repetir.
 5. [ ] Guardar el token como secreto en el `.env` del servidor (`GMAIL_REFRESH_TOKEN`) junto con
    `GMAIL_SENDER_ADDRESS`. **Nunca** en el repositorio ni en un chat.
 6. [ ] Agregar `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` al `.env` del servidor y a los dos

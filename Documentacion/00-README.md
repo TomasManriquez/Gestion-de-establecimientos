@@ -5,11 +5,12 @@
 > a qué documento ir según lo que se quiera hacer. No contiene detalle de implementación.
 >
 > **Estado:** verificado contra el repositorio el 2026-09-23, rama `master`, commit `5b0984e`.
-> El 2026-10-02 se documentó la feature de usuarios e IAM. **Fase F3 implementada** (identidad,
-> acceso por plataforma, unidades, perfil, contraseñas): `04` §1, §2 y §6, `03` §8, `02` §6 y
-> `07` §1.3 describen el código nuevo. Siguen marcadas `🧭 DISEÑO` las partes de F4 a F7
-> (correo, CSV, masivas, Google, auditoría, interconexión). Fuera de eso no se re-verificó
-> el resto contra el código.
+> El 2026-10-02 se documentó la feature de usuarios e IAM. **Fases F3 y F4 implementadas** (2026-10-09):
+> identidad, acceso por plataforma, unidades, perfil, contraseñas (F3); correo e invitaciones, restablecimiento,
+> CSV, operaciones masivas, subrogancias, auditoría y límite de intentos (F4). `04` §1, §2, §6 y §9, `03` §8,
+> `02` §6 y §9 y `07` describen el código nuevo, verificado también contra una MongoDB real desechable.
+> Siguen marcadas `🧭 DISEÑO` solo las partes de F6 y F7 (login con Google, interconexión). Fuera de eso no se
+> re-verificó el resto contra el código.
 
 ---
 
@@ -72,7 +73,7 @@ son correctas *a esta escala* y dejan de serlo un orden de magnitud más arriba.
 | Agregar un gráfico nuevo al dashboard | `05` §2.4 |
 | Cambiar algo del despliegue o las variables de entorno | `07` §2 y §5 |
 | Saber qué está mal hoy y qué falta | `05` §5 y las marcas `🔸 BRECHA` de cada documento |
-| Entender la feature de usuarios e IAM (F3 implementada; F4 a F7 diseñadas) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
+| Entender la feature de usuarios e IAM (F3 y F4 implementadas; F6 y F7 diseñadas) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
 | Entender cómo se conectarán otras plataformas (`selloverde`) | `04` §10 |
 | Configurar el correo de invitaciones (Gmail) | `07` §9 |
 
@@ -112,8 +113,8 @@ según de dónde vino el dato.
 | **Plataforma** | Un sistema del SLEP bajo `*.slepllanquihue.gob.cl` (`datos`, `selloverde`) más la plataforma lógica `iam`. Cada usuario tiene un rol por plataforma. 🧭 | `users.access[]`, `platforms` |
 | **Admin global** | Quien tiene `iam/admin`. Es un rol distinto de `datos/admin`. 🧭 | `04` §9.3 |
 | **Unidad** | Unidad organizacional del SLEP, con nivel 1 a 5 (Dirección Ejecutiva, subdirecciones…). Los funcionarios SLEP pertenecen a una unidad; los usuarios de establecimiento, a un `rbd`. 🧭 | colección `units` |
-| **Jefatura / subrogancia** | Quien dirige una unidad; y quien la reemplaza temporalmente. La subrogancia da visibilidad, no permisos. 🧭 | `units.head_user_id`, `subrogations` |
-| **Invitación** | Estado `invited` de un usuario recién creado: recibe un correo con un enlace de un solo uso para definir su contraseña. 🧭 | `04` §9.5 |
+| **Jefatura / subrogancia** | Quien dirige una unidad; y quien la reemplaza temporalmente. La subrogancia da visibilidad, no permisos. ✅ F4 | `units.head_user_id`, `subrogations` |
+| **Invitación** | Estado `invited` de un usuario recién creado: recibe un correo con un enlace de un solo uso para definir su contraseña. ✅ F4 | `04` §9.5 |
 
 ---
 

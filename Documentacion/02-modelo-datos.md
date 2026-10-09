@@ -525,11 +525,11 @@ poblada requiere hoy vaciar las colecciones y reiniciar, o escribir en Mongo a m
 
 ## 9. 🧭 DISEÑO F2: colecciones de la feature de usuarios e IAM
 
-> **Estado por subsección (2026-10-02).** ✅ Implementado y verificado en F3: 9.1 (salvo
-> `auth_tokens`, `subrogations`, `audit_log`, `rate_limits` y `counterparts.user_id`), 9.2, 9.3,
-> 9.4, 9.5, 9.10 y 9.12 (salvo las transiciones por correo). 🧭 Pendiente: 9.6 `subrogations`
-> y 9.7 `auth_tokens` (F4), 9.8 `counterparts.user_id` (F4), 9.9 `audit_log` y `rate_limits` (F4).
-> La marca `🧭` se retira cuando la fase correspondiente lo implemente y un test lo verifique. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
+> **Estado por subsección (2026-10-09).** ✅ Implementado y verificado: 9.1 a 9.12 (F3: 9.2 a 9.5,
+> 9.10, 9.12; F4: 9.6 `subrogations`, 9.7 `auth_tokens`, 9.8 `counterparts.user_id`, 9.9 `audit_log` y
+> `rate_limits`, y las transiciones por correo de 9.12). Las colecciones de F4 se verificaron además contra una
+> MongoDB real desechable (índices únicos y TTL, `$inc` y upserts). La marca `🧭` se retira cuando la fase
+> correspondiente lo implementa y un test lo verifica. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
 > y campos en inglés, igual que los cinco módulos existentes (ver D23 en `05` §5).
 
 ### 9.1 Panorama
@@ -816,7 +816,7 @@ Sembradas: `iam` (roles `["admin"]`), `datos` y `selloverde` (`["admin","editor"
 `@slepllanquihue.cl`; el **web** es `*.slepllanquihue.gob.cl`. No son el mismo. Las credenciales
 y URLs de redirección de las plataformas consumidoras se diseñan en F7 (`04` §10).
 
-### 9.6 🧭 `subrogations` (propiedad de `units`, prioridad Could)
+### 9.6 ✅ `subrogations` (propiedad de `units`, prioridad Could)
 
 ```json
 {"_id":"ObjectId","unit_id":"ObjectId","subrogate_user_id":"ObjectId","starts_at":"ISODate",
@@ -826,35 +826,54 @@ y URLs de redirección de las plataformas consumidoras se diseñan en F7 (`04` �
 ```
 
 Colección aparte porque el historial crece sin límite (ADR-010). «Vigente» se calcula por fecha,
-sin jobs. Reglas: la registra el admin global; quien subroga está activo, no es la jefatura
-titular y pertenece al subárbol de la unidad; no se superponen dos vigentes en una unidad;
-`ends_at` es obligatorio salvo `VACANCIA`. **No transfiere permisos.**
+sin jobs. Reglas: la registra el admin global; quien subroga es un funcionario SLEP activo, no es la
+jefatura titular y pertenece a la unidad o a su subárbol; la unidad está activa; no se superponen dos no
+canceladas en una unidad (los intervalos contiguos sí caben); `ends_at` es obligatorio salvo `VACANCIA` y
+debe ser posterior a `starts_at`. **No transfiere permisos.** Cancelar fija `cancelled_at` y es idempotente.
+Las fechas son UTC sin zona. Índices: `(unit_id, cancelled_at, starts_at desc)` y `subrogate_user_id`.
+`current` (vigente hoy) no se guarda: se calcula al leer (`units_service._subrogation_public`).
 
-### 9.7 🧭 `auth_tokens` (propiedad de `auth`)
+### 9.7 ✅ `auth_tokens` (propiedad de `auth`)
 
 ```json
 {"_id":"ObjectId","user_id":"ObjectId","purpose":"invite|reset","token_hash":"sha256(…)",
   "expires_at":"ISODate","used_at":"ISODate|null","created_by":"ObjectId","created_at":"ISODate"}
 ```
 
-El token (`secrets.token_urlsafe(32)`) solo viaja en el correo; la base guarda su hash. Índice TTL
-sobre `expires_at`. Emitir uno nuevo invalida el anterior del mismo usuario y propósito.
-Vigencia propuesta: 72 h (`invite`) y 24 h (`reset`).
+El token (`secrets.token_urlsafe(32)`) solo viaja en el correo; la base guarda su sha256 (64 hex).
+**Hay un único documento por `(user_id, purpose)`** y emitir uno nuevo lo reemplaza con un `upsert`: invalidar
+el anterior y emitir el nuevo es la misma operación atómica (ajuste respecto del borrador, que borraba y
+volvía a insertar). Índices: único `(user_id, purpose)`, único `token_hash` y TTL sobre `expires_at`
+(`expireAfterSeconds: 0`). Vigencia: 72 h (`invite`) y 24 h (`reset`). El canje es un
+`find_one_and_update` con `used_at: null` y `expires_at > ahora`: solo una petición gana. Un documento ya
+usado permanece hasta que el TTL lo borre, y un token usado no se vuelve a canjear aunque el usuario
+cambie de estado (`test_BE46_*`).
 
-### 9.8 🧭 `counterparts`: cambio
+### 9.8 ✅ `counterparts`: cambio
 
-Se agrega `user_id: Optional[str] = None`, nunca obligatorio (ADR-011). El backfill es un script
-con dry-run por defecto que empareja por correo normalizado.
+Se agrega `user_id: Optional[str] = None`, nunca obligatorio (ADR-011). Si viene, se valida contra `users`
+(`422 user_not_found`); en `PUT`, `""` desvincula y omitirlo lo conserva. El backfill es
+`backend/scripts/backfill_counterpart_users.py`: ensayo por defecto, empareja por correo normalizado y solo
+escribe con `--apply` (sin pisar un vínculo existente salvo `--overwrite`).
 
-### 9.9 🧭 `audit_log` y `rate_limits` (ADR-014)
+### 9.9 ✅ `audit_log` y `rate_limits` (ADR-014)
 
 ```json
 {"_id":"ObjectId","at":"ISODate","actor_id":"ObjectId","action":"user.create|access.grant|…",
   "target_type":"user|unit|subrogation","target_id":"…","changes":{"campo":["antes","después"]},"bulk_id":"string|null"}
 ```
 
-`audit_log` es solo de agregado; `changes` jamás contiene hashes, contraseñas ni tokens.
-`rate_limits` guarda `{key, count, expires_at}` con índice TTL.
+`audit_log` es solo de agregado (el service no expone ninguna operación que edite o borre; un test lo
+verifica sobre el AST); `changes` jamás contiene hashes, contraseñas ni tokens y `personal_phone` se enmascara
+(`[REDACTED]`). `actor_id` es `null` para acciones del sistema (arranque, seed). `bulk_id` agrupa un lote. Las
+acciones son: `user.create|update|disable|enable|invite|password_reset|password_set`,
+`access.grant|revoke`, `unit.create|update|move|deactivate|activate|head`, `platform.update`,
+`subrogation.create|cancel`. Una operación fallida (409) o sin cambios reales no deja registro. Índices:
+`(at desc)`, `(target_type, target_id, at desc)`, `(actor_id, at desc)` y `bulk_id` (disperso).
+
+`rate_limits` guarda `{key, count, expires_at}`; la clave es `<alcance>:<sha256[:32]>` de lo que se limita
+(correo, IP, id), así que no contiene datos en claro. Índices: único `key` y TTL sobre `expires_at`. Es una
+ventana fija por clave: al vencer, la siguiente `hit` abre una nueva.
 
 ### 9.10 ✅ Migración del admin sembrado
 
