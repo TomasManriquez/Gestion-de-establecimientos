@@ -3,7 +3,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth.auth_entity import AccessContext, IAM_ADMIN, PLATFORM_IAM
-from app.auth.auth_service import require_access
+from app.auth.auth_service import auth_service, require_access
+from app.mail.mail_service import MailError
 from app.users.users_entity import (AccessGrant, EstablishmentPosition, User, UserAdminUpdate,
                                     UserConflict, UserCreate, UserInvalid, UserListResponse, UserMe,
                                     UserNotFound, UserSelfUpdate, UserStatus)
@@ -67,9 +68,13 @@ async def list_users(
 async def create_user(payload: UserCreate, ctx: AccessContext = _IAM_ADMIN):
     """Alta individual: es `create_many([item])`, la misma ruta que usarán el CSV y el seed (R6)."""
     try:
-        return await users_service.create(payload.model_dump(mode="json"), ctx.user_id)
+        created = await users_service.create(payload.model_dump(mode="json"), ctx.user_id)
     except (UserConflict, UserInvalid) as exc:
         raise _http(exc)
+    # La invitación sale después del alta y un fallo de correo no la revierte (ADR-012): el usuario
+    # queda `invited` y `invitation.last_error` dice por qué. La respuesta ya refleja el resultado.
+    await auth_service.send_invitation(created, ctx.user_id)
+    return await users_service.find_by_id(created["_id"])
 
 
 @router.get("/{user_id}", response_model=User)
@@ -118,3 +123,33 @@ async def revoke_access(user_id: str, platform_id: str, ctx: AccessContext = _IA
         return await users_service.revoke_access(user_id, platform_id, ctx.user_id)
     except (UserNotFound, UserConflict) as exc:
         raise _http(exc)
+
+
+@router.post("/{user_id}/invitation", response_model=User)
+async def resend_invitation(user_id: str, ctx: AccessContext = _IAM_ADMIN):
+    """Reenvío: emite un token nuevo (invalida el anterior). Solo a usuarios `invited`. Si el correo
+    falla responde 200 con el usuario y `invitation.last_error`: el documento dice la verdad."""
+    user = await users_service.find_by_id(user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+    if user["status"] != "invited":
+        raise _http(UserConflict("Solo se puede reenviar la invitación a un usuario invitado", "not_invited"))
+    await auth_service.send_invitation(user, ctx.user_id)
+    return await users_service.find_by_id(user_id)
+
+
+@router.post("/{user_id}/password-reset", status_code=status.HTTP_202_ACCEPTED)
+async def request_password_reset(user_id: str, ctx: AccessContext = _IAM_ADMIN):
+    """El admin nunca ve ni define la contraseña: la persona recibe un enlace de un solo uso (24 h).
+    Solo `active`. Si el correo no sale, 502: aquí el correo es la operación."""
+    user = await users_service.find_by_id(user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+    if user["status"] != "active":
+        raise _http(UserConflict("Solo se puede restablecer la contraseña de un usuario activo", "not_active"))
+    try:
+        expires = await auth_service.send_password_reset(user, ctx.user_id)
+    except MailError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail={
+            "code": exc.code, "message": "No se pudo enviar el correo. Inténtalo de nuevo o revisa la configuración del envío."})
+    return {"sent": True, "expires_at": expires}

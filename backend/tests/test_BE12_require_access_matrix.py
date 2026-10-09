@@ -143,6 +143,7 @@ PUBLIC_ROUTES = {
     ("GET", "/"),                                   # healthcheck de Docker/Nginx: público por diseño
     ("POST", "/api/auth/login"), ("POST", "/api/auth/login-form"), ("POST", "/api/auth/logout"),
     ("GET", "/api/auth/password-policy"),         # pública: la pantalla de definir contraseña no tiene sesión
+    ("POST", "/api/auth/set-password"),           # pública: canje del enlace de un solo uso; el token ES la credencial
 }
 
 

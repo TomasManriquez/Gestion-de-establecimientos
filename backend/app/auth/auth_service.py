@@ -1,17 +1,31 @@
+import hashlib
+import logging
 import re
+import secrets
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 
 import bcrypt
 import jwt
+from bson import ObjectId
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
-from app.auth.auth_entity import AccessContext, COMMON_PASSWORDS, CONTEXT_WORDS, SEQUENCES
+from app.audit.audit_entity import AuditAction, AuditTarget
+from app.audit.audit_service import audit_service
+from app.auth.auth_entity import (AccessContext, COMMON_PASSWORDS, CONTEXT_WORDS, INVITE_TTL_HOURS, InvalidLink,
+                                  PURPOSE_INVITE, PURPOSE_RESET, PasswordPolicyError, RESET_TTL_HOURS, SEQUENCES,
+                                  SET_PASSWORD_PATH, render_invitation, render_password_reset)
 from app.config import settings
+from app.database.database_service import db_service
+from app.mail.mail_service import MailError, mail_service
 from app.users.users_service import users_service
+
+logger = logging.getLogger("auth")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -102,6 +116,10 @@ class AuthService:
         local = (email or "").partition("@")[0].lower()
         if len(local) >= 4:
             context.append(local)
+            # También sin separadores: "ana.perez" -> "anaperez" (lo que la gente escribe en realidad)
+            plain_local = re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", local).encode("ascii", "ignore").decode())
+            if len(plain_local) >= 4:
+                context.append(plain_local)
         if any(w in folded or w in pw.lower() for w in context):
             add("context_word", "No puede contener tu correo ni el nombre de la institución")
         return violations
@@ -119,6 +137,106 @@ class AuthService:
             return None
         await users_service.touch_login(user["_id"])
         return user
+
+    # ══ Enlaces de un solo uso: invitación y restablecimiento (ADR-012) ═══════════════════
+    @staticmethod
+    def hash_token(raw: str) -> str:
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    async def issue_link_token(self, user_id: str, purpose: str, created_by: Optional[str]) -> Tuple[str, datetime]:
+        """Emite un token nuevo e invalida el anterior del mismo usuario y propósito.
+
+        Hay un único documento por (user_id, purpose) y se reemplaza con un upsert: la
+        invalidación del anterior y la emisión del nuevo son la misma operación atómica. La base
+        guarda solo el sha256; el token viaja una sola vez, en el correo.
+        """
+        raw = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires = now + timedelta(hours=INVITE_TTL_HOURS if purpose == PURPOSE_INVITE else RESET_TTL_HOURS)
+        key = {"user_id": ObjectId(user_id), "purpose": purpose}
+        fields = {"token_hash": self.hash_token(raw), "expires_at": expires, "used_at": None,
+                  "created_by": ObjectId(created_by) if created_by else None, "created_at": now}
+        try:
+            await db_service.db.auth_tokens.update_one(key, {"$set": fields}, upsert=True)
+        except DuplicateKeyError:        # dos emisiones simultáneas: la segunda reemplaza a la primera
+            await db_service.db.auth_tokens.update_one(key, {"$set": fields})
+        return raw, expires
+
+    @staticmethod
+    def _redeemable(raw: str) -> dict:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return {"token_hash": AuthService.hash_token(raw), "used_at": None, "expires_at": {"$gt": now}}
+
+    @staticmethod
+    def link_for(raw: str) -> str:
+        # Token en el fragmento (#): no llega a los logs del servidor ni a la cabecera Referer.
+        return f"{settings.PUBLIC_BASE_URL}{SET_PASSWORD_PATH}#token={raw}"
+
+    async def send_invitation(self, user: dict, actor_id: Optional[str], bulk_id: Optional[str] = None) -> dict:
+        """Emite el token, envía el correo y guarda el resultado en `users.invitation`.
+
+        Un fallo de correo NO lanza ni revierte el alta: el usuario sigue `invited` y el motivo
+        queda en `invitation.last_error` para que el admin reenvíe (ADR-012 §3).
+        """
+        raw, expires = await self.issue_link_token(user["_id"], PURPOSE_INVITE, actor_id)
+        subject, html, text = render_invitation(user.get("first_name", ""), self.link_for(raw))
+        error: Optional[str] = None
+        try:
+            await mail_service.send(user["email"], subject, html, text)
+        except MailError as exc:
+            error = exc.code
+        except Exception:  # noqa: BLE001 — cualquier otro fallo tampoco debe tumbar el alta
+            logger.exception("Fallo inesperado al enviar la invitación")
+            error = "mail_send_failed"
+        sent_at = None if error else datetime.now(timezone.utc).replace(tzinfo=None)
+        await users_service.set_invitation(user["_id"], sent_at, None if error else expires, error)
+        await audit_service.record(actor_id, AuditAction.USER_INVITE, AuditTarget.USER, str(user["_id"]),
+                                   {"invitation": [None, error or "sent"]}, bulk_id)
+        return {"sent": error is None, "last_error": error, "expires_at": None if error else expires}
+
+    async def invite_many(self, users: list, actor_id: Optional[str], bulk_id: Optional[str] = None) -> list:
+        """Invitaciones en serie (lotes de INVITE_BATCH_LIMIT en el llamador). Un fallo no corta el resto."""
+        return [await self.send_invitation(u, actor_id, bulk_id) for u in users]
+
+    async def send_password_reset(self, user: dict, actor_id: Optional[str]) -> datetime:
+        """Restablecimiento iniciado por el admin: mismo mecanismo con `purpose: reset`. A diferencia
+        de la invitación, aquí el correo ES la operación: si falla, se lanza `MailError`."""
+        raw, expires = await self.issue_link_token(user["_id"], PURPOSE_RESET, actor_id)
+        subject, html, text = render_password_reset(user.get("first_name", ""), self.link_for(raw))
+        await mail_service.send(user["email"], subject, html, text)
+        await audit_service.record(actor_id, AuditAction.USER_PASSWORD_RESET, AuditTarget.USER, str(user["_id"]),
+                                   {"reset_link": [None, "sent"]})
+        return expires
+
+    async def redeem_link(self, raw_token: str, password: str) -> dict:
+        """Canjea el enlace: valida la política, consume el token de forma atómica y fija la contraseña.
+
+        `InvalidLink` ante cualquier problema con el enlace (mismo error para usado, vencido,
+        inexistente o de un usuario que ya no está en el estado esperado). `PasswordPolicyError`
+        NO consume el token: la persona puede corregir y reintentar con el mismo enlace.
+        """
+        token = await db_service.db.auth_tokens.find_one(self._redeemable(raw_token))
+        if token is None:
+            raise InvalidLink()
+        user = await users_service.find_by_id(str(token["user_id"]))
+        expected = {PURPOSE_INVITE: "invited", PURPOSE_RESET: "active"}[token["purpose"]]
+        if user is None or user.get("status") != expected:
+            raise InvalidLink()
+        violations = self.check_password_policy(password, user.get("email"))
+        if violations:
+            raise PasswordPolicyError(violations)
+        # Consumo atómico: solo una petición gana si dos canjean a la vez.
+        consumed = await db_service.db.auth_tokens.find_one_and_update(
+            self._redeemable(raw_token),
+            {"$set": {"used_at": datetime.now(timezone.utc).replace(tzinfo=None)}},
+            return_document=ReturnDocument.AFTER)
+        if consumed is None:
+            raise InvalidLink()
+        updated = await users_service.set_local_password(
+            user["_id"], self.get_password_hash(password), activate_invited=token["purpose"] == PURPOSE_INVITE)
+        await audit_service.record(user["_id"], AuditAction.USER_PASSWORD_SET, AuditTarget.USER, user["_id"],
+                                   {"via": [None, token["purpose"]]})
+        return updated
 
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         to_encode = data.copy()

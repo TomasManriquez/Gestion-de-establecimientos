@@ -28,7 +28,6 @@ ACTIVITY_THROTTLE = timedelta(minutes=5)
 BULK_MAX_ITEMS = 200
 # Unidad a la que se asigna el admin sembrado (Q4). Si no existe, se usa la raíz.
 BOOTSTRAP_ADMIN_UNIT_CODE = "AF-TI"
-INVITATION_NOT_CONFIGURED = "mail_not_configured"
 
 # Proyección de inclusión del listado: personal_phone y auth_providers quedan fuera por
 # omisión (lista blanca, igual que LISTING_PROJECTION de establecimientos).
@@ -274,8 +273,8 @@ class UsersService:
             "is_slep_staff": u.is_slep_staff, "unit_id": _oid(u.unit_id), "rbd": u.rbd,
             "positions": [p.value for p in u.positions],
             "status": status, "auth_providers": providers, "access": [],
-            # Hasta que `auth` emita invitaciones (F4) nadie envió nada: se dice tal cual.
-            "invitation": ({"sent_at": None, "expires_at": None, "last_error": INVITATION_NOT_CONFIGURED}
+            # Sin intento de envío todavía: `sent` es falso. `auth.send_invitation` lo actualiza.
+            "invitation": ({"sent_at": None, "expires_at": None, "last_error": None}
                            if status == "invited" else None),
             "last_login_at": None, "last_activity_at": None,
             "created_at": now, "created_by": actor, "updated_at": now, "updated_by": actor, "disabled_at": None,
@@ -429,6 +428,12 @@ class UsersService:
         return await self.find_by_id(user_id)
 
     # ══ Sesión y credenciales (las usa `auth`, nunca al revés) ═════════════════
+    async def set_invitation(self, user_id: str, sent_at: Optional[datetime], expires_at: Optional[datetime],
+                             last_error: Optional[str]) -> None:
+        """Resultado del último envío de la invitación (lo escribe `auth.send_invitation`)."""
+        await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {
+            "invitation": {"sent_at": sent_at, "expires_at": expires_at, "last_error": last_error}}})
+
     async def touch_login(self, user_id: str) -> None:
         await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {"last_login_at": _utcnow()}})
 

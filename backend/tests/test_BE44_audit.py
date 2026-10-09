@@ -95,8 +95,9 @@ def test_BE44_user_create_update_disable_enable_and_access_are_audited(ctx):
                                    "is_slep_staff": True, "unit_id": ids["AF-TI"], "personal_phone": "+56911112222"}, headers=h)
     assert r.status_code == 201
     uid = r.json()["id"] if "id" in r.json() else r.json()["_id"]
-    created = last(db)
-    assert created["action"] == "user.create" and created["target_id"] == uid
+    created = next(d for d in db.audit_log.docs if d["action"] == "user.create")
+    assert created["target_id"] == uid
+    assert last(db)["action"] == "user.invite" and last(db)["changes"] == {"invitation": [None, "sent"]}
     assert created["actor_id"] == ObjectId(ADMIN_USER["_id"]) and created["bulk_id"] is None
     assert created["changes"]["email"] == [None, "pia.rojas@slepllanquihue.cl"]
 

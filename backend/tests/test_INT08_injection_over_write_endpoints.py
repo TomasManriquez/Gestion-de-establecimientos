@@ -38,6 +38,7 @@ def table(ids):
         ("PATCH", "/api/platforms/selloverde", {"name": "X", "status": "inactive"}, ["name", "status"]),
         ("POST", "/api/auth/login", {"username": "a@slepllanquihue.cl", "password": "x"}, ["username", "password"]),
         ("POST", "/api/auth/password", {"current_password": "x", "new_password": "y"}, ["current_password", "new_password"]),
+        ("POST", "/api/auth/set-password", {"token": "t" * 43, "password": "y"}, ["token", "password"]),
     ]
 
 
@@ -76,13 +77,14 @@ def test_INT08_every_write_route_of_the_feature_is_in_the_table(ctx):
         ("POST", "/api/users"), ("PATCH", "/api/users/{user_id}"), ("PATCH", "/api/users/me"),
         ("PUT", "/api/users/{user_id}/access/{platform_id}"), ("POST", "/api/units"), ("PATCH", "/api/units/{unit_id}"),
         ("POST", "/api/units/{unit_id}/move"), ("PUT", "/api/units/{unit_id}/head"), ("PATCH", "/api/platforms/{platform_id}"),
-        ("POST", "/api/auth/login"), ("POST", "/api/auth/password"),
+        ("POST", "/api/auth/login"), ("POST", "/api/auth/password"), ("POST", "/api/auth/set-password"),
     }
     # escrituras SIN body (acciones): no tienen campos que inyectar
     bodyless = {
         ("POST", "/api/users/{user_id}/disable"), ("POST", "/api/users/{user_id}/enable"),
         ("DELETE", "/api/users/{user_id}/access/{platform_id}"), ("POST", "/api/units/{unit_id}/deactivate"),
         ("POST", "/api/units/{unit_id}/activate"), ("POST", "/api/auth/logout"), ("POST", "/api/auth/login-form"),
+        ("POST", "/api/users/{user_id}/invitation"), ("POST", "/api/users/{user_id}/password-reset"),
     }
     actual = {(m, r.path) for r in _api_routes(app) for m in r.methods
               if m in ("POST", "PUT", "PATCH", "DELETE") and r.path.startswith(feature_prefixes)}

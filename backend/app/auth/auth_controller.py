@@ -1,10 +1,11 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
 from app.auth.auth_service import auth_service, require_access
-from app.auth.auth_entity import (AccessContext, AccessSummary, ChangePasswordRequest, LoginRequest, PLATFORM_DATOS,
-                                  PasswordPolicy, Token, UserResponse)
+from app.auth.auth_entity import (AccessContext, AccessSummary, ChangePasswordRequest, InvalidLink, LoginRequest,
+                                  PLATFORM_DATOS, PasswordPolicy, PasswordPolicyError, SetPasswordRequest, Token,
+                                  UserResponse)
 from app.users.users_entity import UserNotFound
 from app.users.users_service import users_service
 
@@ -110,3 +111,21 @@ async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials",
                             headers={"WWW-Authenticate": "Bearer"})
     return _issue_token(updated)
+
+
+@router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
+async def set_password(payload: SetPasswordRequest):
+    """Canje del enlace de invitación o de restablecimiento (pública: aún no hay sesión).
+
+    Todo fallo del enlace responde el mismo 400, sin distinguir usado, vencido o inexistente. Una
+    contraseña que incumple la política responde 422 y NO consume el enlace. No devuelve token:
+    la persona entra después con su correo y la contraseña recién definida."""
+    try:
+        await auth_service.redeem_link(payload.token, payload.password)
+    except InvalidLink:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={
+            "code": "invalid_or_expired_link",
+            "message": "El enlace no es válido o ya venció. Pide a un administrador que te envíe uno nuevo."})
+    except PasswordPolicyError as exc:
+        raise HTTPException(422, detail=exc.violations)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

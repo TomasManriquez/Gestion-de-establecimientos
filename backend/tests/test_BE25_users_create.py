@@ -38,10 +38,11 @@ def test_BE25_create_slep_user_returns_document(ctx):
     assert u["email"] == "ana.perez@slepllanquihue.cl" and u["status"] == "invited"
     assert u["unit_id"] == ids["AF-TI"] and u["rbd"] is None and u["positions"] == []
     assert u["personal_phone"] == "+56912345678" and u["created_by"] == ADMIN_USER["_id"]
-    assert u["invitation"]["sent"] is False and u["invitation"]["last_error"] == "mail_not_configured"
+    # F4: el alta envía la invitación; en los tests el buzón falso la recibe
+    assert u["invitation"]["sent"] is True and u["invitation"]["last_error"] is None and u["invitation"]["sent_at"]
     assert "hashed_password" not in r.text and u["access"] == []
     stored = [d for d in db.users.docs if d["email"] == u["email"]][0]
-    assert stored["auth_providers"] == [] and stored["created_at"] is not None                   # sin credencial hasta la invitación
+    assert stored["auth_providers"] == [] and stored["created_at"] is not None                   # sin credencial hasta canjear el enlace
 
 
 def test_BE25_unit_must_exist_and_be_active(ctx):

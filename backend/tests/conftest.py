@@ -318,3 +318,30 @@ def prepare_org(fake_db, *users):
     if users:
         seed_users(fake_db, *users)
     return {d["code"]: str(d["_id"]) for d in fake_db.units.docs}
+
+
+# ─── Buzón de correo falso (ADR-012: en los tests se mockea mail_service) ────────────────
+class Mailbox:
+    """Registra los correos que el código de dominio intentó enviar. `fail_with` hace que `send` falle."""
+
+    def __init__(self):
+        self.messages, self.fail_with = [], None
+
+    async def send(self, to, subject, html, text):
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.messages.append({"to": to, "subject": subject, "html": html, "text": text})
+
+    def last_token(self):
+        """Token del último enlace enviado (va en el fragmento `#token=`)."""
+        import re
+        match = re.search(r"#token=([A-Za-z0-9_-]+)", self.messages[-1]["text"])
+        return match.group(1)
+
+
+@pytest.fixture(autouse=True)
+def mailbox():
+    from app.mail.mail_service import mail_service
+    box = Mailbox()
+    with patch.object(mail_service, "send", box.send):
+        yield box

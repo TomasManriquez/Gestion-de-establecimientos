@@ -34,9 +34,12 @@ def test_BE09_users_module_has_exactly_three_files():
 
 
 def test_BE09_auth_does_not_access_users_collection():
+    """`auth` es dueño de `auth_tokens` desde F4 (ADR-012), así que ya puede importar `db_service`;
+    lo que sigue prohibido es tocar la colección `users`: todo acceso a usuarios pasa por `users_service`."""
     for name in ("auth_service.py", "auth_controller.py", "auth_entity.py"):
         path = APP / "auth" / name
-        assert "app.database.database_service" not in _imports(path), f"{name} importa db_service"
+        if name != "auth_service.py":
+            assert "app.database.database_service" not in _imports(path), f"{name} importa db_service"
         tree = ast.parse(path.read_text(encoding="utf-8"))
         collections = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         assert "users" not in collections, f"{name} referencia una colección .users"
