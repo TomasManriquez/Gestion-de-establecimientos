@@ -305,7 +305,7 @@ class AuthService:
         que no está `active`, o token emitido antes del último cambio de contraseña.
         """
         try:
-            payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.ALGORITHM])
+            payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.ALGORITHM], leeway=10)
         except jwt.PyJWTError:
             raise _credentials_exception()
         sub = payload.get("sub")
