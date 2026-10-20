@@ -23,7 +23,7 @@ Base: `/api`. Sin versionado en la ruta. Servidor documentado en `main.py:27-31`
 | 1 | GET | `/` | pública | `{app, status, message}` |
 | 2 | POST | `/api/auth/login` | pública | `Token` |
 | 3 | POST | `/api/auth/login-form` | pública | `Token` |
-| 4 | POST | `/api/auth/logout` | pública | `{message}` |
+| 4 | POST | `/api/auth/logout` | pública (lee el token a mano) | `204` sin cuerpo |
 | 5 | GET | `/api/auth/me` | autenticado | `UserResponse` (ver §5.5) |
 | 6 | GET | `/api/establishments` | `datos`: admin, editor, viewer | `EstablishmentListResponse` |
 | 7 | GET | `/api/establishments/{rbd}` | `datos`: admin, editor, viewer | `Establishment` |
@@ -81,9 +81,8 @@ refresh: al expirar hay que volver a autenticarse.
 compatibilidad, el username legado del admin sembrado. Un usuario `invited` o `disabled` recibe
 el mismo `401` que una credencial errónea.
 
-`POST /api/auth/logout` **no invalida nada**: el JWT es stateless y no hay lista de revocación.
-Devuelve `{"message": "Successfully logged out"}` y es el cliente quien debe descartar el token.
-La ruta ni siquiera exige autenticación.
+`POST /api/auth/logout` **corta todas las sesiones de la persona** (fija `users.sessions_revoked_at`, `04` §9.4)
+y devuelve `204` sin cuerpo. El cliente además descarta su token.
 
 > 🔸 **BRECHA:** no existe autenticación de máquina a máquina. Un consumidor externo debe usar
 > credenciales de un usuario humano de la colección `users`. Sin API keys, sin client
@@ -91,7 +90,7 @@ La ruta ni siquiera exige autenticación.
 >
 > ✅ **Revocación parcial (F3):** desactivar a un usuario, quitarle el acceso o cambiarle la
 > contraseña corta sus sesiones en la siguiente petición (se relee el usuario y se compara `iat`
-> con `password_changed_at`). `logout` sigue sin invalidar el token en el servidor.
+> con `password_changed_at`). `logout` y la desactivación fijan `sessions_revoked_at` (F6, SEC-3).
 >
 > 🔸 **BRECHA:** sigue sin haber refresh; un token filtrado es válido hasta su `exp` (3 h) salvo
 > que se desactive al usuario o se cambie su contraseña.
@@ -216,11 +215,9 @@ La asimetría de `category` es intencional y está comentada en el código
 (`"5. ESCUELA BÁSICA (CURSO COMBINADO)"`) que un `$regex` interpretaría como grupo de captura.
 Se resolvió con comparación directa en vez de escapar el valor.
 
-> 🔸 **BRECHA (inyección de regex):** `search`, `comuna`, `area_type`, `coverage` y `adp` se
-> interpolan **sin escapar** dentro de un `$regex`. Un valor como `(a+)+$` es un patrón
-> catastróficamente backtracking: una petición autenticada puede bloquear un worker (ReDoS).
-> A 78 documentos el impacto es acotado, pero es una superficie real y la mitigación estándar
-> es `re.escape()` sobre el valor antes de construir el patrón.
+> ✅ **RESUELTO (D5, F6 SEC-4):** `search`, `comuna`, `area_type`, `coverage` y `adp` se escapan con
+> `re.escape()` antes de construir el `$regex`; `(a+)+$`, `.*` o `[` son texto literal
+> (`test_INT10_*`). Todo filtro nuevo por texto debe hacer lo mismo.
 >
 > 🔸 **BRECHA:** `search` con `$regex` sin ancla no puede aprovechar el índice sobre `name`:
 > es un collection scan. Correcto a esta escala; el reemplazo natural es un índice de texto
@@ -365,7 +362,10 @@ Pública. Body `LoginRequest {username: str, password: str}` (JSON, solo escalar
 Idéntico, body `application/x-www-form-urlencoded`. Existe solo para Swagger UI.
 
 ### 5.4 `POST /api/auth/logout`
-Pública, sin efecto de servidor. `200` → `{"message": "Successfully logged out"}`.
+Lee el `Authorization: Bearer` por su cuenta (no usa `require_access`, para no devolver `401` a quien
+cierra sesión). Con un token válido fija `sessions_revoked_at` = ahora y **corta todas las sesiones de
+esa persona**, no solo la actual. Responde `204` siempre: sin token, vencido, malformado o ya
+revocado no escribe nada y tampoco falla. Antes de F6 respondía `200 {message}` y no hacía nada.
 
 ### 5.5 `GET /api/auth/me`
 Autenticado (cualquier rol, incluso sin acceso a `datos`). `200` → `UserResponse`:

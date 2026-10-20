@@ -376,7 +376,8 @@ class UsersService:
             raise UserConflict("No se puede desactivar al último admin global activo", "last_admin")
         now = _utcnow()
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
-            "status": "disabled", "disabled_at": now, "updated_at": now, "updated_by": _oid(actor_id)}})
+            "status": "disabled", "disabled_at": now, "sessions_revoked_at": now,
+            "updated_at": now, "updated_by": _oid(actor_id)}})
         await units_service.clear_head_for_user(str(current["_id"]))     # Q8
         await audit_service.record(actor_id, AuditAction.USER_DISABLE, AuditTarget.USER, str(current["_id"]),
                                    {"status": [current["status"], "disabled"]}, bulk_id)
@@ -577,6 +578,10 @@ class UsersService:
         """Resultado del último envío de la invitación (lo escribe `auth.send_invitation`)."""
         await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {
             "invitation": {"sent_at": sent_at, "expires_at": expires_at, "last_error": last_error}}})
+
+    async def revoke_sessions(self, user_id: str) -> None:
+        """Corta todas las sesiones emitidas hasta ahora (`sessions_revoked_at`, SEC-3)."""
+        await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {"sessions_revoked_at": _utcnow()}})
 
     async def touch_login(self, user_id: str) -> None:
         await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {"last_login_at": _utcnow()}})

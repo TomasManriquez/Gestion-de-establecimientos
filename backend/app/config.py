@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 from typing import List, Mapping, Optional
@@ -12,6 +13,16 @@ _DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a
 _EMAIL_RE = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
 _LOCAL_HOSTS = ("localhost", "127.0.0.1")
 MAIL_MODES = ("gmail", "console")
+
+# SEC-1: un secreto de firma corto o conocido equivale a no tener secreto. Los valores rechazados
+# estuvieron versionados en git (compose de desarrollo). Se guardan como sha256 (en minúsculas) para
+# no volver a escribirlos en el código (BE14 lo comprueba); `_PLACEHOLDER_PREFIX` cubre la plantilla.
+JWT_SECRET_MIN_LENGTH = 32
+_KNOWN_WEAK_SECRET_HASHES = frozenset({
+    "2a815a289afe616641e3a72e930d429def113af3a642e96a4b356ad415622140",
+    "e22c24cd6775d31d6b9d783acc334bb81c004e8c612c8267c2c7ba8cf90417d7",
+})
+_PLACEHOLDER_PREFIX = "cambia_esto"
 
 
 class Settings:
@@ -43,7 +54,12 @@ class Settings:
 
         # Seguridad: sin default (D2)
         self.JWT_SECRET: str = self._required("JWT_SECRET")
+        if len(self.JWT_SECRET) < JWT_SECRET_MIN_LENGTH:
+            raise ConfigError(f"JWT_SECRET debe tener al menos {JWT_SECRET_MIN_LENGTH} caracteres "
+                              '(genera uno con: python -c "import secrets; print(secrets.token_hex(64))")')
+        self._reject_known_secret("JWT_SECRET", self.JWT_SECRET)
         self.ADMIN_PASSWORD: str = self._required("ADMIN_PASSWORD")
+        self._reject_known_secret("ADMIN_PASSWORD", self.ADMIN_PASSWORD)
         self.ACCESS_TOKEN_EXPIRE_MINUTES: int = self._int("ACCESS_TOKEN_EXPIRE_MINUTES", 180, minimum=1)
 
         # Identidad: sin default
@@ -105,6 +121,12 @@ class Settings:
         if value is None or value.strip() == "":
             raise ConfigError(f"Variable de entorno obligatoria sin definir: {name}")
         return value
+
+    @staticmethod
+    def _reject_known_secret(name: str, value: str) -> None:
+        folded = value.strip().lower()
+        if hashlib.sha256(folded.encode()).hexdigest() in _KNOWN_WEAK_SECRET_HASHES or folded.startswith(_PLACEHOLDER_PREFIX):
+            raise ConfigError(f"{name} es un valor de ejemplo o un valor público del repositorio: define uno propio")
 
     def _int(self, name: str, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
         raw = self._env.get(name)

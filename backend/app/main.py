@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
@@ -52,15 +51,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS setup
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact domains
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Audit-Status", "Retry-After"],
-)
+# Sin CORS (SEC-5): el frontend es de mismo origen (ADR-008: nginx sirve la SPA y enruta /api/), así
+# que ningún origen ajeno necesita leer respuestas. Cualquier navegador bloquea las lecturas cruzadas.
 # Avisa en la respuesta si una escritura de auditoría falló (ADR-014). Pure ASGI, ver audit_service.
 app.add_middleware(AuditStatusMiddleware)
 

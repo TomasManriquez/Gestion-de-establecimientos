@@ -70,11 +70,20 @@ async def login_for_access_token_form(request: Request, form_data: OAuth2Passwor
     """
     return _issue_token(await _limited_login(request, form_data.username, form_data.password))
 
-@router.post("/logout")
-async def logout():
-    # JWT is stateless, so we just acknowledge logout.
-    # The client discards the token.
-    return {"message": "Successfully logged out"}
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(request: Request):
+    """Corta TODAS las sesiones de la persona (`sessions_revoked_at`): es la forma sin estado, no hay
+    lista de tokens. Responde 204 aunque el token ya no sirva (vencido, revocado, malformado): cerrar
+    sesión nunca falla para quien la cierra. Los 401 de esta ruta no los produce `require_access`."""
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() == "bearer" and token:
+        try:
+            user = await auth_service.get_current_user(token)
+        except HTTPException:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        await users_service.revoke_sessions(user["_id"])
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(ctx: AccessContext = Depends(require_access(None))):

@@ -555,6 +555,7 @@ erDiagram
         datetime updated_at
         ObjectId updated_by FK
         datetime disabled_at
+        datetime sessions_revoked_at "opcional; corta sesiones con iat <= este instante"
     }
     users_auth_providers {
         string provider "local o google"
@@ -754,7 +755,8 @@ Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente
   "invitation": {"sent_at": "ISODate", "expires_at": "ISODate", "last_error": null},
   "last_login_at": "ISODate", "last_activity_at": "ISODate",
   "created_at": "ISODate", "created_by": "ObjectId", "updated_at": "ISODate", "updated_by": "ObjectId",
-  "disabled_at": null
+  "disabled_at": null,
+  "sessions_revoked_at": null
 }
 ```
 

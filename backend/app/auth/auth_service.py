@@ -302,10 +302,12 @@ class AuthService:
         """Verifica el token y vuelve a leer al usuario (el rol nunca se toma del token, 04 §1).
 
         401 si: firma o `exp` inválidos, `sub` ausente o malformado, usuario inexistente, usuario
-        que no está `active`, o token emitido antes del último cambio de contraseña.
+        que no está `active`, o token emitido antes del último cambio de contraseña o de la última
+        revocación de sesiones (`sessions_revoked_at`). Faltar `exp`, `iat` o `sub` también es 401.
         """
         try:
-            payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.ALGORITHM], leeway=10)
+            payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.ALGORITHM], leeway=10,
+                                 options={"require": ["exp", "iat", "sub"]})
         except jwt.PyJWTError:
             raise _credentials_exception()
         sub = payload.get("sub")
@@ -316,13 +318,21 @@ class AuthService:
         if user is None or user.get("status") != "active":
             raise _credentials_exception()
 
+        # Cortes de sesión. La contraseña nueva entrega un token en ese mismo segundo, así que el cambio
+        # de contraseña invalida solo lo anterior (`<`). La revocación explícita (logout, desactivación)
+        # invalida también el segundo del corte (`<=`): un logout inmediato al login debe cortar ese token.
+        # Sirve además a las cuentas de Google, que no tienen `password_changed_at`.
         provider = local_provider(user)
         changed_at = provider.get("password_changed_at") if provider else None
-        if changed_at is not None:
-            # Comparación truncada al segundo: el token emitido en el mismo segundo del cambio es válido.
-            cutoff = int(changed_at.replace(tzinfo=timezone.utc).timestamp())
+        revoked_at = user.get("sessions_revoked_at")
+        if changed_at is not None or revoked_at is not None:
             iat = payload.get("iat")
-            if not isinstance(iat, (int, float)) or int(iat) < cutoff:
+            if not isinstance(iat, (int, float)):
+                raise _credentials_exception()
+            iat = int(iat)
+            if changed_at is not None and iat < int(changed_at.replace(tzinfo=timezone.utc).timestamp()):
+                raise _credentials_exception()
+            if revoked_at is not None and iat <= int(revoked_at.replace(tzinfo=timezone.utc).timestamp()):
                 raise _credentials_exception()
 
         await users_service.touch_activity(user)

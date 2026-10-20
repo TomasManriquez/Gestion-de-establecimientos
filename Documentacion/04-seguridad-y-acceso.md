@@ -49,7 +49,7 @@ lo rechaza antes con 422). Si el usuario no existe se verifica contra un hash de
 igualar el tiempo de respuesta.
 
 **Emisión:** payload `{sub: str(_id), role, iat, exp}` firmado HS256 con `settings.JWT_SECRET`
-(sin default, T9). Expiración por defecto 180 minutos. `role` va en el token por compatibilidad
+(sin default, T9; mínimo 32 caracteres y sin valores de ejemplo ni públicos, SEC-1, `test_BE51_*`). Expiración por defecto 180 minutos. `role` va en el token por compatibilidad
 pero **no se usa nunca para autorizar**.
 
 **Verificación (`get_current_user`):** decodifica, extrae `sub` y **vuelve a leer el usuario**.
@@ -61,10 +61,12 @@ Esa relectura es la decisión de diseño más importante del módulo:
 > en un escenario de alto tráfico sería el primer candidato a caché, reintroduciendo
 > conscientemente una ventana de propagación.
 
-Devuelve `401` si: firma o `exp` inválidos, `sub` ausente o malformado (un objeto de operadores
-da `401`, no `500`), usuario inexistente, usuario que **no está `active`** (`invited` o
-`disabled`), o token emitido **antes del último cambio de contraseña** (`iat` menor que
-`password_changed_at`, comparado al segundo). Todo fallo es el mismo `401` con
+Devuelve `401` si: firma o `exp` inválidos, falta alguno de los claims `exp`, `iat` o `sub`
+(`options={"require": [...]}`, SEC-2; el algoritmo está fijado a HS256, así que `alg: none` y HS512
+se rechazan), `sub` ausente o malformado (un objeto de operadores da `401`, no `500`), usuario
+inexistente, usuario que **no está `active`** (`invited` o `disabled`), token emitido **antes del
+último cambio de contraseña** (`iat` menor que `password_changed_at`, comparado al segundo) o
+token emitido **hasta el instante de la última revocación** (`iat <= sessions_revoked_at`, §9.4). Todo fallo es el mismo `401` con
 `WWW-Authenticate: Bearer`; no se distingue el motivo hacia afuera.
 
 El `sub` aceptado es `str(_id)`. Mientras dure la compatibilidad también se acepta el username
@@ -219,27 +221,12 @@ comportamiento de MongoDB ni la existencia física de los índices.
 
 ## 5. CORS
 
-`main.py:35-41`:
-
-```python
-allow_origins=["*"]
-allow_credentials=True
-allow_methods=["*"]
-allow_headers=["*"]
-```
-
-En la práctica el frontend propio no depende de esto: va por rutas relativas detrás del mismo
-origen (Nginx o el proxy de Vite), así que nunca hace una petición cross-origin.
-`allow_origins=["*"]` afecta solo a clientes servidos desde otro origen.
-
-> 🔸 **BRECHA:** `allow_origins=["*"]` junto a `allow_credentials=True` es una combinación que
-> la especificación CORS prohíbe; los navegadores la rechazan y el middleware de Starlette
-> responde con el origen reflejado. El efecto neto es **permitir credenciales desde cualquier
-> origen**. El propio código lo admite en un comentario (`main.py:37`:
-> `# In production, specify exact domains`). Como el esquema es Bearer y el token va en una
-> cabecera que el atacante no puede inyectar desde otro origen sin XSS, el riesgo práctico es
-> menor que el aparente — pero es una configuración a corregir y una lista de orígenes por
-> variable de entorno es la forma esperada.
+> ✅ **RESUELTO (SEC-5, F6):** el backend ya **no monta `CORSMiddleware`** (`main.py`). El
+> frontend va por rutas relativas detrás del mismo origen (Nginx o el proxy de Vite, ADR-008), así
+> que ningún origen ajeno necesita leer respuestas: el navegador las bloquea (`test_BE54_*`).
+> `Retry-After` sigue siendo legible desde el mismo origen. Si alguna vez se sirve el frontend
+> desde otro origen, hay que agregar una **lista explícita** de orígenes por variable de entorno,
+> nunca `*` con credenciales.
 
 ---
 
@@ -253,7 +240,7 @@ la variable (`ConfigError`). `repr(settings)` no vuelca valores.
 |---|---|---|
 | `MONGODB_URL` | `mongodb://localhost:27017` | — (falla ruidosamente al conectar) |
 | `DATABASE_NAME` | `slep_llanquihue` | — |
-| `JWT_SECRET` | **ninguno** | obligatoria, no vacía |
+| `JWT_SECRET` | **ninguno** | obligatoria, ≥ 32 caracteres, distinta de los valores públicos del repositorio (SEC-1) |
 | `ADMIN_PASSWORD` | **ninguno** | obligatoria; solo se usa para crear el admin con la base vacía |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `180` | entero ≥ 1 |
 | `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | obligatoria; debe pertenecer a `ALLOWED_EMAIL_DOMAINS` |
@@ -266,10 +253,12 @@ la variable (`ConfigError`). `repr(settings)` no vuelca valores.
 > queda ningún secreto del repositorio en `config.py` (`test_BE14_jwt_secret_and_admin_password_have_no_default`).
 > `Settings` valida en rango y falla con un mensaje útil (ya no un `ValueError` en el import).
 >
-> 🔸 **BRECHA:** `docker-compose.yml` (desarrollo) sigue fijando `JWT_SECRET` y `ADMIN_PASSWORD`
-> como literales para poder levantar el entorno. Son valores solo de desarrollo, comentados como
-> tales, pero un despliegue que copie ese archivo los heredaría. Producción no los tiene: usa
-> `${JWT_SECRET}` y `${ADMIN_PASSWORD}` del `.env`.
+> ✅ **RESUELTO (SEC-1, F6):** `docker-compose.yml` (desarrollo) ya no trae secretos literales: lee
+> `${JWT_SECRET}` y `${ADMIN_PASSWORD}` del `.env` de la raíz y no levanta sin ellos. `Settings`
+> exige `JWT_SECRET` de al menos 32 caracteres y rechaza los valores que estuvieron versionados
+> (guardados como sha256 para no reescribirlos en el código) y los marcadores `CAMBIA_ESTO…` de la
+> plantilla, también para `ADMIN_PASSWORD` (`test_BE51_*`). Los valores legados siguen en el
+> historial de git: **cualquier despliegue que los haya usado debe rotarlos**.
 >
 > 🔸 **BRECHA:** para `/docs` y `/openapi.json` públicos, ver §7.
 
@@ -292,8 +281,8 @@ siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATA
 | Rate limiting | ✅ Login, canje de enlaces, reenvío y restablecimiento (§9.5). Sin Redis: colección `rate_limits` con TTL |
 | Bloqueo por intentos fallidos | **Deliberadamente no hay bloqueo de cuenta**: el límite es por (cuenta + IP), para que un tercero no pueda dejar inutilizable la cuenta de otro |
 | Auditoría de cambios | ✅ `audit_log` de solo agregado: quién cambió qué en usuarios, accesos, unidades, plataformas y subrogancias. **Las lecturas no se auditan** (ADR-014) |
-| Validación de entrada | Pydantic con `extra="forbid"` y tipos escalares en toda la feature de usuarios (`test_INT08_*`). En establecimientos, `$regex` sin escapar (D5, ver `03` §3.4); en la búsqueda de usuarios sí se escapa con `re.escape` |
-| Cabeceras de seguridad (CSP, HSTS, X-Frame-Options) | **No configuradas** en `nginx.conf` |
+| Validación de entrada | Pydantic con `extra="forbid"` y tipos escalares en toda la feature de usuarios (`test_INT08_*`). Los filtros de texto de establecimientos y la búsqueda de usuarios escapan el input con `re.escape` (D5 cerrada en F6, `test_INT10_*`) |
+| Cabeceras de seguridad | ✅ (SEC-6, `test_BE55_*`) `nginx.conf` define `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` y una **CSP en modo `Report-Only`** (pasa a enforzada cuando se verifique en el navegador sin violaciones). **HSTS no va en este nginx** (escucha en `:80`, el TLS termina afuera): debe ponerlo el terminador TLS (`07` §5.3) |
 | `/openapi.json`, `/docs` | **Públicos** — exponen el esquema completo a cualquiera |
 | Secretos en el repositorio | `establishments.json` y los `.xlsx`/`.json` de `Documentacion/` están git-ignored. `config.py` ya no contiene ningún secreto (D2 resuelta); `docker-compose.yml` de desarrollo sí tiene valores literales solo-desarrollo |
 
@@ -414,6 +403,14 @@ en todas las rutas de datos, aunque el usuario esté autenticado.
   usuario; la comparación se hace truncada al segundo para no rechazar el token emitido en el
   mismo segundo del cambio. Cambiar o restablecer la contraseña cierra todas las sesiones previas.
   El cambio propio devuelve un token nuevo para que la sesión actual continúe.
+- **Revocación sin estado (SEC-3):** `users.sessions_revoked_at` (ausente = sin corte, no necesita
+  migración). Se rechaza el token con `iat <= sessions_revoked_at` (aquí el segundo del corte
+  también se invalida, a diferencia de la contraseña: un logout inmediato al login debe cortar ese
+  token). Lo fijan `POST /api/auth/logout` y la **desactivación**; reactivar a la persona **no**
+  revive los tokens anteriores. Restablecer o cambiar la contraseña ya corta por
+  `password_changed_at`. **El logout corta todas las sesiones de la persona** (todos sus
+  dispositivos): es la forma sin estado, no hay lista de tokens. Sirve también a las cuentas de
+  Google, que no tienen `password_changed_at` (`test_BE53_*`).
 - Un usuario `disabled` o `invited` con token vigente recibe `401` en la siguiente request.
 - Todo fallo de autenticación sigue siendo el mismo `401` con `WWW-Authenticate: Bearer`.
 - `last_login_at` se escribe en cada login; `last_activity_at` como máximo cada 5 minutos por
@@ -505,7 +502,8 @@ de rango: la política de contraseñas. Detalle y archivos a actualizar: `07` §
 
 **Cierra:** D2 (defaults de `JWT_SECRET` y `ADMIN_PASSWORD`), D3 (`viewer` escribe), D4 (`PUT` sin
 redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting, y el login ilimitado.
-**Sigue abierta:** token en `localStorage` (§1), CORS `*` (§5), cabeceras de seguridad (§7),
+**Cierra (F6, S1):** CORS `*` (§5), D5 (regex sin escapar), el secreto de desarrollo versionado, la ausencia de cabeceras de seguridad (CSP aún en `Report-Only`) y el logout sin efecto.
+**Sigue abierta:** token en `localStorage` (§1; la cookie `HttpOnly` es S3, pendiente de aprobación),
 `/docs` y `/openapi.json` públicos, redacción de `licenses[].email` y de los datos de
 contrapartes (§3), y MFA.
 **Límites conocidos de F4** (registrados en `05` §5.3c): el modo `console` escribe el enlace completo en el

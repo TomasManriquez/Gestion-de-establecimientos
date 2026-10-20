@@ -129,7 +129,7 @@ tienen default: si falta una, la app no arranca** y el mensaje nombra la variabl
 |---|---|---|---|
 | `MONGODB_URL` | `mongodb://localhost:27017` | Cadena de conexión completa. En producción incluye usuario, contraseña y `?authSource=admin` | `docker-compose.prod.yml`, compuesta |
 | `DATABASE_NAME` | `slep_llanquihue` | Nombre de la base | `.env` |
-| `JWT_SECRET` | **ninguno** | **Clave de firma HS256.** Obligatoria. Debe ser única y secreta por despliegue. Generar con `python -c "import secrets; print(secrets.token_hex(64))"` | `.env` |
+| `JWT_SECRET` | **ninguno** | **Clave de firma HS256.** Obligatoria. Debe ser única y secreta por despliegue. Mínimo 32 caracteres; se rechazan los valores públicos del repositorio y los marcadores `CAMBIA_ESTO…` (SEC-1). Generar con `python -c "import secrets; print(secrets.token_hex(64))"` | `.env` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `180` | Vigencia del token en minutos. No hay refresh: al expirar hay que reautenticarse | `.env` (default `180` en el compose) |
 | `ADMIN_PASSWORD` | **ninguno** | Contraseña del admin **solo si hay que crearlo** (§1.3). Obligatoria | `.env` |
 | `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | Correo del admin global sembrado o migrado. Debe pertenecer a `ALLOWED_EMAIL_DOMAINS` | `.env` |
@@ -351,6 +351,16 @@ El script es la mitigación práctica de la brecha de secretos: valida en el ser
 | Frontend | `5173` publicado | `127.0.0.1:8080` → contenedor `:80` |
 
 En producción solo el frontend es alcanzable, y solo desde el propio host.
+
+**Desarrollo (SEC-1):** `docker-compose.yml` ya no trae `JWT_SECRET` ni `ADMIN_PASSWORD` literales; los
+lee del `.env` de la raíz y `docker compose` se niega a levantar si faltan. Quien levante el entorno
+debe tenerlos en su `.env` (el `JWT_SECRET` con ≥ 32 caracteres).
+
+**HSTS (SEC-6):** `frontend/nginx.conf` escucha en `:80` y no puede emitir `Strict-Transport-Security`
+(el TLS termina en un componente externo). Quien administre ese terminador debe agregarlo. El mismo
+`nginx.conf` envía hoy una CSP en modo `Content-Security-Policy-Report-Only`: tras desplegar, abrir
+Login, Directorio, una Ficha con mapa y el Dashboard con la consola abierta; si no hay violaciones,
+renombrar el encabezado a `Content-Security-Policy` y reconstruir la imagen del frontend.
 
 ---
 

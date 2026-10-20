@@ -431,7 +431,7 @@ Registro ordenado por consecuencia. Cada entrada apunta al documento donde está
 | ~~D2~~ | ✅ Resuelto en F3: `JWT_SECRET` y `ADMIN_PASSWORD` no tienen default y la app no arranca sin ellos | `config.py` | `test_BE14_*`. `04` §6 |
 | ~~D3~~ | ✅ Resuelto en F3: `viewer` solo lee; `editor` no borra | todos los controllers (`require_access`) | `test_BE12_*`, `test_INT03_*`. `04` §2 |
 | ~~D4~~ | ✅ Resuelto en F3: el `PUT` respeta `include_sensitive` y el marcador `[REDACTED]` no sobrescribe secretos | `establishments_controller.py`, `establishments_service.py` | `test_BE13_*`, `test_INT04_*`. `04` §3.2 |
-| D5 | `$regex` construido con valores sin escapar | `establishments_service.py:35-58` | ReDoS por petición autenticada. `03` §3.4 |
+| ~~D5~~ | ✅ Resuelto en F6 (SEC-4): los filtros de texto escapan con `re.escape` | `establishments_service.py` | `test_INT10_*`. `03` §3.4 |
 
 ### 5.2 Acoplamiento temporal y duplicación
 

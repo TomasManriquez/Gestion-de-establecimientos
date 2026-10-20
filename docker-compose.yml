@@ -21,11 +21,11 @@ services:
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
       - DATABASE_NAME=slep_llanquihue
-      - JWT_SECRET=super-secret-slep-key-2026-llanquihue-digital-management
-      # Solo desarrollo: valores literales para poder levantar el entorno. En produccion
-      # ninguno tiene default (ver docker-compose.prod.yml y .env.production.template).
+      - JWT_SECRET=${JWT_SECRET:?define JWT_SECRET en el .env de la raiz}
+      # Secretos: se leen del .env de la raiz (no versionado); sin ellos compose no levanta.
+      # JWT_SECRET: >= 32 caracteres (python -c "import secrets; print(secrets.token_hex(64))").
       - ACCESS_TOKEN_EXPIRE_MINUTES=180
-      - ADMIN_PASSWORD=dev-only-admin-password-change-me
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?define ADMIN_PASSWORD en el .env de la raiz}
       - BOOTSTRAP_ADMIN_EMAIL=admin@slepllanquihue.cl
       - ALLOWED_EMAIL_DOMAINS=slepllanquihue.cl
       - PASSWORD_MIN_LENGTH=15

@@ -1,3 +1,4 @@
+import re
 import math
 from typing import List, Optional
 from app.database.database_service import db_service
@@ -31,33 +32,34 @@ class EstablishmentsService:
         page_size: int = 100
     ) -> dict:
         query = {}
+        # D5: todo texto del usuario entra escapado a `$regex` (mismo patrón que users_service).
         
         # Search by name or RBD (starts with/contains, case-insensitive)
         if search:
             # Check if search is numeric (could be RBD)
             if search.isdigit():
-                query["rbd"] = {"$regex": f"^{search}", "$options": "i"}
+                query["rbd"] = {"$regex": f"^{re.escape(search)}", "$options": "i"}
             else:
                 query["$or"] = [
-                    {"name": {"$regex": search, "$options": "i"}},
-                    {"rbd": {"$regex": search, "$options": "i"}},
-                    {"comuna": {"$regex": search, "$options": "i"}}
+                    {"name": {"$regex": re.escape(search), "$options": "i"}},
+                    {"rbd": {"$regex": re.escape(search), "$options": "i"}},
+                    {"comuna": {"$regex": re.escape(search), "$options": "i"}}
                 ]
 
         if comuna:
-            query["comuna"] = {"$regex": f"^{comuna}$", "$options": "i"}
+            query["comuna"] = {"$regex": f"^{re.escape(comuna)}$", "$options": "i"}
         
         if area_type:
-            query["area_type"] = {"$regex": f"^{area_type}$", "$options": "i"}
+            query["area_type"] = {"$regex": f"^{re.escape(area_type)}$", "$options": "i"}
         # el dato de category tiene conflictos con () de establecimiento (curso combinado) por lo que se hace comparacion directa, sin regex.
         if category:
             query["general_info.category"] = category
 
         if coverage:
-            query["general_info.covertura"] = {"$regex": f"^{coverage}", "$options": "i"}
+            query["general_info.covertura"] = {"$regex": f"^{re.escape(coverage)}", "$options": "i"}
             
         if adp:
-            query["general_info.adp"] = {"$regex": f"^{adp}$", "$options": "i"}
+            query["general_info.adp"] = {"$regex": f"^{re.escape(adp)}$", "$options": "i"}
 
         total = await db_service.db.establishments.count_documents(query)
         skip = (page - 1) * page_size
