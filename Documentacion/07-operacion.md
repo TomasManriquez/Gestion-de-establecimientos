@@ -508,3 +508,111 @@ lo evidencia.
    escritura valida `Origin` contra ese valor. El proxy del host **no debe** quitar la cabecera `Origin` ni
    `Set-Cookie`. Tras el primer despliegue, todos los usuarios vuelven a iniciar sesión una vez.
 
+---
+
+## 11. Revisión del proxy del host (tarea manual, guía paso a paso)
+
+> **Por qué.** La aplicación no se publica sola: delante de `127.0.0.1:8080` (frontend, `docker-compose.prod.yml`)
+> hay un proxy del **host** que termina TLS y que **no está en este repositorio** (D29, D35). Tres garantías de
+> seguridad dependen de él: la IP real del cliente (rate limiting), la cookie `Secure` y el `Origin` (ADR-016), y
+> HSTS. Esta guía se ejecuta una vez por despliegue y cada vez que alguien cambie ese proxy.
+
+```
+navegador ──https──▶ PROXY DEL HOST ──http──▶ 127.0.0.1:8080 (nginx del frontend) ──▶ backend:8000 (gunicorn)
+ (IP real)            (TLS, XFF, HSTS)         (cabeceras de seguridad, /api)         (rate limit usa la IP)
+```
+
+### 11.1 Encontrar el proxy y su configuración
+
+```bash
+sudo ss -ltnp | grep -E ':(80|443)\b'          # qué proceso escucha en 80/443 (nginx, apache2, caddy, traefik, haproxy…)
+sudo nginx -T 2>/dev/null | less                 # nginx: configuración EFECTIVA completa (incluye los include)
+                                                  # buscar el bloque con `server_name datos.slepllanquihue.gob.cl`
+# Apache: apachectl -S   ·   Caddy: caddy adapt --config /etc/caddy/Caddyfile   ·   Traefik/HAProxy: su archivo de configuración
+```
+
+### 11.2 Lista de verificación (qué mirar, cómo probarlo desde afuera y cómo se ve lo correcto)
+
+| # | Qué comprobar | Prueba (desde tu equipo, no desde el servidor) | Correcto | Incorrecto |
+|---|---|---|---|---|
+| 1 | **HTTP redirige a HTTPS** | `curl -sI http://datos.slepllanquihue.gob.cl/` | `301`/`308` con `Location: https://…` | `200` sobre http |
+| 2 | **Certificado vigente y completo** | `echo \| openssl s_client -connect datos.slepllanquihue.gob.cl:443 -servername datos.slepllanquihue.gob.cl 2>/dev/null \| openssl x509 -noout -issuer -dates` | `notAfter` en el futuro; emisor reconocido | vencido o autofirmado |
+| 3 | **Solo el proxy es alcanzable** (ni backend ni Mongo ni el puerto 8080 desde fuera) | `nmap -Pn -p 80,443,8000,8080,27017 datos.slepllanquihue.gob.cl` | solo 80 y 443 abiertos | 8000, 8080 o 27017 abiertos |
+| 4 | **Destino correcto** | en la config: `proxy_pass http://127.0.0.1:8080;` | apunta a `127.0.0.1:8080` | apunta a otro puerto o a `backend:8000` |
+| 5 | **`X-Forwarded-For` se SOBRESCRIBE** (la comprobación más importante, D35) | ver 11.3 | `proxy_set_header X-Forwarded-For $remote_addr;` y el límite da `429` aunque cambies la cabecera | `$proxy_add_x_forwarded_for` (agrega): la IP la elige quien llama |
+| 6 | **`X-Forwarded-Proto` y `Host`** | en la config: `proxy_set_header X-Forwarded-Proto $scheme;` y `proxy_set_header Host $host;` | presentes | ausentes |
+| 7 | **La cookie de sesión sale `Secure`** (confirma https y que `Set-Cookie` no se pierde) | `curl -si -X POST https://HOST/api/auth/login -H 'Content-Type: application/json' -d '{"username":"TU_CORREO","password":"TU_CLAVE"}' \| grep -i set-cookie` | `slep_session=…; HttpOnly; Path=/api; SameSite=strict; Secure` | sin `Secure`, o sin `Set-Cookie` |
+| 8 | **`Origin` llega intacto** (ADR-016) | iniciar sesión en el navegador y guardar un cambio en cualquier ficha | se guarda | `403 untrusted_origin` en toda escritura → `PUBLIC_BASE_URL` no coincide con el origen público, o el proxy altera `Origin` |
+| 9 | **HSTS** | `curl -sI https://HOST/ \| grep -i strict-transport` | `Strict-Transport-Security: max-age=…` (empezar con `300`, subir a `31536000` cuando todo funcione) | ausente (se agrega en el proxy: `add_header Strict-Transport-Security "max-age=300" always;`) |
+| 10 | **Las cabeceras del frontend pasan** (no las pisa ni duplica) | `curl -sI https://HOST/ \| grep -iE 'x-frame\|nosniff\|content-security\|referrer-policy\|permissions-policy'` | una vez cada una | faltan o están repetidas |
+| 11 | **No cachea `/api`** | en la config: sin `proxy_cache` para `/api/`; `curl -sI -X POST …/api/auth/login` trae `Cache-Control: no-store` | sin caché | respuestas de `/api` en caché |
+| 12 | **Tamaño de cuerpo** (CSV de importación: 1 MiB + multipart) | en la config: `client_max_body_size 2m;` (también en el `nginx.conf` del frontend, hoy usa el default de 1 MB) | ≥ 2 MB | default `1m`: un CSV legítimo da `413` desde el proxy |
+| 13 | **Host desconocido** | `curl -sI -H 'Host: otro.example' https://IP_DEL_SERVIDOR/ -k` | cerrado (`444`) o 404 | sirve la aplicación para cualquier `Host` |
+
+### 11.3 La comprobación 5, en detalle (`X-Forwarded-For`)
+
+**Qué pasa por dentro.** El backend corre con `--forwarded-allow-ips "*"`: confía en cualquiera que le hable y
+toma como IP del cliente **la dirección más a la izquierda** de `X-Forwarded-For`. Lo verificamos con el código de
+uvicorn de este repo:
+
+```
+cliente miente "9.9.9.9" y el proxy AGREGA la real  →  X-Forwarded-For: 9.9.9.9, 203.0.113.7, 172.18.0.1  →  backend ve 9.9.9.9   ✗
+el proxy SOBRESCRIBE con $remote_addr               →  X-Forwarded-For: 203.0.113.7, 172.18.0.1          →  backend ve 203.0.113.7 ✓
+```
+
+Si el proxy agrega, un atacante cambia la cabecera en cada petición y **nunca llega al límite** de login,
+canje de enlaces ni `/api/auth/google`.
+
+**Prueba funcional** (usa un correo inexistente; no toca cuentas reales). Hace 7 intentos fallidos cambiando la
+IP inventada; el límite es de 5 por (cuenta + IP):
+
+```bash
+for i in 1 2 3 4 5 6 7; do
+  curl -s -o /dev/null -w "%{http_code} " -X POST https://datos.slepllanquihue.gob.cl/api/auth/login \
+    -H 'Content-Type: application/json' -H "X-Forwarded-For: 10.0.0.$i" \
+    -d '{"username":"prueba-proxy@slepllanquihue.cl","password":"x"}'
+done; echo
+```
+
+- ✅ **`401 401 401 401 401 429 429`**: el proxy ignora lo que inventa el cliente. Correcto.
+- ❌ **`401 401 401 401 401 401 401`**: la IP es falsificable. Corregir el proxy (ver abajo).
+- ❌ **`429` desde otro equipo con el mismo correo**: el proxy no reenvía la IP y todos comparten un contador.
+
+Ver la cadena que recibe el frontend (el `nginx` interno la imprime al final de cada línea del log):
+
+```bash
+curl -s -o /dev/null -H 'X-Forwarded-For: 9.9.9.9' https://datos.slepllanquihue.gob.cl/api/auth/password-policy
+docker compose -f docker-compose.prod.yml logs --tail=3 frontend      # el último campo entre comillas es X-Forwarded-For
+```
+
+Correcto: el primero de la lista es **tu IP pública** (no `9.9.9.9`). Después, borrar los contadores de la prueba
+(expiran solos en 15 min) o esperar.
+
+**Corrección en el proxy del host** (nginx): en el bloque que hace `proxy_pass`,
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;      # SOBRESCRIBE: nunca $proxy_add_x_forwarded_for en el borde
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+**Corrección propuesta en el repositorio** (no aplicada; defensa en profundidad, funciona aunque el proxy del host
+agregue): en `frontend/nginx.conf`, confiar solo en la red de Docker y quedarse con la última dirección no
+confiable, y reenviar una sola IP:
+
+```nginx
+set_real_ip_from 172.16.0.0/12;     # la red de Docker: el único que habla con este nginx es el proxy del host
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;               # toma la dirección más a la derecha que NO sea de confianza (la que añadió el proxy del borde)
+# ... y en `location /api/`:
+proxy_set_header X-Forwarded-For $remote_addr;      # una sola IP, ya limpia
+```
+
+Requiere reconstruir la imagen del frontend y repetir la prueba. Se registró como D35 (`05` §5).
+
+### 11.4 Registro de la revisión
+
+Anotar en el cambio o ticket: fecha, quién revisó, versión de la configuración del proxy, resultado de las 13
+comprobaciones y, si falló alguna, cuándo se corrigió y se repitió.
+

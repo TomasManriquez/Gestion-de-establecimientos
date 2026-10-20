@@ -508,6 +508,66 @@ del servidor). Orden:
 > un `viewer` ve en el detalle es `ssid_password` redactado y datos de contacto del establecimiento
 > (`director_email`, `director_phone`, §3). La activación la decide el responsable.
 
+### 9.6.1 🧭 DISEÑO · Recepción de las cuentas autoaprovisionadas (mínimo privilegio y zero trust)
+
+> **Estado: propuesta para decisión del responsable. No está implementada** (salvo lo marcado ✅). No cambia
+> G1 (la cuenta nace `viewer` en `datos`); define el **formato del registro de entrada**, qué se confía de
+> Google y qué se vuelve a verificar, y los controles que acotan el daño si el dominio se abusa o una cuenta se
+> compromete. Premisa de G4: **pertenecer al dominio no significa ser funcionario.**
+
+**Principios aplicados.** (1) *Nunca confiar, siempre verificar:* cada petición vuelve a leer a la persona y su
+rol sale del documento, no del token ✅ (ADR-009); cada login vuelve a validar firma, `aud`, `iss`, `hd`,
+`email_verified` e `iat` ✅. (2) *Mínimo privilegio:* denegar por defecto; el único permiso automático es
+lectura de `datos`; todo lo demás lo concede un `iam/admin`, con auditoría ✅. (3) *Suponer la brecha:* acotar
+cuánto puede crear un abuso, cuánto dura una cuenta olvidada y qué ve una cuenta no verificada.
+
+**Formato del registro de entrada.** Qué se guarda de lo que Google entrega y qué no:
+
+| Dato | Origen | Se guarda | Confianza |
+|---|---|---|---|
+| `sub` | `id_token` verificado | ✅ `auth_providers[google].subject` (inmutable; vínculo único) | Alta: identifica a la persona, no el correo |
+| `email` | `id_token`, con `email_verified=true` y `hd` = dominio | ✅ `email` (normalizado) | Media: el correo puede reasignarse; el vínculo real es `sub` |
+| `given_name`, `family_name` | `id_token` | ✅ `first_name`, `last_name` (recortados a 80) | Baja: solo para mostrar; nunca para decidir permisos |
+| `picture`, `locale`, `name`, `exp`, `jti`… | `id_token` | ❌ se descartan (minimización de datos) | — |
+| Rol, plataformas, unidad, cargos | **servidor** (nunca el token) | ✅ `access: [{datos, viewer}]`, `is_slep_staff: null` | Es la decisión del sistema |
+| Credencial de Google (`credential`) | navegador | ❌ jamás (ni en logs) ✅ | — |
+
+Documento resultante (✅ hoy salvo `provisioning`, 🧭 propuesto):
+
+```json
+{
+  "email": "persona@slepllanquihue.cl", "first_name": "…", "last_name": "…",
+  "status": "active", "is_slep_staff": null, "unit_id": null, "rbd": null, "positions": [],
+  "access": [{"platform_id": "datos", "role": "viewer", "granted_at": "ISODate", "granted_by": null}],
+  "auth_providers": [{"provider": "google", "subject": "…", "linked_at": "ISODate"}],
+  "provisioning": {"source": "google", "at": "ISODate", "vetted": false}
+}
+```
+
+`provisioning.vetted` (🧭): `false` hasta que un `iam/admin` confirme que la persona es quien dice y qué es
+(funcionario, docente, estudiante). Quien tiene `vetted: false` está **sin verificar por una persona**, aunque
+Google la haya autenticado.
+
+**Controles propuestos** (cada uno cierra un riesgo concreto; la columna *Costo* indica qué hay que construir):
+
+| # | Riesgo | Control | Estado | Costo |
+|---|---|---|---|---|
+| Z1 | Alta masiva (abuso del dominio, un script con miles de cuentas de estudiantes) | **Tope global de altas automáticas** por hora (p. ej. 30). Al superarlo, el login nuevo responde el mismo `401` y se registra un aviso; las cuentas existentes siguen entrando | 🧭 | Variable `GOOGLE_AUTO_PROVISION_MAX_PER_HOUR` (obligatoria, 4 archivos de despliegue) + contador en `rate_limits` |
+| Z2 | Una cuenta no verificada ve datos personales | **Enmascarar contactos personales** (`director_email`, `director_phone`, correos y teléfonos de contrapartes) para `vetted: false`, igual que hoy se redacta `ssid_password` para `viewer`. El directorio y las fichas siguen visibles | 🧭 **Requiere decisión:** cambia lo que N18 aceptó | Un campo y una condición en la redacción; el frontend ya tolera `[REDACTED]` |
+| Z3 | Cuenta olvidada o de quien ya no está | **Caducidad por inactividad**: pasar a `disabled` tras N días sin `last_activity_at` (p. ej. 180) y solo si `vetted: false`; reingresar con Google la reactiva como lector nueva | 🧭 | Tarea programada o chequeo perezoso en el login |
+| Z4 | Cuenta de Google comprometida | Acotar la sesión: TTL de 180 min ✅, revocación inmediata al desactivar ✅ y `logout` que corta todas las sesiones ✅; **la suspensión en Google no corta una sesión ya abierta** hasta que expire | ✅ / límite conocido | Reducir el TTL o consultar a Google con refresh cada X min (fuera de alcance, §6 de F6) |
+| Z5 | Un permiso que se «pega» | Los permisos solo se **amplían** por una acción de `iam/admin` auditada (`access.grant`); el alta automática **nunca** modifica una cuenta existente (rol, unidad, estado) ✅ (`test_BE56_*`) | ✅ | — |
+| Z6 | Plataformas futuras heredan el acceso por el dominio | Todo recurso no público exige acceso explícito por plataforma lógica; nunca el dominio ni `is_slep_staff` (G4) | ✅ regla | Revisar en cada ADR de módulo nuevo |
+| Z7 | Nadie mira las cuentas nuevas | Cola de revisión: `GET /api/users?assignment=unassigned` ✅; falta un recuento visible y la acción «marcar verificada» | 🧭 | UI de administración (N17) + endpoint `POST /api/users/{id}/vet` |
+| Z8 | Reutilización de un `id_token` robado | `iat` ≤ 5 min ✅; no se guarda estado (sin `jti` ni nonce, fuera de alcance) | ✅ / límite conocido | — |
+| Z9 | Enumeración o fuerza bruta sobre `/api/auth/google` | Mismo `401` para todo fallo ✅; 30 rechazos por IP en 15 min ✅. **La IP debe ser la real**: depende del proxy del host (D35) | ✅ + D35 | Corregir D35 |
+
+**Orden recomendado (menor costo primero):** D35 (corrección de IP, afecta a todo el rate limiting) → Z1 (tope
+global) → Z7 (cola visible) → Z2 y Z3 (cambian la experiencia: exigen tu decisión).
+
+**Decisiones que quedan para el responsable.** (a) ¿Z2: los contactos personales se enmascaran a las cuentas
+no verificadas? (b) ¿Z3: caducidad por inactividad y a cuántos días? (c) ¿Z1: valor del tope por hora?
+
 ### 9.7 Invariantes por protegerse y su test previsto
 
 Los IDs siguen la numeración real (último existente: BE08, INT02, FE05).
