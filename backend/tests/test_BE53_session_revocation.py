@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi.testclient import TestClient
 from app.config import settings
-from tests.conftest import (ADMIN_USER, EDITOR_USER, _user, bearer_for, prepare_org, run, seed_users,
+from tests.conftest import (ADMIN_USER, EDITOR_USER, _user, bearer_for, prepare_org, run, seed_users, session_headers,
                             user_with_password)
 
 GOOGLE_USER = _user("6600000000000000000000b1", "google@slepllanquihue.cl", "Gina", "Google", [("datos", "viewer")],
@@ -111,4 +111,4 @@ def test_BE53_password_change_still_cuts_previous_sessions(fake_db):
     r = c.post("/api/auth/password", json={"current_password": password, "new_password": new}, headers=old)
     assert r.status_code == 200
     assert me(c, old) == 401
-    assert me(c, {"Authorization": "Bearer " + r.json()["access_token"]}) == 200
+    assert me(c, session_headers(r)) == 200

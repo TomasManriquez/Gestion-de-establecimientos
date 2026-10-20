@@ -268,6 +268,14 @@ def seed_users(db, *users):
     return docs
 
 
+SESSION_COOKIE = "slep_session"
+
+
+def session_headers(response) -> dict:
+    """Authorization con el JWT que la respuesta entregó en la cookie de sesión (S3: ya no va en el cuerpo)."""
+    return {"Authorization": "Bearer " + response.cookies.get(SESSION_COOKIE)}
+
+
 def bearer_for(user: dict, **claims):
     """Cabecera Authorization con un JWT real para ese usuario (sub = str(_id))."""
     from app.auth.auth_service import auth_service

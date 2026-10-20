@@ -52,10 +52,9 @@ export default function Login({ onLoginSuccess }) {
   // Ruta de destino post-login (guardada por ProtectedRoute en ?from=)
   const redirectTo = searchParams.get('from') || '/dashboard';
 
-  // Misma salida para ambos métodos: guarda el token y deja que App cargue al usuario.
-  const finishLogin = (accessToken) => {
-    localStorage.setItem('token', accessToken);
-    axios.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+  // Misma salida para ambos métodos. El servidor ya dejó la sesión en una cookie HttpOnly (ADR-016):
+  // aquí no se guarda ningún token; App solo vuelve a preguntar quién es el usuario.
+  const finishLogin = () => {
     onLoginSuccess();
     navigate(redirectTo, { replace: true });
   };
@@ -65,8 +64,8 @@ export default function Login({ onLoginSuccess }) {
     setError('');
     setLoading(true);
     try {
-      const { data } = await axios.post('/api/auth/google', { credential: response.credential });
-      finishLoginRef.current(data.access_token);
+      await axios.post('/api/auth/google', { credential: response.credential });
+      finishLoginRef.current();
     } catch (err) {
       setError(err.response?.status === 429 ? err.response.data?.detail?.message || GOOGLE_ERROR : GOOGLE_ERROR);
     } finally {
@@ -107,8 +106,8 @@ export default function Login({ onLoginSuccess }) {
     setLoading(true);
 
     try {
-      const { data } = await axios.post('/api/auth/login', { username, password });
-      finishLogin(data.access_token);
+      await axios.post('/api/auth/login', { username, password });
+      finishLogin();
     } catch (err) {
       console.error(err);
       setError(

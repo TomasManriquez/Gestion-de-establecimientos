@@ -1,8 +1,8 @@
 /**
  * api.js — cliente API único de las pantallas de gestión de usuarios (ADR-008).
  *
- * Usa el `axios` global a propósito: así hereda la cabecera `Authorization` que instala
- * `App.jsx` y su interceptor de 401. No crea otra instancia ni toca el token.
+ * Usa el `axios` global a propósito: así hereda su interceptor de 401. La sesión es una cookie
+ * HttpOnly que el navegador envía sola (ADR-016): este módulo no crea otra instancia ni toca credenciales.
  * Todas las rutas son relativas (`/api/...`): el proxy de Vite o el de Nginx las resuelve.
  * Los componentes antiguos siguen llamando a `axios` directo (D19); no se migran aquí.
  */

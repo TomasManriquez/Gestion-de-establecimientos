@@ -52,10 +52,10 @@ describe('FE-00: Login — Migración a shadcn/ui', () => {
     });
   });
 
-  it('autentica exitosamente y guarda token en localStorage', async () => {
+  it('autentica exitosamente sin guardar ningún token en el navegador (cookie HttpOnly)', async () => {
     const onLoginSuccess = vi.fn();
     axios.post.mockResolvedValueOnce({
-      data: { access_token: 'fake-jwt-token-123' },
+      data: { expires_in: 10800 },
     });
 
     render(
@@ -76,8 +76,8 @@ describe('FE-00: Login — Migración a shadcn/ui', () => {
         username: 'admin',
         password: 'secret',
       });
-      expect(localStorage.getItem('token')).toBe('fake-jwt-token-123');
-      expect(axios.defaults.headers.common['Authorization']).toBe('Bearer fake-jwt-token-123');
+      expect(localStorage.getItem('token')).toBeNull();
+      expect(axios.defaults.headers.common['Authorization']).toBeUndefined();
       expect(onLoginSuccess).toHaveBeenCalled();
       expect(screen.getByText('Dashboard Page')).toBeInTheDocument();
     });

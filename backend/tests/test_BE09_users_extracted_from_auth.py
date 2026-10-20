@@ -12,7 +12,7 @@ Verifica que:
 import ast
 from pathlib import Path
 from fastapi.testclient import TestClient
-from tests.conftest import ADMIN_USER, seed_users, user_with_password, bearer_for
+from tests.conftest import ADMIN_USER, seed_users, session_headers, user_with_password, bearer_for
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -58,9 +58,9 @@ def test_BE09_login_and_me_contract_unchanged(fake_db):
 
     r = client.post("/api/auth/login", json={"username": "admin@slepllanquihue.cl", "password": "una-clave-larga-de-prueba"})
     assert r.status_code == 200
-    assert set(r.json()) == {"access_token", "token_type"} and r.json()["token_type"] == "bearer"
+    assert set(r.json()) == {"expires_in"}                                  # S3: el token va solo en la cookie
 
-    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"})
+    me = client.get("/api/auth/me", headers=session_headers(r))
     assert me.status_code == 200
     body = me.json()
     assert {"username", "full_name", "role"} <= set(body)                   # contrato original
@@ -68,5 +68,5 @@ def test_BE09_login_and_me_contract_unchanged(fake_db):
     assert body["role"] == "admin" and body["full_name"] == "Administrador SLEP"
     assert {"id", "email", "access"} <= set(body)                            # aditivo
 
-    anon = client.get("/api/auth/me")
+    anon = TestClient(app).get("/api/auth/me")                              # cliente sin la cookie de la sesión anterior
     assert anon.status_code == 401 and anon.headers["www-authenticate"] == "Bearer"

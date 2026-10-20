@@ -32,7 +32,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from tests.conftest import ADMIN_USER, EDITOR_USER, _user, prepare_org
+from tests.conftest import ADMIN_USER, EDITOR_USER, _user, prepare_org, session_headers
 
 CLIENT_ID = "test-client-id.apps.googleusercontent.com"
 NEW_EMAIL = "persona.nueva@slepllanquihue.cl"
@@ -144,14 +144,14 @@ def test_BE56_missing_client_id_rejects_everything(ctx, monkeypatch):
 def test_BE56_new_account_is_unassigned_active_viewer_in_datos(ctx):
     c, db = ctx
     r = login(c)
-    assert r.status_code == 200 and r.json()["token_type"] == "bearer"
+    assert r.status_code == 200 and set(r.json()) == {"expires_in"}
     doc = user_by_email(db, NEW_EMAIL)
     assert doc["status"] == "active"
     assert [(a["platform_id"], a["role"]) for a in doc["access"]] == [("datos", "viewer")]
     assert doc["is_slep_staff"] is None and doc["unit_id"] is None and doc["rbd"] is None and doc["positions"] == []
     assert (doc["first_name"], doc["last_name"]) == ("Persona", "Nueva")
     assert [(p["provider"], p["subject"]) for p in doc["auth_providers"]] == [("google", "110000000000000000001")]
-    body = me(c, r.json()["access_token"]).json()
+    body = c.get("/api/auth/me", headers=session_headers(r)).json()
     assert body["role"] == "viewer" and body["email"] == NEW_EMAIL
     assert not any(a["platform_id"] == "iam" for a in body["access"])
     assert doc["last_login_at"] is not None
@@ -236,7 +236,7 @@ def test_BE56_existing_user_enters_by_email_and_keeps_role_and_membership(ctx):
     for field in ("access", "is_slep_staff", "unit_id", "rbd", "positions", "status", "first_name", "last_name"):
         assert after[field] == before[field], field
     assert [p["provider"] for p in after["auth_providers"]] == ["local", "google"]
-    assert me(c, r.json()["access_token"]).json()["role"] == "admin"
+    assert c.get("/api/auth/me", headers=session_headers(r)).json()["role"] == "admin"
 
 
 def test_BE56_invited_account_becomes_active_and_linked(ctx):

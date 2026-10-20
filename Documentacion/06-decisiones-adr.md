@@ -228,8 +228,8 @@ descartado sin registro escrito (ver la brecha de `04` §1).
 >    se sincroniza el directorio de Workspace.
 >
 > Se mantienen: bcrypt, JWT HS256 para la sesión propia de este sistema, relectura del usuario
-> en cada request (sin ventana de propagación) y el token en `localStorage` (brecha de `04` §1,
-> sin cambio). La sesión interna nunca sale de este sistema; los tokens para otras
+> en cada request (sin ventana de propagación). ~~El token en `localStorage`~~: **enmendado por ADR-016**, la sesión
+> pasa a una cookie `HttpOnly` (F6 S3). La sesión interna nunca sale de este sistema; los tokens para otras
 > plataformas son otro mecanismo, diseñado en F7 (`04` §10).
 
 ---
@@ -621,4 +621,42 @@ servicio (N16, N18).
 **Alternativas descartadas.** Alta solo por invitación (lo reemplaza C24). Asignar unidad o cargo por el
 dominio, por el correo o por el claim `hd` (el dominio no distingue funcionarios de estudiantes). Rol
 tomado de una claim del token. Flujo de authorization code con servidor de sesiones. Nonce con estado.
+
+---
+
+## ADR-016 · Sesión en cookie `HttpOnly` en lugar de `localStorage` (enmienda ADR-006)
+
+**Contexto.** El JWT vivía en `localStorage` y se enviaba como `Authorization: Bearer`. Cualquier XSS en la SPA
+lo exfiltra (`04` §1, brecha registrada). SEC-6 (CSP) y SEC-3 (revocación) acotan el daño, pero solo la cookie
+`HttpOnly` elimina el robo del token. Precondiciones cumplidas: SEC-5 aplicado (sin CORS) y SPA y API de
+**mismo origen** (ADR-008).
+
+**Decisión.**
+1. `_issue_token` (único punto de emisión) entrega el JWT en `Set-Cookie: slep_session` con `HttpOnly`,
+   `SameSite=Strict`, `Path=/api`, `Max-Age` = vigencia y `Secure` según el esquema de `PUBLIC_BASE_URL`. El
+   cuerpo ya no lleva el token: `{expires_in}`.
+2. `get_current_user` acepta la cabecera `Authorization: Bearer` (clientes no navegador, tiene prioridad) o la
+   cookie. Con cookie, las peticiones que no son de solo lectura exigen `Origin == PUBLIC_BASE_URL`
+   (`403 untrusted_origin`). No se agregan tokens CSRF ni un middleware propio.
+3. `POST /api/auth/logout` revoca las sesiones (`sessions_revoked_at`) y borra la cookie; responde 204 aunque
+   no haya sesión, salvo un `Origin` ajeno con cookie (403).
+4. El frontend no guarda ni lee ningún token; `App` pregunta `GET /api/auth/me` al cargar y purga el `token`
+   antiguo de `localStorage`.
+
+**Consecuencias.**
+- Un XSS ya no puede llevarse el token, aunque aún puede actuar como la persona mientras la página esté
+  abierta (por eso la CSP sigue importando).
+- **`PUBLIC_BASE_URL` debe ser exactamente el origen que ve el navegador** (esquema, host y puerto): si no,
+  toda escritura da `403`. En desarrollo hay que entrar por `http://localhost:5173`, no por `127.0.0.1`.
+- Las sesiones abiertas antes del cambio (token en `localStorage`) dejan de servir: **todos vuelven a iniciar sesión una vez**.
+- Los consumidores que leían `access_token` del cuerpo de `/login` deben leer la cookie o migrar. No hay
+  versionado de API (D10): es un cambio de contrato **breaking** para ellos; no se conocen otros consumidores
+  que el frontend.
+- `SameSite=Strict` implica que un enlace desde otro sitio (p. ej. el correo de invitación) llega sin cookie en la
+  primera navegación: la SPA vuelve a preguntar `/me` y, si hace falta, muestra el login. No afecta al flujo de
+  invitación (el token va en el fragmento y no hay sesión previa).
+
+**Alternativas descartadas.** Seguir con `localStorage` + CSP (no cierra la clase). Tokens CSRF con estado o
+doble envío de cookie (más piezas; `SameSite=Strict` + `Origin` cubren el caso a esta escala). Cookie de
+dominio padre (F7 lo diseña aparte, `04` §10). Refresh tokens (fuera de alcance, §6 del prompt de F6).
 

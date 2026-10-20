@@ -3,13 +3,13 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
-from app.auth.auth_service import _credentials_exception, auth_service, client_ip, rate_limited_http, require_access
+from app.auth.auth_service import SESSION_COOKIE, _credentials_exception, auth_service, client_ip, rate_limited_http, require_access
 from app.auth.google_service import GoogleLoginError, google_login_service
 from app.auth.auth_entity import (AccessContext, AccessSummary, AuthConfig, ChangePasswordRequest, GOOGLE_IP_LIMIT,
                                   GOOGLE_WINDOW_SECONDS, GoogleLoginRequest, InvalidLink, LoginRequest,
                                   LOGIN_ACCOUNT_LIMIT, LOGIN_IP_LIMIT, LOGIN_WINDOW_SECONDS, PLATFORM_DATOS, PasswordPolicy,
                                   PasswordPolicyError, REDEEM_IP_LIMIT, REDEEM_WINDOW_SECONDS, RateLimited,
-                                  SetPasswordRequest, Token, UserResponse)
+                                  SessionStarted, SetPasswordRequest, UserResponse)
 from app.users.users_entity import UserNotFound
 from app.users.users_service import users_service
 
@@ -17,13 +17,22 @@ logger = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _issue_token(user: dict) -> dict:
-    """El `sub` es str(_id): estable, nunca el correo ni el username (C6)."""
+def _cookie_attrs() -> dict:
+    """Atributos de la cookie de sesión (ADR-016). `Path=/api`: solo viaja hacia la API. `SameSite=Strict`:
+    SPA y API son de mismo origen. Los mismos atributos hacen falta para borrarla."""
+    return {"path": "/api", "httponly": True, "samesite": "strict", "secure": settings.SESSION_COOKIE_SECURE}
+
+
+def _issue_token(user: dict, response: Response) -> dict:
+    """ÚNICO punto por donde sale una sesión (login, login-form, Google, cambio de contraseña): emite el
+    JWT y lo entrega como cookie `HttpOnly`, no en el cuerpo. El `sub` es str(_id): estable, nunca el
+    correo ni el username (C6)."""
+    ttl = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth_service.create_access_token(
-        data={"sub": str(user["_id"]), "role": datos_role(user) or "none"},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+        data={"sub": str(user["_id"]), "role": datos_role(user) or "none"}, expires_delta=ttl)
+    response.set_cookie(SESSION_COOKIE, access_token, max_age=int(ttl.total_seconds()), **_cookie_attrs())
+    response.headers["Cache-Control"] = "no-store"
+    return {"expires_in": int(ttl.total_seconds())}
 
 
 def datos_role(user: dict):
@@ -59,13 +68,13 @@ async def _limited_login(request: Request, login: str, password: str) -> dict:
     return user
 
 
-@router.post("/login", response_model=Token)
-async def login_for_access_token(payload: LoginRequest, request: Request):
+@router.post("/login", response_model=SessionStarted)
+async def login_for_access_token(payload: LoginRequest, request: Request, response: Response):
     """
     JSON Login endpoint. `username` acepta el correo o, mientras dure la compatibilidad, el
     username legado. Responde 429 con `Retry-After` al superar el límite de intentos fallidos.
     """
-    return _issue_token(await _limited_login(request, payload.username, payload.password))
+    return _issue_token(await _limited_login(request, payload.username, payload.password), response)
 
 @router.get("/config", response_model=AuthConfig)
 async def get_auth_config():
@@ -74,8 +83,8 @@ async def get_auth_config():
     return {"google_client_id": settings.GOOGLE_CLIENT_ID}
 
 
-@router.post("/google", response_model=Token)
-async def login_with_google(payload: GoogleLoginRequest, request: Request):
+@router.post("/google", response_model=SessionStarted)
+async def login_with_google(payload: GoogleLoginRequest, request: Request, response: Response):
     """Login con Google Identity Services (C24). Pública. Todo fallo es el mismo 401 de las demás rutas,
     sin revelar la causa; el `credential` no se registra en ningún log. Los rechazos cuentan para el
     límite por IP (429 con `Retry-After`). La sesión sale de `_issue_token`, el único punto de emisión."""
@@ -92,30 +101,34 @@ async def login_with_google(payload: GoogleLoginRequest, request: Request):
         await auth_service.rate_hit(ip_key, GOOGLE_WINDOW_SECONDS)
         raise _credentials_exception()
     await users_service.touch_login(user["_id"])
-    return _issue_token(user)
+    return _issue_token(user, response)
 
 
-@router.post("/login-form", response_model=Token)
-async def login_for_access_token_form(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
+@router.post("/login-form", response_model=SessionStarted)
+async def login_for_access_token_form(request: Request, response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
     """
     Form-url-encoded Login endpoint (standard for Swagger UI)
     """
-    return _issue_token(await _limited_login(request, form_data.username, form_data.password))
+    return _issue_token(await _limited_login(request, form_data.username, form_data.password), response)
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request):
     """Corta TODAS las sesiones de la persona (`sessions_revoked_at`): es la forma sin estado, no hay
-    lista de tokens. Responde 204 aunque el token ya no sirva (vencido, revocado, malformado): cerrar
-    sesión nunca falla para quien la cierra. Los 401 de esta ruta no los produce `require_access`."""
-    header = request.headers.get("authorization", "")
-    scheme, _, token = header.partition(" ")
-    if scheme.lower() == "bearer" and token:
-        try:
-            user = await auth_service.get_current_user(token)
-        except HTTPException:
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-        await users_service.revoke_sessions(user["_id"])
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    lista de tokens. Borra la cookie de sesión. Responde 204 aunque el token ya no sirva (vencido,
+    revocado, malformado, ausente): cerrar sesión nunca falla para quien la cierra. Única excepción: una
+    petición con cookie y `Origin` ajeno (403), para que un sitio hermano no pueda cerrar sesiones."""
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(SESSION_COOKIE, **_cookie_attrs())
+    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+    try:
+        token = auth_service.resolve_token(request, bearer if scheme.lower() == "bearer" else None)
+        user = await auth_service.authenticate_token(token)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise
+        return response
+    await users_service.revoke_sessions(user["_id"])
+    return response
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(ctx: AccessContext = Depends(require_access(None))):
@@ -141,8 +154,9 @@ async def get_password_policy():
             "require_char_classes": settings.PASSWORD_REQUIRE_CHAR_CLASSES}
 
 
-@router.post("/password", response_model=Token)
-async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext = Depends(require_access(None))):
+@router.post("/password", response_model=SessionStarted)
+async def change_own_password(payload: ChangePasswordRequest, response: Response,
+                              ctx: AccessContext = Depends(require_access(None))):
     """Cambio de contraseña propio (C19). Devuelve un token nuevo: el cambio fija
     `password_changed_at`, lo que invalida el token con el que se llamó.
 
@@ -166,7 +180,7 @@ async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext
     except UserNotFound:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials",
                             headers={"WWW-Authenticate": "Bearer"})
-    return _issue_token(updated)
+    return _issue_token(updated, response)
 
 
 @router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)

@@ -9,7 +9,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 from tests.conftest import (ADMIN_USER, EDITOR_USER, VIEWER_USER, NO_DATOS_USER, prepare_org, bearer_for,
-                            user_with_password, seed_users, _user)
+                            user_with_password, seed_users, _user, session_headers)
 
 PHONE = "+56911112222"
 SECRET_KEYS = {"hashed_password", "token_hash", "password_hash", "refresh_token"}
@@ -68,13 +68,13 @@ def test_INT07_write_responses_never_leak_hashes(ctx):
         assert not re.search(r"\$2[aby]\$", r.text)
 
 
-def test_INT07_login_and_password_change_responses_have_only_the_token(ctx):
+def test_INT07_login_and_password_change_responses_carry_no_token_in_the_body(ctx):
     c, db = ctx
     r = c.post("/api/auth/login", json={"username": ADMIN_USER["email"], "password": "una-clave-larga-de-prueba"})
-    assert set(r.json()) == {"access_token", "token_type"}
+    assert set(r.json()) == {"expires_in"}                                      # el token solo viaja en la cookie
     ch = c.post("/api/auth/password", json={"current_password": "una-clave-larga-de-prueba", "new_password": "otra-frase-larga-xyz-1"},
-                headers={"Authorization": "Bearer " + r.json()["access_token"]})
-    assert set(ch.json()) == {"access_token", "token_type"}
+                headers=session_headers(r))
+    assert set(ch.json()) == {"expires_in"}
 
 
 def test_INT07_personal_phone_only_for_iam_admin_and_owner(ctx):

@@ -86,6 +86,9 @@ class Settings:
         if self.MAIL_MODE not in MAIL_MODES:
             raise ConfigError(f"MAIL_MODE debe ser uno de {', '.join(MAIL_MODES)} (recibido: {self.MAIL_MODE!r})")
         self.PUBLIC_BASE_URL: str = self._base_url(self._required("PUBLIC_BASE_URL"))
+        # Cookie de sesión (S3, ADR-016): `Secure` cuando la aplicación se sirve por https. En desarrollo
+        # (http://localhost) no puede ser `Secure` o el navegador la rechazaría.
+        self.SESSION_COOKIE_SECURE: bool = urlsplit(self.PUBLIC_BASE_URL).scheme == "https"
         host = urlsplit(self.PUBLIC_BASE_URL).hostname or ""
         local = host in _LOCAL_HOSTS
         self.GMAIL_SENDER_ADDRESS: str = self._get("GMAIL_SENDER_ADDRESS", "").strip().lower()

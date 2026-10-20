@@ -287,7 +287,7 @@ sequenceDiagram
     participant S as establishments_service
     participant M as MongoDB
 
-    B->>B: axios.defaults.headers.Authorization = Bearer TOKEN
+    Note over B: la cookie HttpOnly `slep_session` viaja sola (ADR-016)
     B->>N: GET /api/establishments/7722
     N->>F: proxy_pass → backend:8000
     F->>A: Depends(get_current_user)
@@ -318,8 +318,8 @@ que revisar ante cualquier bug de "falta un campo" o "se filtró un dato":
 4. **El proxy**, que puede cortar por timeout (`proxy_read_timeout 120s` en `nginx.conf`).
 
 Interceptor del lado cliente: `App.jsx:35-41` registra un interceptor de axios que en
-cualquier `401` ejecuta `handleLogout()` — borra el token de `localStorage`, quita la cabecera
-y marca la sesión como cerrada. Es el único manejo transversal de errores del frontend.
+cualquier `401` ejecuta `handleLogout()` — marca la sesión como cerrada (la cookie `HttpOnly` la gestiona
+el servidor; `AppLayout` llama a `POST /api/auth/logout` para borrarla y revocar las sesiones). Es el único manejo transversal de errores del frontend.
 
 ---
 

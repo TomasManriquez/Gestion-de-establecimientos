@@ -30,10 +30,10 @@ sequenceDiagram
     else válidas
         AS->>US: touch_login
         AC->>AS: create_access_token({sub: str(_id), role, iat, exp})
-        AC-->>C: 200 {access_token, token_type}
+        AC-->>C: 200 {expires_in} + Set-Cookie slep_session (HttpOnly, SameSite=Strict)
     end
 
-    C->>AC: GET /api/... + Authorization: Bearer TOKEN
+    C->>AC: GET /api/... + cookie slep_session (o Authorization: Bearer)
     AC->>AS: Depends(require_access(plataforma, roles))
     AS->>AS: jwt.decode (firma y exp), sub malformado -> 401
     AS->>US: find_for_session(sub)
@@ -72,16 +72,25 @@ token emitido **hasta el instante de la última revocación** (`iat <= sessions_
 El `sub` aceptado es `str(_id)`. Mientras dure la compatibilidad también se acepta el username
 legado del admin sembrado (`sub = "admin"`). Se retira una versión después de F3.
 
-**Lado cliente** (`frontend/src/App.jsx:26-44`, `Login.jsx:36-40`): el token se guarda en
-`localStorage`, se instala como `axios.defaults.headers.common['Authorization']`, y un
-interceptor de respuesta cierra la sesión ante **cualquier `401`**. Por eso un endpoint que
-valida una contraseña (cambio propio) responde `400` y nunca `401` ante la clave actual
-errónea. Al montar la app, si hay token se llama `GET /api/auth/me`.
+**Cookie de sesión (✅ F6 S3, ADR-016).** El JWT se entrega **solo** en `Set-Cookie: slep_session`
+(`HttpOnly`, `SameSite=Strict`, `Path=/api`, `Max-Age` = vigencia, `Secure` si `PUBLIC_BASE_URL` es https) y
+nunca en el cuerpo: un XSS ya no tiene un token que robar (`test_BE59_*`, `test_FE18_*`). `_issue_token` sigue
+siendo el único punto de emisión. `get_current_user` toma el token de la cabecera `Authorization` (clientes no
+navegador; tiene prioridad) o, si no hay, de la cookie. **Con cookie**, toda petición que no sea GET/HEAD/OPTIONS
+exige `Origin == PUBLIC_BASE_URL` (si no, `403 untrusted_origin`): `SameSite=Strict` no frena a un sitio
+*hermano* (otro subdominio del mismo dominio registrable cuenta como «same-site»); el `Origin` sí. La cabecera
+Bearer no es una credencial ambiental, así que no pasa por ese control. No hay CORS (SEC-5), por lo que
+ningún origen ajeno puede leer respuestas.
 
-> 🔸 **BRECHA:** el token vive en `localStorage`, accesible desde JavaScript, por lo que
-> cualquier XSS en la SPA lo exfiltra. La alternativa habitual (cookie `HttpOnly` + `SameSite`)
-> exigiría CSRF tokens y cambiar el esquema Bearer. Es una decisión consciente de simplicidad,
-> pero no está registrada como tal en ningún ADR.
+**Lado cliente** (`App.jsx`, `Login.jsx`, `AppLayout.jsx`): no se guarda nada en el navegador. Al montar,
+`App` llama `GET /api/auth/me`; un `401` significa «sin sesión». Un interceptor de respuesta cierra la sesión de
+la vista ante **cualquier `401`**, por eso un endpoint que valida una contraseña (cambio propio) responde `400`
+y nunca `401` ante la clave actual errónea. `App` purga el `token` que versiones anteriores dejaron en
+`localStorage`. El cierre de sesión llama `POST /api/auth/logout`, que revoca las sesiones y borra la cookie.
+
+> ✅ **RESUELTO (F6 S3):** la brecha «token en `localStorage`» (robo por XSS) quedó cerrada. Siguen
+> abiertos los límites de §7: la CSP está en `Report-Only` y un XSS aún podría *usar* la sesión desde la
+> propia página (hacer peticiones como la persona mientras dure la visita), aunque ya no puede *llevarse* el token.
 
 ---
 
@@ -337,9 +346,9 @@ sequenceDiagram
     AS->>AS: status == active, bcrypt.checkpw sobre el proveedor local
     AS-->>AC: usuario | None
     AC->>AS: create_access_token({sub: str(_id), iat, exp})
-    AC-->>C: 200 {access_token, token_type}
+    AC-->>C: 200 {expires_in} + Set-Cookie slep_session
 
-    C->>AC: GET /api/establishments/7722 + Bearer
+    C->>AC: GET /api/establishments/7722 + cookie
     AC->>AS: Depends(require_access("datos", {admin, editor, viewer}))
     AS->>AS: jwt.decode (firma, exp)
     AS->>US: get(sub)
@@ -534,8 +543,8 @@ de rango: la política de contraseñas. Detalle y archivos a actualizar: `07` §
 **Cierra:** D2 (defaults de `JWT_SECRET` y `ADMIN_PASSWORD`), D3 (`viewer` escribe), D4 (`PUT` sin
 redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting, y el login ilimitado.
 **Cierra (F6, S1):** CORS `*` (§5), D5 (regex sin escapar), el secreto de desarrollo versionado, la ausencia de cabeceras de seguridad (CSP aún en `Report-Only`) y el logout sin efecto.
-**Sigue abierta:** token en `localStorage` (§1; la cookie `HttpOnly` es S3, pendiente de aprobación),
-`/docs` y `/openapi.json` públicos, la redacción de los datos de contrapartes (§3), y MFA.
+**Cierra (F6, S3):** el token en `localStorage` (§1: cookie `HttpOnly`, ADR-016).
+**Sigue abierta:**`/docs` y `/openapi.json` públicos, la redacción de los datos de contrapartes (§3), y MFA.
 **Límites conocidos de F4** (registrados en `05` §5.3c): el modo `console` escribe el enlace completo en el
 log (solo desarrollo); un atacante distribuido en muchas IPs puede probar 5 contraseñas por IP contra una
 cuenta (el diseño evita el bloqueo de cuenta a propósito); el reloj de pared del entorno de desarrollo

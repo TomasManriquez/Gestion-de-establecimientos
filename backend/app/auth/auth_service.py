@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Tuple
 import bcrypt
 import jwt
 from bson import ObjectId
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -28,7 +28,12 @@ from app.users.users_service import users_service
 
 logger = logging.getLogger("auth")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# La sesión del navegador viaja en una cookie HttpOnly (S3, ADR-016). La cabecera `Authorization: Bearer`
+# se sigue aceptando para clientes que no son navegador (scripts, pruebas): no es una ambient credential,
+# así que no necesita defensa contra CSRF. `auto_error=False`: sin ninguna de las dos fuentes, 401 uniforme.
+SESSION_COOKIE = "slep_session"
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 # Costo de bcrypt. Los tests lo bajan para no pagar ~0.25 s por hash.
 BCRYPT_ROUNDS = 12
@@ -298,7 +303,33 @@ class AuthService:
         to_encode.update({"exp": expire, "iat": int(time.time())})
         return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.ALGORITHM)
 
-    async def get_current_user(self, token: str = Depends(oauth2_scheme)) -> dict:
+    @staticmethod
+    def origin_is_trusted(request: Request) -> bool:
+        """Defensa en profundidad contra CSRF para la cookie de sesión. `SameSite=Strict` no protege de
+        un sitio *hermano* (otro subdominio del mismo dominio registrable es «same-site»); el `Origin`
+        sí: los navegadores lo envían en toda petición que no sea GET/HEAD, y debe ser el origen público
+        de la aplicación (`PUBLIC_BASE_URL`)."""
+        return request.headers.get("origin") == settings.PUBLIC_BASE_URL
+
+    def resolve_token(self, request: Request, bearer: Optional[str]) -> str:
+        """Fuente del token: la cabecera `Authorization` (clientes no navegador) o, si no hay, la cookie
+        de sesión. Con cookie, una petición que no sea de solo lectura exige `Origin` de confianza (403).
+        Sin ninguna de las dos, el mismo 401 de siempre."""
+        if bearer:
+            return bearer
+        cookie = request.cookies.get(SESSION_COOKIE)
+        if not cookie:
+            raise _credentials_exception()
+        if request.method not in SAFE_METHODS and not self.origin_is_trusted(request):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                detail={"code": "untrusted_origin", "message": "Origen no permitido"})
+        return cookie
+
+    async def get_current_user(self, request: Request, bearer: Optional[str] = Depends(oauth2_scheme)) -> dict:
+        """Dependencia de FastAPI: resuelve la fuente del token y lo verifica (`authenticate_token`)."""
+        return await self.authenticate_token(self.resolve_token(request, bearer))
+
+    async def authenticate_token(self, token: str) -> dict:
         """Verifica el token y vuelve a leer al usuario (el rol nunca se toma del token, 04 §1).
 
         401 si: firma o `exp` inválidos, `sub` ausente o malformado, usuario inexistente, usuario

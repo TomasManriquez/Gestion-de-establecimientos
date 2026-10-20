@@ -441,6 +441,7 @@ lo evidencia.
 | El mapa de la ficha dice "Ubicación no disponible" | La base se re-sembró y se perdió `location` | `db.establishments.countDocuments({location:{$exists:true}})` · §4.1 |
 | El dashboard muestra ceros | No hay métricas del año 2026, que está hardcodeado | `db.metrics.countDocuments({year:2026})` · `03` §5.16 |
 | Sesión que se cierra sola | Token expirado (180 min), usuario desactivado, contraseña cambiada, o un `401` que disparó el interceptor | `04` §1 |
+| Todas las escrituras dan `403 untrusted_origin` tras iniciar sesión | `PUBLIC_BASE_URL` no es el origen exacto que ve el navegador (esquema, host, puerto), p. ej. se entra por `127.0.0.1` y la variable dice `localhost`, o el dominio público cambió | `.env` · ADR-016 |
 | El backend pasa el healthcheck pero la app no funciona | `GET /` no consulta MongoDB | `03` §5.1 |
 | El arranque falla al crear un índice | Se cambió la definición de un índice existente | `docker compose logs backend` · §7 |
 
@@ -502,4 +503,8 @@ lo evidencia.
    con respaldo previo (`scripts/backup-mongo.sh`), `--apply`. Si el conteo de documentos «con al menos una
    credencial» no es 0, **rotar esas credenciales** en cada plataforma externa: borrarlas de Mongo no las
    invalida y siguen en los respaldos anteriores. La aplicación ya no lee ni sirve el campo aunque exista.
+10. [ ] **Cookie de sesión (ADR-016):** `PUBLIC_BASE_URL` debe ser **exactamente** el origen público
+   (`https://datos.slepllanquihue.gob.cl`, sin barra final): con `https`, la cookie sale `Secure`; y toda
+   escritura valida `Origin` contra ese valor. El proxy del host **no debe** quitar la cabecera `Origin` ni
+   `Set-Cookie`. Tras el primer despliegue, todos los usuarios vuelven a iniciar sesión una vez.
 

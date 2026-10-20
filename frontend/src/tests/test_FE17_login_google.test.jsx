@@ -49,10 +49,10 @@ describe('FE-17: Login con Google Identity Services (C24)', () => {
     expect(screen.getByTestId('google-login')).not.toHaveClass('hidden');
   });
 
-  it('envía el credential a /api/auth/google y reutiliza el cierre de login (token, cabecera, onLoginSuccess)', async () => {
+  it('envía el credential a /api/auth/google y reutiliza el cierre de login (sin guardar token, con onLoginSuccess)', async () => {
     const gsi = installGoogleStub();
     axios.get.mockResolvedValueOnce({ data: { google_client_id: 'c.apps.googleusercontent.com' } });
-    axios.post.mockResolvedValueOnce({ data: { access_token: 'jwt-de-google' } });
+    axios.post.mockResolvedValueOnce({ data: { expires_in: 10800 } });
     const onLoginSuccess = renderLogin();
 
     await waitFor(() => expect(gsi.initialize).toHaveBeenCalled());
@@ -60,8 +60,8 @@ describe('FE-17: Login con Google Identity Services (C24)', () => {
 
     await waitFor(() => expect(screen.getByText('DASHBOARD')).toBeInTheDocument());
     expect(axios.post).toHaveBeenCalledWith('/api/auth/google', { credential: 'id-token-de-google' });
-    expect(localStorage.getItem('token')).toBe('jwt-de-google');
-    expect(axios.defaults.headers.common['Authorization']).toBe('Bearer jwt-de-google');
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(axios.defaults.headers.common['Authorization']).toBeUndefined();
     expect(onLoginSuccess).toHaveBeenCalledTimes(1);
   });
 
@@ -106,14 +106,15 @@ describe('FE-17: Login con Google Identity Services (C24)', () => {
 
   it('si /api/auth/config falla, el login por contraseña funciona igual', async () => {
     axios.get.mockRejectedValueOnce(new Error('network'));
-    axios.post.mockResolvedValueOnce({ data: { access_token: 'jwt-clave' } });
+    axios.post.mockResolvedValueOnce({ data: { expires_in: 10800 } });
     renderLogin();
 
     fireEvent.change(screen.getByLabelText(/Usuario de red/i), { target: { value: 'admin@slepllanquihue.cl' } });
     fireEvent.change(screen.getByLabelText(/Contraseña/i), { target: { value: 'una-clave-larga-1' } });
     fireEvent.click(screen.getByRole('button', { name: /Ingresar al sistema/i }));
 
-    await waitFor(() => expect(localStorage.getItem('token')).toBe('jwt-clave'));
+    await waitFor(() => expect(screen.getByText('DASHBOARD')).toBeInTheDocument());
     expect(axios.post).toHaveBeenCalledWith('/api/auth/login', { username: 'admin@slepllanquihue.cl', password: 'una-clave-larga-1' });
+    expect(localStorage.getItem('token')).toBeNull();
   });
 });

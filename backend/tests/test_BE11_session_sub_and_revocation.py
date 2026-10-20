@@ -39,7 +39,7 @@ def test_BE11_token_sub_is_object_id_string(fake_db):
     docs = seed_users(fake_db, user_with_password(ADMIN_USER, PASSWORD))
     c = client()
     r = c.post("/api/auth/login", json={"username": "admin@slepllanquihue.cl", "password": PASSWORD})
-    payload = jwt.decode(r.json()["access_token"], settings.JWT_SECRET, algorithms=["HS256"])
+    payload = jwt.decode(r.cookies["slep_session"], settings.JWT_SECRET, algorithms=["HS256"])
     assert payload["sub"] == str(docs[0]["_id"])
     assert "@" not in payload["sub"] and "iat" in payload and isinstance(payload["iat"], int)
 

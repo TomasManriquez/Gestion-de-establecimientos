@@ -21,8 +21,8 @@ Base: `/api`. Sin versionado en la ruta. Servidor documentado en `main.py:27-31`
 | # | Método | Ruta | Auth | Respuesta |
 |---|---|---|---|---|
 | 1 | GET | `/` | pública | `{app, status, message}` |
-| 2 | POST | `/api/auth/login` | pública | `Token` |
-| 3 | POST | `/api/auth/login-form` | pública | `Token` |
+| 2 | POST | `/api/auth/login` | pública | `{expires_in}` + cookie de sesión |
+| 3 | POST | `/api/auth/login-form` | pública | `{expires_in}` + cookie de sesión |
 | 4 | POST | `/api/auth/logout` | pública (lee el token a mano) | `204` sin cuerpo |
 | 5 | GET | `/api/auth/me` | autenticado | `UserResponse` (ver §5.5) |
 | 6 | GET | `/api/establishments` | `datos`: admin, editor, viewer | `EstablishmentListResponse` |
@@ -54,8 +54,9 @@ de la feature de usuarios marcados ✅ en §8 (auth: `password-policy` y `passwo
 
 ## 2. Autenticación
 
-Esquema: **JWT Bearer**, HS256, sin refresh. El `sub` es `str(_id)` del usuario y el token lleva `iat`. Detalle del flujo y del modelo de roles en
-`04-seguridad-y-acceso.md`; aquí solo lo que el cliente necesita.
+Esquema: **JWT HS256 en una cookie `HttpOnly`** (`slep_session`, ADR-016), sin refresh. El `sub` es `str(_id)` del
+usuario y el token lleva `iat`. Detalle del flujo y del modelo de roles en `04-seguridad-y-acceso.md`; aquí solo
+lo que el cliente necesita.
 
 ```
 POST /api/auth/login
@@ -64,13 +65,25 @@ Content-Type: application/json
 {"username": "admin@slepllanquihue.cl", "password": "..."}
 ```
 
-```json
-{"access_token": "eyJhbGciOiJIUzI1NiIs...", "token_type": "bearer"}
+```
+HTTP/1.1 200 OK
+Set-Cookie: slep_session=eyJhbGciOiJIUzI1NiIs...; HttpOnly; Max-Age=10800; Path=/api; SameSite=Strict[; Secure]
+Cache-Control: no-store
+
+{"expires_in": 10800}
 ```
 
-Las peticiones posteriores llevan `Authorization: Bearer <access_token>`. El token expira a
-los `ACCESS_TOKEN_EXPIRE_MINUTES` (default **180**, `config.py:11`). No hay endpoint de
-refresh: al expirar hay que volver a autenticarse.
+**El token ya no viaja en el cuerpo**: ningún script de la página puede leerlo. `Secure` se agrega cuando
+`PUBLIC_BASE_URL` es `https`. La cookie solo se envía a `/api` y solo desde el mismo sitio.
+
+- **Navegador:** la cookie viaja sola. **Toda petición que no sea de solo lectura (POST/PUT/PATCH/DELETE) debe
+  llevar `Origin` igual a `PUBLIC_BASE_URL`** (los navegadores lo envían); si falta o es otro → `403
+  {code: "untrusted_origin"}` (defensa contra CSRF de un sitio hermano, que `SameSite` no frena).
+- **Clientes que no son navegador** (scripts, integraciones): pueden seguir enviando `Authorization: Bearer <JWT>`,
+  que tiene prioridad sobre la cookie y no pasa por el control de `Origin`. El JWT se obtiene de la cookie
+  `Set-Cookie` de `login` (p. ej. `curl -c`).
+- El token expira a los `ACCESS_TOKEN_EXPIRE_MINUTES` (default **180**). No hay endpoint de refresh: al expirar
+  hay que volver a autenticarse.
 
 `POST /api/auth/login-form` hace exactamente lo mismo pero acepta
 `application/x-www-form-urlencoded` con campos `username`/`password`. Existe para que el
@@ -354,13 +367,13 @@ Usada como healthcheck en `Dockerfile.prod` y `docker-compose.prod.yml`. No repo
 > porque no la consulta. Un backend sin base pasaría el healthcheck y Nginx lo consideraría sano.
 
 ### 5.2 `POST /api/auth/login`
-Pública. Body `LoginRequest {username: str, password: str}` (JSON, solo escalares: un objeto de operadores da `422`). `200` → `Token {access_token, token_type: "bearer"}`. `401` credenciales inválidas o usuario no activo. `422` body mal formado.
+Pública. Body `LoginRequest {username: str, password: str}` (JSON, solo escalares: un objeto de operadores da `422`). `200` → `{expires_in}` y `Set-Cookie: slep_session`. `401` credenciales inválidas o usuario no activo. `422` body mal formado.
 
 ### 5.3 `POST /api/auth/login-form`
 Idéntico, body `application/x-www-form-urlencoded`. Existe solo para Swagger UI.
 
 ### 5.4 `POST /api/auth/logout`
-Lee el `Authorization: Bearer` por su cuenta (no usa `require_access`, para no devolver `401` a quien
+Lee la cookie (o el `Authorization: Bearer`) por su cuenta (no usa `require_access`, para no devolver `401` a quien
 cierra sesión). Con un token válido fija `sessions_revoked_at` = ahora y **corta todas las sesiones de
 esa persona**, no solo la actual. Responde `204` siempre: sin token, vencido, malformado o ya
 revocado no escribe nada y tampoco falla. Antes de F6 respondía `200 {message}` y no hacía nada.
@@ -485,9 +498,11 @@ gráfico no. `establishments_by_connectivity` etiqueta los nulos como `"Sin Cone
 ```bash
 BASE=https://<host>/api
 
-TOKEN=$(curl -sS -X POST "$BASE/auth/login" \
+curl -sS -c cookies.txt -X POST "$BASE/auth/login" \
   -H 'Content-Type: application/json' \
-  -d '{"username":"USUARIO","password":"CLAVE"}' | jq -r .access_token)
+  -d '{"username":"USUARIO","password":"CLAVE"}'
+# El JWT queda en la cookie `slep_session` de cookies.txt; para usar la cabecera Bearer:
+TOKEN=$(awk '$6=="slep_session"{print $7}' cookies.txt)
 
 # Directorio filtrado y paginado
 curl -sS "$BASE/establishments?comuna=FRUTILLAR&area_type=RURAL&page=1&page_size=50" \
@@ -540,11 +555,11 @@ declaran **antes** de `/{id}` para que no las capture.
 
 | Método | Ruta | Acceso | Respuesta |
 |---|---|---|---|
-| POST | `/api/auth/google` ✅ F6 | pública | `Token` (body `{credential}`, `extra="forbid"`; verifica el `id_token` y, con `GOOGLE_AUTO_PROVISION=true`, da de alta al lector; todo fallo es el mismo `401`; `429` con `Retry-After` tras 30 rechazos por IP en 15 min; ADR-015) |
+| POST | `/api/auth/google` ✅ F6 | pública | `{expires_in}` + cookie de sesión (body `{credential}`, `extra="forbid"`; verifica el `id_token` y, con `GOOGLE_AUTO_PROVISION=true`, da de alta al lector; todo fallo es el mismo `401`; `429` con `Retry-After` tras 30 rechazos por IP en 15 min; ADR-015) |
 | GET | `/api/auth/config` ✅ F6 | pública | `{google_client_id}` (el frontend no tiene variables de entorno, ADR-008; el client id no es secreto) |
 | GET | `/api/auth/password-policy` ✅ | pública | `{min_length, max_length, require_char_classes}` |
 | POST | `/api/auth/set-password` ✅ | pública | `204` (canje del enlace; mismo error genérico `400` ante token usado, vencido, inexistente o de un usuario en otro estado; `422` si la contraseña incumple la política y **no** consume el enlace; `429` con `Retry-After`) |
-| POST | `/api/auth/password` ✅ | autenticado | `Token` nuevo (cambio de contraseña propia) |
+| POST | `/api/auth/password` ✅ | autenticado | `{expires_in}` + cookie nueva (cambio de contraseña propia) |
 
 **`/api/users`** (módulo `users`; todo `iam/admin` salvo `/me`). `GET /api/users?assignment=unassigned` lista las cuentas sin asignar (`is_slep_staff` nulo, creadas por el alta automática); cualquier otro valor da `422`.
 

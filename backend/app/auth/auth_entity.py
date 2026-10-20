@@ -40,9 +40,10 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=1024)
 
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+class SessionStarted(BaseModel):
+    """Respuesta de login, Google y cambio de contraseña. El token viaja SOLO en una cookie `HttpOnly`
+    (`Set-Cookie`): ningún script de la página puede leerlo, ni siquiera el del propio frontend."""
+    expires_in: int          # segundos de vigencia de la sesión
 
 
 class TokenData(BaseModel):
