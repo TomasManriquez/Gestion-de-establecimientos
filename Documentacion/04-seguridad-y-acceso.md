@@ -109,7 +109,7 @@ Cada usuario tiene `access[]`: una entrada `{platform_id, role}` por plataforma 
 | `GET /`, `/docs`, `/redoc`, `/openapi.json`, `POST /api/auth/login`, `/login-form`, `/logout`, `GET /api/auth/password-policy` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `GET /api/auth/me`, `GET`/`PATCH /api/users/me`, `POST /api/auth/password`, `GET /api/units*` | ❌ 401 | ✅ | ✅ | ✅ | ✅ |
 | `GET` de establecimientos, contrapartes, métricas y analytics | ❌ 401 | ✅ | ✅ | ✅ | solo si además tiene rol en `datos` |
-| Detalle de establecimiento: `licenses[].password` y `ssid_password` | — | ❌ `[REDACTED]` | ✅ en claro | ✅ en claro | según su rol en `datos` |
+| Detalle de establecimiento: `connectivity.ssid_password` | — | ❌ `[REDACTED]` | ✅ en claro | ✅ en claro | según su rol en `datos` |
 | `PUT /api/establishments/{rbd}`, `POST`/`PUT` contrapartes, `PUT` métricas | ❌ 401 | ❌ 403 | ✅ | ✅ | según su rol en `datos` |
 | `DELETE /api/counterparts/{id}` | ❌ 401 | ❌ 403 | ❌ 403 | ✅ | según su rol en `datos` |
 | `/api/users/*` (salvo `/me`), escritura en `/api/units/*`, `/api/platforms/*` | ❌ 401 | ❌ 403 | ❌ 403 | ❌ 403 | ✅ |
@@ -119,7 +119,7 @@ todas las rutas de datos, y `GET /api/auth/me` le devuelve `role: "none"`. Un `r
 en `access[]` no concede nada. Ejecutada por HTTP real en `test_INT03_role_matrix_over_http`.
 
 > **El editor ve credenciales en claro (C20) — confirmado por el usuario el 2026-10-06.** Antes
-> solo las veía el admin. Las credenciales de licencias y del WiFi de los establecimientos son de
+> solo las veía el admin. La credencial del WiFi de los establecimientos es de
 > uso público dentro de la institución, así que el riesgo se acepta de forma explícita. Si algún día
 > dejaran de serlo, `SENSITIVE_ROLES` en `auth_entity.py` pasa a `{admin}` y el resto de las
 > garantías (incluida la protección de la sobrescritura, §3.2) sigue valiendo.
@@ -139,7 +139,7 @@ probable al modificar el listado o el detalle.
 
 `LISTING_PROJECTION` (`establishments_service.py:6-17`) es una proyección **de inclusión**:
 enumera los 10 campos que se leen y MongoDB descarta todo lo demás en el servidor de base de
-datos. `connectivity`, `printers` y `licenses` no viajan siquiera dentro del proceso Python.
+datos. `connectivity` y `printers` no viajan siquiera dentro del proceso Python.
 
 Esta protección es **por lista blanca**, y eso importa: un campo sensible nuevo en el documento
 queda protegido en el listado **por omisión**. Es el mecanismo robusto de los dos.
@@ -149,8 +149,7 @@ queda protegido en el listado **por omisión**. Es el mecanismo robusto de los d
 `find_by_rbd(rbd, include_sensitive=False)` (`establishments_service.py:84-95`) sustituye por
 la cadena literal `"[REDACTED]"`:
 
-- cada `licenses[].password` no vacío;
-- `connectivity.ssid_password` si no está vacío.
+- `connectivity.ssid_password` si no está vacío. (`licenses[].password` se redactaba también; el campo se retiró en F6, N15.)
 
 El controller decide el booleano (`establishments_controller.py`, `include_sensitive = ctx.role in
 SENSITIVE_ROLES`): solo `viewer` recibe `[REDACTED]`. El service nunca sabe qué es un rol; el
@@ -161,7 +160,7 @@ modo que su respuesta tampoco devuelve credenciales a quien no corresponde (cier
 **El marcador `[REDACTED]` nunca se persiste.** Un cliente que recibió el detalle redactado y lo
 reenvía completo en el `PUT` (así lo hace `EditFicha.jsx:35` y `:173-175`) no destruye las
 credenciales: `_resolve_redacted_markers` conserva el valor almacenado si hay uno equivalente
-(misma posición y mismo `name` en las licencias; el `ssid_password` existente) y responde `422`
+(el `ssid_password` existente) y responde `422`
 si no lo hay. Verificado por `test_BE13_*` y `test_INT04_*`.
 
 Esta protección es **por lista negra**, con dos entradas literales. Un campo sensible nuevo
@@ -173,8 +172,8 @@ Esta protección es **por lista negra**, con dos entradas literales. Un campo se
 > el valor real queda expuesto. Lo robusto sería no leerlo (proyección de exclusión) cuando no
 > se necesita.
 >
-> 🔸 **BRECHA:** `licenses[].email` — el usuario de cada credencial externa — **no se redacta**.
-> Media credencial viaja completa a cualquier autenticado.
+> ✅ **RESUELTO (N15, F6):** `licenses` se retiró. Ya no hay `licenses[].email` sin redactar ni contraseñas
+> de plataformas externas guardadas por la aplicación.
 
 ---
 
@@ -186,15 +185,13 @@ rompa está cambiando una garantía de seguridad, no un detalle de implementaci�
 | Invariante | Test que lo protege | Qué se rompe si se viola |
 |---|---|---|
 | `LISTING_PROJECTION` existe como constante exportable de `establishments_service` | `test_BE03_listing_projection_constant_exists` | Cualquier refactor que la haga local o inline |
-| La proyección **excluye** `licenses`, `connectivity`, `printers` | `test_BE03_listing_projection_excludes_sensitive_fields` | Agregar cualquiera de los tres a la proyección "para que la UI no pida el detalle" |
+| La proyección **excluye** `licenses` (retirado), `connectivity`, `printers` | `test_BE03_listing_projection_excludes_sensitive_fields` | Agregar cualquiera de los tres a la proyección "para que la UI no pida el detalle" |
 | La proyección **incluye** los campos que el directorio necesita | `test_BE03_listing_projection_includes_required_fields` | Quitar un campo del listado y romper la tabla del frontend |
 | `find_all()` pasa efectivamente la proyección al cursor | `test_BE03_find_all_applies_projection_to_cursor` | Declarar la constante y olvidar usarla |
 | Ningún documento del listado tiene `licenses` | `test_BE03_find_all_result_has_no_licenses_field` | Regresión del anterior, verificada sobre el resultado |
 | `find_by_rbd()` **no** usa la proyección del listado | `test_BE06_find_by_rbd_returns_full_document_not_projected` | "Unificar" ambas lecturas en una sola con proyección — vaciaría la ficha |
 | El payload del listado completo pesa < 50 KB | `test_BE03` (docstring) | Reintroducir bloques pesados en el listado |
 | `find_by_rbd()` acepta `include_sensitive` | `test_BE05_find_by_rbd_accepts_include_sensitive_param` | Cambiar la firma sin adecuar el controller |
-| No-admin recibe `licenses[].password == "[REDACTED]"` | `test_BE05_non_admin_receives_redacted_license_password` | Quitar o invertir la redacción |
-| Admin recibe la contraseña real | `test_BE05_admin_receives_real_license_password` | Redactar siempre (rompería la función de la ficha para TI) |
 | No-admin recibe `ssid_password == "[REDACTED]"` | `test_BE05_non_admin_receives_redacted_ssid_password` | Olvidar el segundo campo al refactorizar |
 | Admin recibe el `ssid_password` real | `test_BE05_admin_receives_real_ssid_password` | — |
 | El controller pasa `include_sensitive=True` solo para admin | `test_BE05_controller_passes_include_sensitive_true_for_admin` / `..._false_for_viewer` | Mover la decisión de rol al service, o hardcodearla |
@@ -380,7 +377,7 @@ editar) y `viewer` (solo ver); `iam` solo tiene `admin`. Reemplaza la matriz de 
 | Operación en `datos` | `viewer` | `editor` | `admin` |
 |---|---|---|---|
 | `GET` de establecimientos, contrapartes, métricas y analytics | ✅ | ✅ | ✅ |
-| Ver `licenses[].password` y `ssid_password` en claro | ❌ redactado | ✅ | ✅ |
+| Ver `ssid_password` en claro | ❌ redactado | ✅ | ✅ |
 | `PUT` / `POST` de ficha, contrapartes y métricas | ❌ `403` | ✅ | ✅ |
 | `DELETE /api/counterparts/{id}` | ❌ `403` | ❌ `403` | ✅ |
 | `/api/users/*` (salvo `/me`), escritura en `/api/units/*` y `/api/platforms/*`, `/api/audit` | solo con `iam/admin` | solo con `iam/admin` | solo con `iam/admin` |
@@ -389,7 +386,7 @@ editar) y `viewer` (solo ver); `iam` solo tiene `admin`. Reemplaza la matriz de 
 **`datos/admin` no es `iam/admin`**: separación de funciones (C12). **Sin acceso a `datos` ⇒ `403`**
 en todas las rutas de datos, aunque el usuario esté autenticado.
 
-> ⚠️ **Amplía quién ve secretos.** Hoy solo el admin ve `licenses[].password` y `ssid_password`.
+> ⚠️ **Amplía quién ve secretos.** Hoy solo el admin ve `ssid_password`.
 > Con esta matriz también los ve el `editor` (lectura confirmada de la respuesta N10). Si esa
 > lectura fuera errónea, `include_sensitive` queda solo para `admin` y la protección contra la
 > sobrescritura de secretos redactados (9.7) deja de ser inalcanzable solo por diseño.
@@ -496,11 +493,11 @@ del servidor). Orden:
 > caché local). A esta escala es aceptable; si Google no responde, el login con Google falla con `401` y
 > el ingreso con contraseña no se afecta.
 >
-> 🔸 **Antes de activar `GOOGLE_AUTO_PROVISION` en producción** (decisión del responsable, no del agente):
-> el `viewer` recibe las contraseñas de `licenses` y `ssid_password` como `[REDACTED]` (BE05, BE13, INT02,
-> INT04), pero **`licenses[].email` viaja en claro** (§3) y esas credenciales siguen guardadas en claro
-> en Mongo. Con el alta automática, cualquier cuenta del dominio las vería. El retiro de `licenses` (N15)
-> y la rotación de esas credenciales son previos a la activación.
+> ✅ **`licenses` ya está retirado (N15).** Uno de los dos requisitos previos a la activación de
+> `GOOGLE_AUTO_PROVISION` en producción queda cumplido. Falta, si existió algún despliegue con datos reales
+> en `licenses`, ejecutar `scripts/retire_licenses.py --apply` y **rotar esas credenciales** (`02` §5). Lo que
+> un `viewer` ve en el detalle es `ssid_password` redactado y datos de contacto del establecimiento
+> (`director_email`, `director_phone`, §3). La activación la decide el responsable.
 
 ### 9.7 Invariantes por protegerse y su test previsto
 
@@ -538,8 +535,7 @@ de rango: la política de contraseñas. Detalle y archivos a actualizar: `07` §
 redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting, y el login ilimitado.
 **Cierra (F6, S1):** CORS `*` (§5), D5 (regex sin escapar), el secreto de desarrollo versionado, la ausencia de cabeceras de seguridad (CSP aún en `Report-Only`) y el logout sin efecto.
 **Sigue abierta:** token en `localStorage` (§1; la cookie `HttpOnly` es S3, pendiente de aprobación),
-`/docs` y `/openapi.json` públicos, redacción de `licenses[].email` y de los datos de
-contrapartes (§3), y MFA.
+`/docs` y `/openapi.json` públicos, la redacción de los datos de contrapartes (§3), y MFA.
 **Límites conocidos de F4** (registrados en `05` §5.3c): el modo `console` escribe el enlace completo en el
 log (solo desarrollo); un atacante distribuido en muchas IPs puede probar 5 contraseñas por IP contra una
 cuenta (el diseño evita el bloqueo de cuenta a propósito); el reloj de pared del entorno de desarrollo

@@ -194,7 +194,7 @@ contenedores.
 ```bash
 cd backend
 python -m pytest -v                                    # toda la suite
-python -m pytest tests/test_BE05_licenses_access_control.py -v   # un archivo
+python -m pytest tests/test_BE05_sensitive_access_control.py -v   # un archivo
 python -m pytest -k "INT02" -v                         # por patrón
 ```
 
@@ -498,4 +498,8 @@ lo evidencia.
    por IP de `/api/auth/google` se comparte entre todos los usuarios.
 8. [ ] Tras desplegar, **rebuild** de las imágenes del backend (dependencias `google-auth` y `requests`) y
    del frontend (`nginx.conf`).
+9. [ ] **Retiro de `licenses` (N15):** tras desplegar, `python scripts/retire_licenses.py` (cuenta, no modifica) y,
+   con respaldo previo (`scripts/backup-mongo.sh`), `--apply`. Si el conteo de documentos «con al menos una
+   credencial» no es 0, **rotar esas credenciales** en cada plataforma externa: borrarlas de Mongo no las
+   invalida y siguen en los respaldos anteriores. La aplicación ya no lee ni sirve el campo aunque exista.
 

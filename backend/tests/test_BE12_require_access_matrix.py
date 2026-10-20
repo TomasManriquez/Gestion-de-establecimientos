@@ -66,11 +66,11 @@ def test_BE12_admin_can_delete_counterpart(fake_db):
 def test_BE12_detail_redaction_by_role(fake_db, user, redacted):
     c = setup(fake_db)
     d = c.get("/api/establishments/7722", headers=bearer_for(user)).json()
-    pw, ssid = d["licenses"][0]["password"], d["connectivity"]["ssid_password"]
+    ssid = d["connectivity"]["ssid_password"]
     if redacted:
-        assert pw == ssid == "[REDACTED]"
+        assert ssid == "[REDACTED]"
     else:
-        assert pw == "clave-secreta-sige" and ssid == "password-secreta-wifi"          # C20: el editor ve en claro
+        assert ssid == "password-secreta-wifi"          # C20: el editor ve en claro
 
 
 def test_BE12_controller_passes_include_sensitive_true_for_editor():

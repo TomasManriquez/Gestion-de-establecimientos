@@ -65,16 +65,6 @@ SAMPLE_ESTABLISHMENT = {
         "phone_extensions": [],
     },
     "printers": {"owned": [], "leased": []},
-    "licenses": [
-        {
-            "name": "Plataforma SIGE",
-            "email": "admin@liceo.cl",
-            "password": "clave-secreta-sige",  # Campo sensible
-            "url": "https://sige.mineduc.cl",
-            "obs": "",
-            "is_new": False,
-        }
-    ],
 }
 
 SAMPLE_ESTABLISHMENT_2 = {
@@ -115,7 +105,6 @@ SAMPLE_ESTABLISHMENT_2 = {
         "phone_extensions": [],
     },
     "printers": {"owned": [], "leased": []},
-    "licenses": [],
 }
 
 SAMPLE_COUNTERPART = {

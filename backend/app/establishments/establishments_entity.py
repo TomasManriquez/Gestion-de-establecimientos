@@ -92,15 +92,6 @@ class Location(BaseModel):
     lat: float
     lng: float
 
-# Main License sub-model
-class LicenseCredential(BaseModel):
-    name: str
-    email: str
-    password: str
-    url: Optional[str] = ""
-    obs: Optional[str] = ""
-    is_new: Optional[bool] = False
-
 # Main Models
 class Establishment(BaseModel):
     rbd: str
@@ -114,7 +105,6 @@ class Establishment(BaseModel):
     general_info: GeneralInfo = GeneralInfo()
     connectivity: Connectivity = Connectivity()
     printers: Printers = Printers()
-    licenses: List[LicenseCredential] = []
 
 class EstablishmentUpdate(BaseModel):
     name: Optional[str] = None
@@ -125,7 +115,6 @@ class EstablishmentUpdate(BaseModel):
     general_info: Optional[GeneralInfo] = None
     connectivity: Optional[Connectivity] = None
     printers: Optional[Printers] = None
-    licenses: Optional[List[LicenseCredential]] = None
 
 class EstablishmentSummary(BaseModel):
     rbd: str

@@ -30,7 +30,6 @@ erDiagram
         object general_info "embebido"
         object connectivity "embebido"
         object printers "embebido"
-        array licenses "embebido - SENSIBLE"
     }
     counterparts {
         ObjectId _id PK
@@ -83,7 +82,7 @@ endpoint de borrado de establecimientos, así que el escenario no es alcanzable 
 La regla aplicada, y la razón por la que este modelo se ve como se ve:
 
 **Se embebe lo que solo tiene sentido dentro de un establecimiento y se lee siempre junto a él.**
-`general_info`, `connectivity`, `printers` y `licenses` no se consultan nunca por sí solos —
+`general_info`, `connectivity` y `printers` no se consultan nunca por sí solos —
 no hay una pregunta legítima como "todas las impresoras arrendadas del servicio" que no pase
 por el establecimiento. Además su cardinalidad es acotada y no crece con el tiempo. Embebidos
 significan una sola lectura para armar la ficha completa.
@@ -122,7 +121,6 @@ Origen del esquema: `backend/app/establishments/establishments_entity.py`.
 | `general_info` | `GeneralInfo` | instancia vacía | Embebido 1:1. |
 | `connectivity` | `Connectivity` | instancia vacía | Embebido 1:1. |
 | `printers` | `Printers` | instancia vacía | Embebido: `{owned: [], leased: []}`. |
-| `licenses` | `List[LicenseCredential]` | `[]` | **Embebido y sensible.** |
 
 ### 3.2 Sub-esquemas embebidos
 
@@ -210,20 +208,11 @@ classDiagram
         +install_date: str
         +initial_counter: int
     }
-    class LicenseCredential {
-        +name: str
-        +email: str
-        +password: str
-        +url: str
-        +obs: str
-        +is_new: bool
-    }
 
     Establishment o-- Location
     Establishment *-- GeneralInfo
     Establishment *-- Connectivity
     Establishment *-- Printers
-    Establishment *-- "0..*" LicenseCredential
     Connectivity *-- "0..*" BamEntry
     Connectivity *-- Starlink
     Connectivity *-- InternalNetwork
@@ -253,7 +242,7 @@ central para todo lo demás:
 
 | Modelo | Uso | Campos |
 |---|---|---|
-| `Establishment` | Respuesta del detalle y del PUT | Todo, incluido `licenses` |
+| `Establishment` | Respuesta del detalle y del PUT | Todo el documento (`licenses` se retiró en F6) |
 | `EstablishmentUpdate` | Body del PUT | Los mismos que `Establishment` menos `rbd`/`rbd_dv`/`rbd_full`, **todos `Optional` con default `None`** |
 | `EstablishmentSummary` | Ítem del listado | `rbd`, `rbd_full`, `name`, `comuna`, `area_type`, `address`, `category`, `adp`, `covertura` |
 | `EstablishmentListResponse` | Envoltorio del listado | `items`, `total`, `page`, `page_size`, `total_pages` |
@@ -466,10 +455,7 @@ Este es el inventario que cualquier cambio debe respetar. Su enforcement está e
 
 | Campo | Ubicación | Naturaleza | Tratamiento |
 |---|---|---|---|
-| `licenses[].password` | `establishments` (embebido) | Credencial de plataforma externa (SIGE, etc.) | `[REDACTED]` para no-admin (`establishments_service.py:89-91`) |
-| `licenses[].email` | `establishments` | Usuario de esa credencial | **Sin redactar.** Viaja completo a cualquier autenticado. |
-| `connectivity.ssid_password` | `establishments` | Clave de la red WiFi del establecimiento | `[REDACTED]` para no-admin (`:92-93`) |
-| `licenses` (array completo) | `establishments` | — | **Excluido de `LISTING_PROJECTION`**: nunca aparece en el listado, para ningún rol |
+| `connectivity.ssid_password` | `establishments` | Clave de la red WiFi del establecimiento | `[REDACTED]` para `viewer` (`establishments_service.find_by_rbd`) |
 | `connectivity` (bloque) | `establishments` | Contiene el SSID y su clave | Excluido de `LISTING_PROJECTION` |
 | `general_info.director_email`, `director_phone` | `establishments` | Datos personales | Sin redactar. Excluidos del listado solo por no estar proyectados. |
 | `counterparts[].email`, `.phone` | `counterparts` | Datos personales de funcionarios | **Sin redactar ni restringir.** Cualquier autenticado lee todas las contrapartes. |
@@ -506,12 +492,13 @@ Claves de nivel raíz por registro: `rbd`, `rbd_dv`, `name`, `comuna`, `area_typ
 > paso, la base ya corriendo); el seeding ahora solo es responsable de *propagarlas* al crear
 > la base desde cero.
 >
-> 🔸 **BRECHA:** `est_doc` incluye `"licenses": item.get("licenses", [])`, pero
-> `establishments.json` **no tiene** la clave `licenses` en ningún registro. Todo el aparato
-> de `LicenseCredential`, la redacción de `password` y los tests BE-05 / INT-02 protegen hoy
-> un array que siempre se siembra vacío. La funcionalidad es correcta y los tests la cubren
-> con datos sintéticos; simplemente no hay dato real cargado por esa vía.
->
+> ✅ **`licenses` retirado (F6, N15).** El campo guardaba usuario y contraseña de plataformas externas en
+> claro y nunca tuvo datos reales (el JSON origen no lo trae). Se eliminaron el modelo `LicenseCredential`,
+> la redacción, la protección del marcador `[REDACTED]` para ese campo y el seeding. Un documento antiguo
+> que aún lo tenga en Mongo **no lo devuelve** el detalle (`find_by_rbd` lo descarta) y `PUT` lo ignora.
+> Para borrarlo de la base: `python scripts/retire_licenses.py` (simulación) y `--apply`; si había
+> credenciales reales, **rotarlas** en cada plataforma (borrarlas no las invalida y siguen en los respaldos).
+
 > 🔸 **BRECHA:** `rbd_full` no existe en el JSON origen, así que el seeding cae al fallback
 > `f"{rbd}"` (`:210`) y el `rbd_full` de todos los establecimientos queda igual al `rbd`, sin
 > el dígito verificador — aunque `rbd_dv` sí esté presente y se guarde aparte.

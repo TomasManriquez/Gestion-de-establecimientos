@@ -615,8 +615,7 @@ servicio (N16, N18).
 - Las cuentas sin asignar se listan con `GET /api/users?assignment=unassigned`; la interfaz de ese filtro
   queda fuera de F6 (N17).
 - **Condiciones para activar el alta automática en producción:** SEC-1 a SEC-6 aplicados y en verde, y el
-  retiro de `licenses` (N15) o, como mínimo, su redacción vigente con BE05, BE13, INT02 e INT04 en verde
-  (`04` §9.6). La activación la hace el responsable.
+  retiro de `licenses` (N15, **hecho**: `04` §9.6). La activación la hace el responsable.
 - Dependencias nuevas: `google-auth` y `requests` (el transporte HTTP que exige su verificación).
 
 **Alternativas descartadas.** Alta solo por invitación (lo reemplaza C24). Asignar unidad o cargo por el

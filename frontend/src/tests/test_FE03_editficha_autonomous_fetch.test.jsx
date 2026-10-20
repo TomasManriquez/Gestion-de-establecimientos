@@ -25,7 +25,6 @@ const MOCK_ESTABLISHMENT = {
   general_info: { director: 'Juan Pérez', category: '7. LICEO POLITÉCNICO', adp: 'Si' },
   connectivity: { internet_provider: 'TELSUR', ssid: '', ssid_password: '' },
   printers: { owned: [], leased: [] },
-  licenses: [],
 };
 
 const MOCK_COUNTERPARTS = [

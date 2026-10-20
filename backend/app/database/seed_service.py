@@ -184,7 +184,6 @@ async def _seed_establishments(db):
             "general_info": item.get("general_info", {}),
             "connectivity": item.get("connectivity", {}),
             "printers": item.get("printers", {}),
-            "licenses": item.get("licenses", [])
         }
         establishments_to_insert.append(est_doc)
 

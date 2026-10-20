@@ -279,8 +279,6 @@ en el listado, además, hay que agregarlo a la proyección **y** al aplanamiento
 |---|---|---|
 | `_id` (establecimiento) | **No** | El service lo stringifica, pero `Establishment` no lo declara |
 | `_id` (contraparte/métrica) | **Sí, como `_id`** | `Field(alias="_id")` + `populate_by_name` |
-| `licenses` | Solo en detalle | Fuera de `LISTING_PROJECTION` |
-| `licenses[].password` | Solo admin | Redacción |
 | `connectivity.ssid_password` | Solo admin | Redacción |
 | `users.hashed_password` | **Nunca** | `UserResponse` solo declara 3 campos |
 | `general_info.*` | Detalle completo; en el listado solo `category`, `adp`, `covertura`, **aplanados** | Proyección + `EstablishmentSummary` |
@@ -390,22 +388,21 @@ Bearer. Query: `search`, `comuna`, `area_type`, `category`, `coverage`, `adp` (�
  "area_type":"URBANO","address":"...","category":"7. LICEO POLITÉCNICO","adp":"Si","covertura":"MEDIA"}
 ```
 
-**Garantía de seguridad (INT-02):** este endpoint nunca incluye `licenses`, `connectivity` ni
-`printers`, para ningún rol. Verificado por `test_INT02_listing_response_never_contains_licenses_field`.
+**Garantía de seguridad (INT-02):** este endpoint nunca incluye `connectivity` ni `printers`, para ningún
+rol (ni el campo `licenses`, retirado en F6). Verificado por `test_INT02_listing_response_never_contains_licenses_field`.
 
 ### 5.7 `GET /api/establishments/{rbd}`
 Bearer. `200` → `Establishment` completo (esquema en `02-modelo-datos.md` §3).
 `404` si el RBD no existe. **La respuesta depende del rol**: para no-admin,
-`licenses[].password` y `connectivity.ssid_password` valen `"[REDACTED]"`.
+`connectivity.ssid_password` vale `"[REDACTED]"` (solo `viewer`).
 
 ### 5.8 `PUT /api/establishments/{rbd}`
 `datos`: admin o editor (`viewer` recibe `403`). Body `EstablishmentUpdate`: todos los campos
 opcionales; `rbd`, `rbd_dv` y `rbd_full` **no** son modificables.
 `200` → `Establishment` actualizado; las credenciales van en claro porque solo `admin` y `editor`
 pueden llegar aquí (C20), y el controller pasa `include_sensitive` explícito al service.
-`422` si un secreto llega como `"[REDACTED]"` y no hay valor almacenado equivalente (misma
-posición y mismo `name` en las licencias). Si hay uno equivalente se conserva y la edición
-funciona. `400` si no se pudo actualizar.
+`422` si `connectivity.ssid_password` llega como `"[REDACTED]"` y no hay valor almacenado; si lo hay, se
+conserva y la edición funciona. Un campo `licenses` en el body se ignora (retirado en F6). `400` si no se pudo actualizar.
 
 > ✅ **RESUELTO (D4):** la fuga por escritura está cerrada (el `viewer` no puede escribir) y cubierta por `test_INT04_*`.
 
@@ -601,7 +598,7 @@ una plantilla HTML y de texto (ADR-012).
 | `GET /api/auth/me` | **Aditivo:** conserva `username`, `full_name`, `role` y agrega `id`, `email` y `access: [{platform_id, role}]`. `role` es el rol en `datos`, o `"none"` si no tiene acceso. | No |
 | `POST /api/auth/login` | El campo `username` acepta el correo (normalizado) o el username legado. Un usuario `invited` o `disabled` recibe el mismo `401` que una credencial errónea. El token lleva `sub = str(_id)` e `iat`. | No para clientes que tratan el token como opaco |
 | Los 12 endpoints de datos | `Depends(get_current_user)` pasa a `require_access("datos", …)`. **`viewer` recibe `403` en toda escritura; `editor` no puede `DELETE`; quien no tiene acceso a `datos` recibe `403`.** | **Sí, de comportamiento** (intencional: cierra D3 y D4) |
-| `PUT /api/establishments/{rbd}` | Un `licenses[].password` o `connectivity.ssid_password` igual a `"[REDACTED]"` conserva el valor almacenado; si no hay valor equivalente → `422`. | No |
+| `PUT /api/establishments/{rbd}` | Un `connectivity.ssid_password` igual a `"[REDACTED]"` conserva el valor almacenado; si no hay valor equivalente → `422`. | No |
 | `POST/PUT /api/counterparts` | Campo opcional `user_id` (validado contra `users`; `422 user_not_found`; en `PUT`, `""` desvincula). La respuesta lo incluye (`null` si no hay vínculo). | No |
 | `GET /api/users` | Filtro `acting=true`: solo quienes subrogan una unidad hoy. | No |
 | `POST /api/users` | Además de crear, **envía la invitación** y responde con el usuario ya con `invitation`. Un fallo de correo no cambia el `201`. | No |
