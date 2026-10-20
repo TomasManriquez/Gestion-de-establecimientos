@@ -9,7 +9,7 @@
 > identidad, acceso por plataforma, unidades, perfil, contraseñas (F3); correo e invitaciones, restablecimiento,
 > CSV, operaciones masivas, subrogancias, auditoría y límite de intentos (F4). `04` §1, §2, §6 y §9, `03` §8,
 > `02` §6 y §9 y `07` describen el código nuevo, verificado también contra una MongoDB real desechable.
-> Siguen marcadas `🧭 DISEÑO` solo las partes de F6 y F7 (login con Google, interconexión). Fuera de eso no se
+> **F6 implementada** (2026-10-20): línea base de seguridad (S1) y login con Google con alta automática (S2, ADR-015). Siguen marcadas `🧭 DISEÑO` solo las partes de F7 (interconexión). Fuera de eso no se
 > re-verificó el resto contra el código.
 
 ---
@@ -73,7 +73,7 @@ son correctas *a esta escala* y dejan de serlo un orden de magnitud más arriba.
 | Agregar un gráfico nuevo al dashboard | `05` §2.4 |
 | Cambiar algo del despliegue o las variables de entorno | `07` §2 y §5 |
 | Saber qué está mal hoy y qué falta | `05` §5 y las marcas `🔸 BRECHA` de cada documento |
-| Entender la feature de usuarios e IAM (F3 y F4 implementadas; F6 y F7 diseñadas) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
+| Entender la feature de usuarios e IAM (F3, F4 y F6 implementadas; F7 diseñada) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
 | Entender cómo se conectarán otras plataformas (`selloverde`) | `04` §10 |
 | Configurar el correo de invitaciones (Gmail) | `07` §9 |
 

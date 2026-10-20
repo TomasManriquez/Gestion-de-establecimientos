@@ -74,6 +74,7 @@ async def list_users(
     role: Optional[str] = Query(None, max_length=20),
     status_filter: Optional[UserStatus] = Query(None, alias="status"),
     acting: bool = Query(False, description="Solo quienes subrogan una jefatura hoy"),
+    assignment: Optional[str] = Query(None, pattern="^unassigned$", description="unassigned: cuentas sin asignar (alta automática)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=200, description="Items por página (máx 200)"),
     ctx: AccessContext = _IAM_ADMIN,
@@ -82,7 +83,8 @@ async def list_users(
     return await users_service.list_users(
         q=q, unit_id=unit_id, include_descendants=include_descendants, level=level, kind=kind,
         rbd=rbd, position=position.value if position else None, platform=platform, role=role,
-        status=status_filter.value if status_filter else None, only_ids=acting_ids, page=page, page_size=page_size)
+        status=status_filter.value if status_filter else None, only_ids=acting_ids, assignment=assignment,
+        page=page, page_size=page_size)
 
 
 @router.post("", response_model=User, status_code=status.HTTP_201_CREATED)

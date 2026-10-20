@@ -14,6 +14,8 @@ os.environ["ALLOWED_EMAIL_DOMAINS"] = "slepllanquihue.cl"
 os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "admin@slepllanquihue.cl"
 os.environ["MAIL_MODE"] = "console"
 os.environ["PUBLIC_BASE_URL"] = "http://localhost:5173"
+os.environ["GOOGLE_AUTO_PROVISION"] = "false"     # cada test de alta automática la enciende con patch
+os.environ["GOOGLE_CLIENT_ID"] = "test-client-id.apps.googleusercontent.com"
 for _name in ("PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES"):
     os.environ.pop(_name, None)
 

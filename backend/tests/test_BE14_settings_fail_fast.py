@@ -25,6 +25,7 @@ VALID_ENV = {
     "BOOTSTRAP_ADMIN_EMAIL": "admin@slepllanquihue.cl",
     "MAIL_MODE": "console",
     "PUBLIC_BASE_URL": "http://localhost:5173",
+    "GOOGLE_AUTO_PROVISION": "false",
 }
 
 
@@ -36,7 +37,7 @@ def test_BE14_valid_env_builds_settings_with_nist_defaults():
     assert s.ACCESS_TOKEN_EXPIRE_MINUTES == 180
 
 
-@pytest.mark.parametrize("missing", ["JWT_SECRET", "ADMIN_PASSWORD", "ALLOWED_EMAIL_DOMAINS", "BOOTSTRAP_ADMIN_EMAIL", "MAIL_MODE", "PUBLIC_BASE_URL"])
+@pytest.mark.parametrize("missing", ["JWT_SECRET", "ADMIN_PASSWORD", "ALLOWED_EMAIL_DOMAINS", "BOOTSTRAP_ADMIN_EMAIL", "MAIL_MODE", "PUBLIC_BASE_URL", "GOOGLE_AUTO_PROVISION"])
 def test_BE14_missing_required_env_fails_fast(missing):
     env = {k: v for k, v in VALID_ENV.items() if k != missing}
     with pytest.raises(ConfigError, match=missing):

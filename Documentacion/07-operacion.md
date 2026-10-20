@@ -160,6 +160,7 @@ no arranca.**
 | `GMAIL_REFRESH_TOKEN` | **ninguno** | **Secreto.** Token de la casilla remitente, obtenido una vez (§9). Trátese como `JWT_SECRET` |
 | `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Desde F4 los dos compose la pasan al contenedor (`${GOOGLE_CLIENT_ID:-}`); obligatoria con `MAIL_MODE=gmail` |
 | `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Lo usa el refresco del token de Gmail |
+| `GOOGLE_AUTO_PROVISION` | **ninguno** (obligatoria) | `true` o `false`, nada más. Con `true`, quien entra con una cuenta del dominio y no existe obtiene una cuenta de **lector** en `datos`, sin asignar (ADR-015). **En producción la activa el responsable** tras las condiciones de `04` §9.6; la plantilla trae `false`. Ambos compose la exigen (`${GOOGLE_AUTO_PROVISION:?…}`) |
 | `PASSWORD_MIN_LENGTH` | `15` | Mínimo ≥ 8 (NIST SP 800-63B-4: 15 sin MFA) |
 | `PASSWORD_MAX_LENGTH` | `64` | Mínimo permitido 64; la política también rechaza lo que pase de 72 bytes (límite de bcrypt) |
 | `PASSWORD_REQUIRE_CHAR_CLASSES` | `0` | De 0 a 4. NIST recomienda 0 |
@@ -168,7 +169,7 @@ no arranca.**
 **Cada variable pasa a ser obligatoria en la fase que la usa**, no antes: F3 exige
 `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `JWT_SECRET`, `ADMIN_PASSWORD` y la política de
 contraseñas; F4 agrega `MAIL_MODE` y `PUBLIC_BASE_URL` (y las de Gmail/Google si `MAIL_MODE=gmail`);
-F6 agrega el uso de `GOOGLE_CLIENT_ID` para el login. Mientras la cuenta remitente no exista se trabaja con
+F6 agrega el uso de `GOOGLE_CLIENT_ID` para el login y la variable obligatoria `GOOGLE_AUTO_PROVISION`. Mientras la cuenta remitente no exista se trabaja con
 `MAIL_MODE=console`: el mensaje, **con el enlace completo**, sale por el log del backend
 (`docker compose logs backend | grep "MAIL console"`), que es como se prueba el alta en desarrollo.
 En desarrollo `docker-compose.yml` usa `MAIL_MODE=${MAIL_MODE:-console}` y
@@ -475,3 +476,26 @@ lo evidencia.
    en `users.invitation.last_error`; al restablecer el envío, el admin reenvía las invitaciones.
 8. [ ] Confirmar con TI que el filtro de salida o de spam del dominio no bloquea los correos de la
    casilla remitente antes de la primera alta masiva.
+
+---
+
+## 10. Login con Google: checklist de la consola de Google Cloud (tarea manual)
+
+> **El código está implementado (F6, ADR-015); estos pasos los hace una persona con acceso a la consola.**
+> Sin ellos el botón de Google no aparece o Google rechaza el inicio de sesión.
+
+1. [ ] **Orígenes de JavaScript autorizados** del cliente OAuth: `http://localhost:5173` y
+   `https://datos.slepllanquihue.gob.cl`. **No hacen falta URIs de redirección**: la callback de Google
+   Identity Services es de JavaScript.
+2. [ ] Para pruebas locales la guía de Google Identity Services pide registrar además `http://localhost`
+   (sin puerto); verificarlo contra la guía vigente si el botón no aparece.
+3. [ ] **Navegar siempre por `localhost`, no por `127.0.0.1`**: son orígenes distintos para Google.
+4. [ ] La pantalla de consentimiento debe ser de tipo **Internal** (§9, paso 2).
+5. [ ] `GOOGLE_CLIENT_ID` definido en el `.env` del entorno (el frontend lo obtiene de `GET /api/auth/config`).
+6. [ ] **`GOOGLE_AUTO_PROVISION`:** en desarrollo, `true` en el `.env`; en producción, `false` hasta que el
+   responsable decida activarla (condiciones en `04` §9.6 y ADR-015). Cambiarla exige reiniciar el backend.
+7. [ ] Primer despliegue: comprobar que el proxy del host reenvía `X-Forwarded-For` (§7). Si no, el límite
+   por IP de `/api/auth/google` se comparte entre todos los usuarios.
+8. [ ] Tras desplegar, **rebuild** de las imágenes del backend (dependencias `google-auth` y `requests`) y
+   del frontend (`nginx.conf`).
+

@@ -37,6 +37,7 @@ def table(ids):
         ("PUT", f"/api/units/{ids['AF-TI']}/head", {"user_id": UID}, ["user_id"]),
         ("PATCH", "/api/platforms/selloverde", {"name": "X", "status": "inactive"}, ["name", "status"]),
         ("POST", "/api/auth/login", {"username": "a@slepllanquihue.cl", "password": "x"}, ["username", "password"]),
+        ("POST", "/api/auth/google", {"credential": "x"}, ["credential"]),
         ("POST", "/api/auth/password", {"current_password": "x", "new_password": "y"}, ["current_password", "new_password"]),
         ("POST", "/api/auth/set-password", {"token": "t" * 43, "password": "y"}, ["token", "password"]),
         ("POST", "/api/users/bulk-create", {"items": [u], "dry_run": False}, ["items", "dry_run"]),
@@ -82,7 +83,7 @@ def test_INT08_every_write_route_of_the_feature_is_in_the_table(ctx):
         ("POST", "/api/users"), ("PATCH", "/api/users/{user_id}"), ("PATCH", "/api/users/me"),
         ("PUT", "/api/users/{user_id}/access/{platform_id}"), ("POST", "/api/units"), ("PATCH", "/api/units/{unit_id}"),
         ("POST", "/api/units/{unit_id}/move"), ("PUT", "/api/units/{unit_id}/head"), ("PATCH", "/api/platforms/{platform_id}"),
-        ("POST", "/api/auth/login"), ("POST", "/api/auth/password"), ("POST", "/api/auth/set-password"),
+        ("POST", "/api/auth/login"), ("POST", "/api/auth/google"), ("POST", "/api/auth/password"), ("POST", "/api/auth/set-password"),
         ("POST", "/api/users/bulk-create"), ("POST", "/api/users/bulk"), ("POST", "/api/units/{unit_id}/subrogations"),
     }
     # multipart (CSV): sin body JSON; sus pruebas de entrada hostil están en test_BE48

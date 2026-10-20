@@ -40,6 +40,8 @@ services:
       - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      # Alta automática de cuentas del dominio como lector (C24). Sin default: true solo en desarrollo.
+      - GOOGLE_AUTO_PROVISION=${GOOGLE_AUTO_PROVISION:?define GOOGLE_AUTO_PROVISION (true o false) en el .env de la raiz}
     volumes:
       - ./backend:/app
     depends_on:

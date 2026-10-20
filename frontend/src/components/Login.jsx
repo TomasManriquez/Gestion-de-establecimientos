@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { School, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
@@ -16,6 +16,28 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
+const GSI_SRC = 'https://accounts.google.com/gsi/client';
+// `hd` es solo una pista de interfaz para Google: la protección real es la verificación del servidor.
+const GOOGLE_HOSTED_DOMAIN = 'slepllanquihue.cl';
+const GOOGLE_ERROR = 'No se pudo iniciar sesión con Google. Use su cuenta institucional @slepllanquihue.cl.';
+
+/** Carga el script de Google Identity Services una sola vez y entrega `window.google`. */
+function loadGoogleScript() {
+  if (window.google?.accounts?.id) return Promise.resolve(window.google);
+  return new Promise((resolve, reject) => {
+    let script = document.querySelector(`script[src="${GSI_SRC}"]`);
+    if (!script) {
+      script = document.createElement('script');
+      script.src = GSI_SRC;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', () => resolve(window.google), { once: true });
+    script.addEventListener('error', () => reject(new Error('gsi')), { once: true });
+  });
+}
+
 export default function Login({ onLoginSuccess }) {
   const [username, setUsername]       = useState('');
   const [password, setPassword]       = useState('');
@@ -23,9 +45,61 @@ export default function Login({ onLoginSuccess }) {
   const [loading, setLoading]         = useState(false);
   const [searchParams]                = useSearchParams();
   const navigate                      = useNavigate();
+  const [googleReady, setGoogleReady] = useState(false);
+  const googleButtonRef               = useRef(null);
+  const finishLoginRef                = useRef(null);
 
   // Ruta de destino post-login (guardada por ProtectedRoute en ?from=)
   const redirectTo = searchParams.get('from') || '/dashboard';
+
+  // Misma salida para ambos métodos: guarda el token y deja que App cargue al usuario.
+  const finishLogin = (accessToken) => {
+    localStorage.setItem('token', accessToken);
+    axios.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+    onLoginSuccess();
+    navigate(redirectTo, { replace: true });
+  };
+  finishLoginRef.current = finishLogin;
+
+  const handleGoogleCredential = async (response) => {
+    setError('');
+    setLoading(true);
+    try {
+      const { data } = await axios.post('/api/auth/google', { credential: response.credential });
+      finishLoginRef.current(data.access_token);
+    } catch (err) {
+      setError(err.response?.status === 429 ? err.response.data?.detail?.message || GOOGLE_ERROR : GOOGLE_ERROR);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Botón de Google: el client id viene del backend (el frontend no tiene variables de entorno, ADR-008).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await axios.get('/api/auth/config');
+        const clientId = response?.data?.google_client_id;
+        if (!clientId) return;
+        const google = await loadGoogleScript();
+        if (cancelled || !google?.accounts?.id || !googleButtonRef.current) return;
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleGoogleCredential,
+          hd: GOOGLE_HOSTED_DOMAIN,
+        });
+        google.accounts.id.renderButton(googleButtonRef.current, {
+          theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', locale: 'es',
+          width: googleButtonRef.current.offsetWidth || 320,
+        });
+        setGoogleReady(true);
+      } catch {
+        // Sin Google (config vacía, script bloqueado, sin red): queda el ingreso con contraseña.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -34,10 +108,7 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       const { data } = await axios.post('/api/auth/login', { username, password });
-      localStorage.setItem('token', data.access_token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`;
-      onLoginSuccess();
-      navigate(redirectTo, { replace: true });
+      finishLogin(data.access_token);
     } catch (err) {
       console.error(err);
       setError(
@@ -150,6 +221,15 @@ export default function Login({ onLoginSuccess }) {
               )}
             </Button>
           </form>
+
+          <div className={googleReady ? 'flex flex-col gap-4' : 'hidden'} data-testid="google-login">
+            <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-muted-foreground" aria-hidden="true">
+              <span className="h-px flex-1 bg-slate-200 dark:bg-border" />
+              o
+              <span className="h-px flex-1 bg-slate-200 dark:bg-border" />
+            </div>
+            <div ref={googleButtonRef} className="flex justify-center min-h-11" />
+          </div>
         </CardContent>
 
         <CardFooter className="flex justify-center border-t border-slate-100 dark:border-border/40 py-4 text-center text-xs text-slate-400 dark:text-muted-foreground">

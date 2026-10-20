@@ -65,6 +65,16 @@ class UserResponse(BaseModel):
     access: List[AccessSummary] = []
 
 
+class GoogleLoginRequest(BaseModel):
+    """Body de POST /api/auth/google: solo el `credential` (id_token) de Google Identity Services."""
+    model_config = ConfigDict(extra="forbid")
+    credential: str = Field(..., min_length=1)    # sin max_length: un 422 devolvería el valor en el cuerpo
+
+
+class AuthConfig(BaseModel):
+    google_client_id: str
+
+
 class PasswordPolicy(BaseModel):
     """Lo único que el cliente necesita para validar en vivo. Nunca incluye la lista de bloqueo."""
     min_length: int
@@ -95,6 +105,8 @@ SET_PASSWORD_PATH = "/definir-contrasena"
 LOGIN_ACCOUNT_LIMIT = 5        # fallos por (cuenta + IP) en la ventana: no bloquea la cuenta para todo el mundo
 LOGIN_IP_LIMIT = 30            # fallos por IP, para frenar el recorrido de muchas cuentas
 LOGIN_WINDOW_SECONDS = 15 * 60
+GOOGLE_IP_LIMIT = 30           # rechazos de /auth/google por IP (probar credenciales robadas o dominios)
+GOOGLE_WINDOW_SECONDS = 15 * 60
 REDEEM_IP_LIMIT = 10           # canjes fallidos por IP (adivinar enlaces)
 REDEEM_WINDOW_SECONDS = 15 * 60
 SEND_TARGET_LIMIT = 5          # envíos (reenvío o restablecimiento) por usuario destinatario: no llenar su bandeja

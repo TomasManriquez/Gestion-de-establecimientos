@@ -223,8 +223,8 @@ descartado sin registro escrito (ver la brecha de `04` §1).
 >    solo verifica credenciales y emite tokens (ADR-013).
 > 2. **El rol deja de ser un campo de texto libre** en el usuario y pasa a `users.access[]`
 >    por plataforma (ADR-009).
-> 3. **Google se integra verificando el `id_token` en el backend**, con alta solo por
->    invitación y restricción de dominio (`04` §9.6). No se usa authorization code flow ni
+> 3. **Google se integra verificando el `id_token` en el backend**, con restricción de dominio
+>    (`04` §9.6). ~~Alta solo por invitación~~: **enmendado por ADR-015** (alta automática como lector). No se usa authorization code flow ni
 >    se sincroniza el directorio de Workspace.
 >
 > Se mantienen: bcrypt, JWT HS256 para la sesión propia de este sistema, relectura del usuario
@@ -579,3 +579,47 @@ efectivos son por cuenta+IP; una IP compartida (por ejemplo, la de una oficina) 
 Contadores en memoria de cada worker (el límite efectivo se multiplica por el número de
 workers). Bloqueo de la cuenta tras N fallos (permite denegación de servicio dirigida).
 Auditar lecturas (volumen sin requisito que lo pida).
+
+---
+
+## ADR-015 · Login con Google y alta automática como lector (enmienda ADR-006 y ADR-009)
+
+**Contexto.** ADR-006 y ADR-009 fijaban «Google solo para quien ya existe en `users` (sin auto-provisión)».
+La decisión C24 la cambia: el responsable quiere que cualquier persona de la organización entre sin que
+un administrador la cree antes, y que la plataforma `datos` (contenido público dentro de la organización)
+sea de lectura para todos. Se acepta de forma consciente que el dominio incluya estudiantes y cuentas de
+servicio (N16, N18).
+
+**Decisión.**
+1. `POST /api/auth/google` verifica el `id_token` en el backend (`google-auth`; firma, `aud`, `exp`,
+   `iss`, `email_verified`, `hd` y dominio del correo, `iat` ≤ 5 min). Nada de authorization code flow,
+   nonce con estado ni sincronización del directorio.
+2. **Alta automática (G1):** quien entra con una cuenta del dominio y no existe obtiene `status: active`,
+   `access: [{datos, viewer}]` y pertenencia **sin asignar** (`is_slep_staff: null`, G2: no se asigna
+   unidad, establecimiento ni cargo a nadie, ni siquiera a los directores). El rol sale del servidor,
+   nunca del token de Google. Pasa por el pipeline de `users_service` (`create_many`), sin segunda ruta
+   de creación, y se audita como `user.autoprovision`.
+3. **`GOOGLE_AUTO_PROVISION`** (`true`/`false`) es obligatoria y **sin default**: activar el alta
+   automática en un despliegue es una decisión explícita. En producción la activa el responsable, no el
+   código ni el agente.
+4. **`is_slep_staff` admite `null`** (sin asignar) con el invariante «`null` ⇒ sin `unit_id`, `rbd` ni
+   `positions`». Un usuario ya asignado no vuelve a `null`. El alta manual y el CSV siguen exigiendo
+   asignación (`UserCreate`); solo el alta automática usa `UserCreateUnassigned`.
+5. La sesión sale de `_issue_token`, igual que el login con contraseña.
+
+**Consecuencias.**
+- **Pertenecer al dominio no significa ser funcionario (G4).** Todo recurso no público se protege con un
+  acceso explícito por plataforma lógica, nunca con el dominio del correo ni con `is_slep_staff`.
+- Un correo del dominio basta para tener cuenta: el límite por IP (30 rechazos en 15 min) es la única
+  barrera contra el abuso de `/api/auth/google`.
+- Las cuentas sin asignar se listan con `GET /api/users?assignment=unassigned`; la interfaz de ese filtro
+  queda fuera de F6 (N17).
+- **Condiciones para activar el alta automática en producción:** SEC-1 a SEC-6 aplicados y en verde, y el
+  retiro de `licenses` (N15) o, como mínimo, su redacción vigente con BE05, BE13, INT02 e INT04 en verde
+  (`04` §9.6). La activación la hace el responsable.
+- Dependencias nuevas: `google-auth` y `requests` (el transporte HTTP que exige su verificación).
+
+**Alternativas descartadas.** Alta solo por invitación (lo reemplaza C24). Asignar unidad o cargo por el
+dominio, por el correo o por el claim `hd` (el dominio no distingue funcionarios de estudiantes). Rol
+tomado de una claim del token. Flujo de authorization code con servidor de sesiones. Nonce con estado.
+

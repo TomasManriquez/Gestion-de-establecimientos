@@ -3,7 +3,7 @@
 > **Estado (2026-10-09, rama `feature/usuarios-f4`).** Las secciones 1 a 8 describen el código
 > **tal como queda tras las fases F3 y F4** (identidad en el módulo `users`, `require_access`, sesión
 > revocable, política de contraseñas, primer acceso por enlace, auditoría y límite de intentos). La §9
-> conserva el diseño completo y marca con ✅ lo implementado y con 🧭 lo pendiente (login con Google, F6).
+> conserva el diseño completo y marca con ✅ lo implementado y con 🧭 lo pendiente (F7). El login con Google (F6) está implementado.
 > La §10 es el marco de interconexión (F7), solo diseño.
 
 ---
@@ -310,12 +310,12 @@ siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATA
 
 ---
 
-## 9. Modelo de acceso por plataforma (✅ F3 y F4; 🧭 Google en F6)
+## 9. Modelo de acceso por plataforma (✅ F3, F4 y F6)
 
 > **Estado por subsección.** ✅ Implementado y verificado: 9.1 (flujo, sin la parte de Google), 9.2, 9.3,
 > 9.4, 9.5 completa (F3: política, cambio propio y bootstrap; F4: invitación, reenvío, restablecimiento y
-> canje por enlace, rate limiting), 9.7 y 9.8. La auditoría de ADR-014 también (F4). 🧭 Pendiente: 9.6 login
-> con Google (F6).
+> canje por enlace, rate limiting), 9.6 (login con Google y alta automática, F6, ADR-015), 9.7 y 9.8. La
+> auditoría de ADR-014 también (F4).
 > Decisiones: ADR-009 (acceso y roles), ADR-012 (primer acceso),
 > ADR-013 (dependencias) y ADR-014 (auditoría y límites) en `06`. Modelo de datos en `02` §9;
 > contrato en `03` §8. **Documento obligatorio antes de tocar `auth/`:** F3 y F6 tocan un punto
@@ -457,16 +457,50 @@ en todas las rutas de datos, aunque el usuario esté autenticado.
 - **Admin sembrado:** `BOOTSTRAP_ADMIN_EMAIL` obligatoria y sin default; con la base vacía, la
   contraseña inicial sale de `ADMIN_PASSWORD` con `must_change_password: true` (`02` §9.10).
 
-### 9.6 Login con Google
+### 9.6 Login con Google (✅ F6, ADR-015)
 
-El frontend obtiene un `id_token` con Google Identity Services y lo envía a `POST
-/api/auth/google`. El backend lo verifica con `google-auth` (en un hilo, porque la verificación
-es síncrona): firma, `aud == GOOGLE_CLIENT_ID`, `iss`, expiración, `email_verified`, y que el
-claim **`hd`** esté en `ALLOWED_EMAIL_DOMAINS` (no basta con el dominio del correo). **No hay
-auto-provisión:** el correo debe existir en `users`; un usuario `invited` pasa a `active` y se
-vincula `auth_providers: {provider: "google", subject, linked_at}`. Un usuario ya vinculado cuyo
-`sub` de Google no coincide, un usuario `disabled` y un correo desconocido reciben el mismo `401`.
-Todos los correos son `@slepllanquihue.cl` (también los del personal de establecimientos).
+El frontend obtiene un `id_token` con Google Identity Services (`Login.jsx`) y lo envía a `POST
+/api/auth/google`. Implementación: `auth/google_service.py`; la sesión sale de `_issue_token`, el único
+punto de emisión (no hay una segunda ruta). Todo fallo responde el mismo `401` de las demás rutas, sin
+revelar la causa, y el `credential` no se escribe en ningún log (el motivo, sin el token, queda en el log
+del servidor). Orden:
+
+1. **Límite por IP** (`google-ip`, 30 rechazos en 15 min, `429` con `Retry-After`); los logins correctos
+   no cuentan.
+2. **`google-auth`** (`id_token.verify_oauth2_token` en `asyncio.to_thread`, porque es síncrono): firma,
+   `aud == GOOGLE_CLIENT_ID` y `exp`, con `clock_skew_in_seconds=10` (mismo motivo que el `leeway` de D28).
+3. **Comprobaciones explícitas:** `iss` en (`accounts.google.com`, `https://accounts.google.com`),
+   `email_verified is True` (el booleano, no un texto), `hd` presente, dentro de `ALLOWED_EMAIL_DOMAINS`
+   **y** igual al dominio del correo (una cuenta personal de Gmail no trae `hd`), `sub` no vacío e `iat`
+   de no más de 5 minutos (acota la reutilización de un `id_token` robado sin guardar estado).
+4. **Persona:** por (`google`, `subject`); si no, por correo normalizado. `invited` pasa a `active` y se
+   vincula el proveedor; `active` sin vínculo se vincula; vinculada a **otro** `subject`, `disabled` o
+   `invited` sin poder vincularse → `401`. El vínculo es atómico y nunca reactiva a un `disabled`.
+5. **No existe:** con `GOOGLE_AUTO_PROVISION=true` se crea (G1, G2) por el pipeline de `users_service`
+   (`create_many`, sin segunda ruta de creación): `status: active`, `access: [{datos, viewer}]`,
+   `is_slep_staff: null` y sin unidad, rbd ni cargos; nombre y apellido salen de `given_name` y
+   `family_name`. El rol sale del servidor, **nunca** de una claim. Se audita como `user.autoprovision`
+   (actor `null`). Con `false`, el mismo `401`. Dos logins simultáneos del mismo correo crean una sola
+   cuenta: el índice único de `email` frena al segundo, que recupera la cuenta.
+6. Emite el token (`_issue_token`) y actualiza `last_login_at`.
+
+`hd` en el cliente (`initialize({hd})`) es solo una pista de interfaz y **no protege nada**.
+
+> ⚠️ **Pertenecer al dominio no es ser funcionario (G4).** El dominio incluye estudiantes y cuentas de
+> servicio, y la decisión de dar `viewer` en `datos` a cualquiera de ellos la tomó el responsable
+> (N16, N18) porque `datos` es público dentro de la organización. Todo recurso que no sea público (por
+> ejemplo, el futuro `/personas`) se protege con un acceso explícito por plataforma lógica, nunca con el
+> dominio del correo ni con `is_slep_staff`.
+>
+> 🔸 **Límite conocido:** `verify_oauth2_token` descarga los certificados de Google en cada login (no hay
+> caché local). A esta escala es aceptable; si Google no responde, el login con Google falla con `401` y
+> el ingreso con contraseña no se afecta.
+>
+> 🔸 **Antes de activar `GOOGLE_AUTO_PROVISION` en producción** (decisión del responsable, no del agente):
+> el `viewer` recibe las contraseñas de `licenses` y `ssid_password` como `[REDACTED]` (BE05, BE13, INT02,
+> INT04), pero **`licenses[].email` viaja en claro** (§3) y esas credenciales siguen guardadas en claro
+> en Mongo. Con el alta automática, cualquier cuenta del dominio las vería. El retiro de `licenses` (N15)
+> y la rotación de esas credenciales son previos a la activación.
 
 ### 9.7 Invariantes por protegerse y su test previsto
 

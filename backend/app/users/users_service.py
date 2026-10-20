@@ -20,7 +20,7 @@ from app.platforms.platforms_service import platforms_service
 from app.units.units_entity import HeadCandidate
 from app.units.units_service import units_service
 from app.users.users_entity import (BULK_LIMIT, CSV_COLUMNS, CSV_REQUIRED, BulkRequest, UserAdminUpdate, UserConflict,
-                                    UserCreate, UserInvalid, UserNotFound, UserSelfUpdate, check_mode, normalize_email)
+                                    UserCreate, UserCreateUnassigned, UserInvalid, UserNotFound, UserSelfUpdate, check_mode, normalize_email)
 
 logger = logging.getLogger("users")
 
@@ -103,6 +103,40 @@ class UsersService:
         doc = await db_service.db.users.find_one(query)
         return _stringify(doc) if doc else None
 
+    @staticmethod
+    def now() -> datetime:
+        return _utcnow()
+
+    async def find_by_google_subject(self, subject: str) -> Optional[dict]:
+        if not isinstance(subject, str) or not subject:
+            return None
+        doc = await db_service.db.users.find_one(
+            {"auth_providers": {"$elemMatch": {"provider": "google", "subject": subject}}})
+        return _stringify(doc) if doc else None
+
+    async def link_google(self, user: dict, subject: str) -> Optional[dict]:
+        """Vincula la cuenta de Google a una cuenta existente y activa a las `invited`. El vínculo es
+        atómico (solo si aún no tiene proveedor `google`); `None` si otro vínculo ganó la carrera o el
+        `subject` ya pertenece a otra cuenta (índice único)."""
+        oid = _oid(user["_id"])
+        now = _utcnow()
+        try:
+            linked = await db_service.db.users.update_one(
+                {"_id": oid, "status": {"$ne": "disabled"}, "auth_providers.provider": {"$ne": "google"}},
+                {"$push": {"auth_providers": {"provider": "google", "subject": subject, "linked_at": now}},
+                 "$set": {"updated_at": now}})
+        except DuplicateKeyError:
+            return None
+        if not linked.modified_count:
+            return None
+        changes = {"auth_provider": [None, "google"]}
+        activated = await db_service.db.users.update_one({"_id": oid, "status": "invited"},
+                                                         {"$set": {"status": "active", "updated_at": now}})
+        if activated.modified_count:
+            changes["status"] = ["invited", "active"]
+        await audit_service.record(None, AuditAction.USER_UPDATE, AuditTarget.USER, str(oid), changes)
+        return await self.find_by_id(str(oid))
+
     async def find_for_session(self, sub: str) -> Optional[dict]:
         """Resuelve el `sub` del JWT: `str(_id)` y, mientras dure la compatibilidad, el username legado."""
         if not isinstance(sub, str) or not sub:
@@ -141,7 +175,8 @@ class UsersService:
                          kind: Optional[str] = None, rbd: Optional[str] = None,
                          position: Optional[str] = None, platform: Optional[str] = None,
                          role: Optional[str] = None, status: Optional[str] = None,
-                         only_ids: Optional[List[str]] = None, page: int = 1, page_size: int = 100) -> dict:
+                         only_ids: Optional[List[str]] = None, assignment: Optional[str] = None,
+                         page: int = 1, page_size: int = 100) -> dict:
         query: Dict = {}
         and_clauses: List[dict] = []
         if q:
@@ -156,6 +191,8 @@ class UsersService:
         if level:
             ids = [ObjectId(i) for i in await units_service.ids_by_level(level)]
             and_clauses.append({"unit_id": {"$in": ids}})
+        if assignment == "unassigned":
+            query["is_slep_staff"] = None          # null o ausente: sin asignar (alta automática, C24)
         if kind == "slep":
             query["is_slep_staff"] = True
         elif kind == "establishment":
@@ -187,10 +224,14 @@ class UsersService:
     # ══ Alta: UNA sola ruta para alta individual, CSV, bulk y seed (R6) ═════════
     async def create_many(self, items: List[dict], actor_id: Optional[str], dry_run: bool = False,
                           status: str = "invited", local_password_hash: Optional[str] = None,
-                          must_change_password: bool = False, bulk_id: Optional[str] = None) -> dict:
+                          must_change_password: bool = False, bulk_id: Optional[str] = None,
+                          unassigned: bool = False, auth_providers: Optional[List[dict]] = None,
+                          access: Optional[List[dict]] = None,
+                          audit_action: AuditAction = AuditAction.USER_CREATE) -> dict:
         """normalizar -> validar -> resolver referencias en lote -> detectar duplicados
-        (dentro del lote y contra la base) -> insertar. `status` y `local_password_hash` son
-        opciones internas (las usa el bootstrap): ningún body HTTP las puede fijar."""
+        (dentro del lote y contra la base) -> insertar. `status`, `local_password_hash`,
+        `unassigned`, `auth_providers`, `access` y `audit_action` son opciones internas (las usan el
+        bootstrap y el alta automática con Google, C24): ningún body HTTP las puede fijar."""
         explicit_bulk = bulk_id
         bulk_id = bulk_id or uuid.uuid4().hex
         audit_bulk = explicit_bulk or (bulk_id if len(items) > 1 else None)   # una alta suelta no es una operación masiva
@@ -200,7 +241,7 @@ class UsersService:
         # 1. Validación (las mismas reglas del modelo para toda ruta de entrada)
         for i, raw in enumerate(items):
             try:
-                parsed[i] = UserCreate.model_validate(raw)
+                parsed[i] = (UserCreateUnassigned if unassigned else UserCreate).model_validate(raw)
             except ValidationError as exc:
                 results[i].update(status="invalid", errors=_validation_errors(exc))
 
@@ -245,7 +286,8 @@ class UsersService:
             if dry_run:
                 results[i]["status"] = "ok"
                 continue
-            doc = self._new_document(u, status, actor, now, local_password_hash, must_change_password)
+            doc = self._new_document(u, status, actor, now, local_password_hash, must_change_password,
+                                     auth_providers, access)
             try:
                 inserted = await db_service.db.users.insert_one(doc)
             except DuplicateKeyError:
@@ -254,7 +296,7 @@ class UsersService:
                 continue
             results[i].update(status="created", id=str(inserted.inserted_id))
             await audit_service.record(
-                actor_id, AuditAction.USER_CREATE, AuditTarget.USER, str(inserted.inserted_id),
+                actor_id, audit_action, AuditTarget.USER, str(inserted.inserted_id),
                 {"email": [None, u.email], "is_slep_staff": [None, u.is_slep_staff],
                  "unit_id": [None, u.unit_id], "rbd": [None, u.rbd], "positions": [None, [p.value if hasattr(p, "value") else p for p in u.positions]]},
                 audit_bulk)
@@ -264,8 +306,9 @@ class UsersService:
                 "succeeded": created, "failed": len(items) - created, "items": results}
 
     @staticmethod
-    def _new_document(u: UserCreate, status: str, actor, now, password_hash, must_change) -> dict:
-        providers = []
+    def _new_document(u: UserCreate, status: str, actor, now, password_hash, must_change,
+                      auth_providers=None, access=None) -> dict:
+        providers = [dict(p) for p in (auth_providers or [])]
         if password_hash:
             providers.append({"provider": "local", "hashed_password": password_hash,
                               "password_changed_at": None, "must_change_password": must_change})
@@ -274,7 +317,7 @@ class UsersService:
             "personal_phone": u.personal_phone, "work_extension": u.work_extension,
             "is_slep_staff": u.is_slep_staff, "unit_id": _oid(u.unit_id), "rbd": u.rbd,
             "positions": [p.value for p in u.positions],
-            "status": status, "auth_providers": providers, "access": [],
+            "status": status, "auth_providers": providers, "access": [dict(a) for a in (access or [])],
             # Sin intento de envío todavía: `sent` es falso. `auth.send_invitation` lo actualiza.
             "invitation": ({"sent_at": None, "expires_at": None, "last_error": None}
                            if status == "invited" else None),

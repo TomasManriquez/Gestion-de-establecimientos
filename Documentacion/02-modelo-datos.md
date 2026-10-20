@@ -543,7 +543,7 @@ erDiagram
         string last_name
         string personal_phone "SENSIBLE Ley 19.628 y 21.719"
         string work_extension
-        bool is_slep_staff
+        bool is_slep_staff "nulo = sin asignar (alta automática con Google)"
         ObjectId unit_id FK "idx, solo si SLEP"
         string rbd FK "idx, solo si establecimiento"
         array positions "idx multikey, EstablishmentPosition"
@@ -777,7 +777,7 @@ Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente
 
 | Invariante | Quién lo hace cumplir |
 |---|---|
-| `is_slep_staff=true` ⇒ `unit_id` con valor, `rbd` nulo y `positions` vacía. `false` ⇒ `rbd` con valor, `positions` con ≥ 1 elemento y `unit_id` nulo | `model_validator` de Pydantic |
+| `is_slep_staff=true` ⇒ `unit_id` con valor, `rbd` nulo y `positions` vacía. `false` ⇒ `rbd` con valor, `positions` con ≥ 1 elemento y `unit_id` nulo. **`null` (sin asignar, F6) ⇒ `unit_id`, `rbd` y `positions` vacíos**; solo el alta automática con Google lo admite (`UserCreateUnassigned`), el alta manual y el CSV exigen asignación, y un usuario ya asignado no vuelve a `null` (el PATCH ignora los `null`) | `check_mode` (compartida por el modelo de alta y la edición) |
 | `rbd` existe en `establishments` | `users_service`, vía `establishments_service` (L5) |
 | `unit_id` existe y la unidad está activa | `users_service`, vía `units_service` |
 | `access[].role` pertenece a `platforms.roles` de esa plataforma; una entrada por plataforma | `users_service`, vía `platforms_service` |
@@ -868,7 +868,7 @@ escribe con `--apply` (sin pisar un vínculo existente salvo `--overwrite`).
 `audit_log` es solo de agregado (el service no expone ninguna operación que edite o borre; un test lo
 verifica sobre el AST); `changes` jamás contiene hashes, contraseñas ni tokens y `personal_phone` se enmascara
 (`[REDACTED]`). `actor_id` es `null` para acciones del sistema (arranque, seed). `bulk_id` agrupa un lote. Las
-acciones son: `user.create|update|disable|enable|invite|password_reset|password_set`,
+acciones son: `user.create|update|disable|enable|invite|password_reset|password_set|autoprovision` (esta última: alta automática con Google, `actor_id` nulo),
 `access.grant|revoke`, `unit.create|update|move|deactivate|activate|head`, `platform.update`,
 `subrogation.create|cancel`. Una operación fallida (409) o sin cambios reales no deja registro. Índices:
 `(at desc)`, `(target_type, target_id, at desc)`, `(actor_id, at desc)` y `bulk_id` (disperso).

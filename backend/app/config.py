@@ -40,7 +40,7 @@ class Settings:
         "ADMIN_PASSWORD", "BOOTSTRAP_ADMIN_EMAIL", "ALLOWED_EMAIL_DOMAINS",
         "PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES",
         "MAIL_MODE", "PUBLIC_BASE_URL", "GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN",
-        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_AUTO_PROVISION",
     )
 
     PROJECT_NAME: str = "SLEP Llanquihue - Gestión de Establecimientos"
@@ -92,6 +92,12 @@ class Settings:
         self.GMAIL_REFRESH_TOKEN: str = self._get("GMAIL_REFRESH_TOKEN", "").strip()
         self.GOOGLE_CLIENT_ID: str = self._get("GOOGLE_CLIENT_ID", "").strip()
         self.GOOGLE_CLIENT_SECRET: str = self._get("GOOGLE_CLIENT_SECRET", "").strip()
+        # Alta automática con Google (C24, G1). Obligatoria y sin default: activarla es una decisión
+        # de despliegue explícita, nunca un olvido. `true` o `false`, nada más.
+        raw_provision = self._required("GOOGLE_AUTO_PROVISION").strip().lower()
+        if raw_provision not in ("true", "false"):
+            raise ConfigError(f"GOOGLE_AUTO_PROVISION debe ser true o false (recibido: {raw_provision!r})")
+        self.GOOGLE_AUTO_PROVISION: bool = raw_provision == "true"
         if self.MAIL_MODE == "console":
             # Que no pueda quedar activo en producción sin querer: el log sale con el enlace.
             if not local:

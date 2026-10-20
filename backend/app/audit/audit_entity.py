@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class AuditAction(str, Enum):
     """Acciones registradas. Cada valor es `<objeto>.<verbo>`; el filtro de la API las valida."""
     USER_CREATE = "user.create"
+    USER_AUTOPROVISION = "user.autoprovision"        # alta automática al entrar con Google (C24)
     USER_UPDATE = "user.update"
     USER_DISABLE = "user.disable"
     USER_ENABLE = "user.enable"

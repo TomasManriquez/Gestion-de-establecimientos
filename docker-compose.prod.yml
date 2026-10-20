@@ -51,6 +51,7 @@ services:
       GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_AUTO_PROVISION: ${GOOGLE_AUTO_PROVISION:?define GOOGLE_AUTO_PROVISION (true o false)}
     depends_on:
       mongodb:
         condition: service_healthy

@@ -543,13 +543,13 @@ declaran **antes** de `/{id}` para que no las capture.
 
 | Método | Ruta | Acceso | Respuesta |
 |---|---|---|---|
-| POST | `/api/auth/google` 🧭 F6 | pública | `Token` (verifica el `id_token`; sin auto-provisión) |
-| GET | `/api/auth/config` 🧭 F6 | pública | `{google_client_id}` (el frontend no tiene variables de entorno, ADR-008) |
+| POST | `/api/auth/google` ✅ F6 | pública | `Token` (body `{credential}`, `extra="forbid"`; verifica el `id_token` y, con `GOOGLE_AUTO_PROVISION=true`, da de alta al lector; todo fallo es el mismo `401`; `429` con `Retry-After` tras 30 rechazos por IP en 15 min; ADR-015) |
+| GET | `/api/auth/config` ✅ F6 | pública | `{google_client_id}` (el frontend no tiene variables de entorno, ADR-008; el client id no es secreto) |
 | GET | `/api/auth/password-policy` ✅ | pública | `{min_length, max_length, require_char_classes}` |
 | POST | `/api/auth/set-password` ✅ | pública | `204` (canje del enlace; mismo error genérico `400` ante token usado, vencido, inexistente o de un usuario en otro estado; `422` si la contraseña incumple la política y **no** consume el enlace; `429` con `Retry-After`) |
 | POST | `/api/auth/password` ✅ | autenticado | `Token` nuevo (cambio de contraseña propia) |
 
-**`/api/users`** (módulo `users`; todo `iam/admin` salvo `/me`)
+**`/api/users`** (módulo `users`; todo `iam/admin` salvo `/me`). `GET /api/users?assignment=unassigned` lista las cuentas sin asignar (`is_slep_staff` nulo, creadas por el alta automática); cualquier otro valor da `422`.
 
 | Método | Ruta | Acceso | Respuesta |
 |---|---|---|---|

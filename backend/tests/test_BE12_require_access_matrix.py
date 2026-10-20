@@ -142,6 +142,7 @@ def _declares_access(dependant):
 PUBLIC_ROUTES = {
     ("GET", "/"),                                   # healthcheck de Docker/Nginx: público por diseño
     ("POST", "/api/auth/login"), ("POST", "/api/auth/login-form"), ("POST", "/api/auth/logout"),
+    ("POST", "/api/auth/google"), ("GET", "/api/auth/config"),   # login con Google (C24): el credential ES la credencial; la config solo expone el client id
     ("GET", "/api/auth/password-policy"),         # pública: la pantalla de definir contraseña no tiene sesión
     ("POST", "/api/auth/set-password"),           # pública: canje del enlace de un solo uso; el token ES la credencial
 }

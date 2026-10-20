@@ -1,15 +1,19 @@
+import logging
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
-from app.auth.auth_service import auth_service, client_ip, rate_limited_http, require_access
-from app.auth.auth_entity import (AccessContext, AccessSummary, ChangePasswordRequest, InvalidLink, LoginRequest,
+from app.auth.auth_service import _credentials_exception, auth_service, client_ip, rate_limited_http, require_access
+from app.auth.google_service import GoogleLoginError, google_login_service
+from app.auth.auth_entity import (AccessContext, AccessSummary, AuthConfig, ChangePasswordRequest, GOOGLE_IP_LIMIT,
+                                  GOOGLE_WINDOW_SECONDS, GoogleLoginRequest, InvalidLink, LoginRequest,
                                   LOGIN_ACCOUNT_LIMIT, LOGIN_IP_LIMIT, LOGIN_WINDOW_SECONDS, PLATFORM_DATOS, PasswordPolicy,
                                   PasswordPolicyError, REDEEM_IP_LIMIT, REDEEM_WINDOW_SECONDS, RateLimited,
                                   SetPasswordRequest, Token, UserResponse)
 from app.users.users_entity import UserNotFound
 from app.users.users_service import users_service
 
+logger = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -62,6 +66,34 @@ async def login_for_access_token(payload: LoginRequest, request: Request):
     username legado. Responde 429 con `Retry-After` al superar el límite de intentos fallidos.
     """
     return _issue_token(await _limited_login(request, payload.username, payload.password))
+
+@router.get("/config", response_model=AuthConfig)
+async def get_auth_config():
+    """Pública: el frontend no tiene variables de entorno (ADR-008) y necesita el client id de Google
+    para dibujar el botón antes de que haya sesión. El client id no es secreto."""
+    return {"google_client_id": settings.GOOGLE_CLIENT_ID}
+
+
+@router.post("/google", response_model=Token)
+async def login_with_google(payload: GoogleLoginRequest, request: Request):
+    """Login con Google Identity Services (C24). Pública. Todo fallo es el mismo 401 de las demás rutas,
+    sin revelar la causa; el `credential` no se registra en ningún log. Los rechazos cuentan para el
+    límite por IP (429 con `Retry-After`). La sesión sale de `_issue_token`, el único punto de emisión."""
+    ip_key = auth_service.rate_key("google-ip", client_ip(request))
+    try:
+        await auth_service.rate_guard([(ip_key, GOOGLE_IP_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
+    try:
+        claims = await google_login_service.verify(payload.credential)
+        user = await google_login_service.resolve_user(claims)
+    except GoogleLoginError as exc:
+        logger.info("Login con Google rechazado: %s", exc.reason)
+        await auth_service.rate_hit(ip_key, GOOGLE_WINDOW_SECONDS)
+        raise _credentials_exception()
+    await users_service.touch_login(user["_id"])
+    return _issue_token(user)
+
 
 @router.post("/login-form", response_model=Token)
 async def login_for_access_token_form(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):

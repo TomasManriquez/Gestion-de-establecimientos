@@ -27,6 +27,7 @@ from app.mail.mail_service import MailError, MailService, SEND_URL, TOKEN_URL
 ENV = {
     "JWT_SECRET": "x" * 64, "ADMIN_PASSWORD": "una-clave-de-prueba",
     "ALLOWED_EMAIL_DOMAINS": "slepllanquihue.cl", "BOOTSTRAP_ADMIN_EMAIL": "admin@slepllanquihue.cl",
+    "GOOGLE_AUTO_PROVISION": "false",
     "MAIL_MODE": "gmail", "PUBLIC_BASE_URL": "https://gestion.slepllanquihue.cl",
     "GMAIL_SENDER_ADDRESS": "no-responder@slepllanquihue.cl", "GMAIL_REFRESH_TOKEN": "1//refresh-token-secreto",
     "GOOGLE_CLIENT_ID": "id.apps.googleusercontent.com", "GOOGLE_CLIENT_SECRET": "GOCSPX-secreto-del-cliente",

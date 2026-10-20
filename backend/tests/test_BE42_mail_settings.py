@@ -17,6 +17,7 @@ from app.config import Settings, ConfigError
 BASE = {
     "JWT_SECRET": "x" * 64, "ADMIN_PASSWORD": "una-clave-de-prueba",
     "ALLOWED_EMAIL_DOMAINS": "slepllanquihue.cl", "BOOTSTRAP_ADMIN_EMAIL": "admin@slepllanquihue.cl",
+    "GOOGLE_AUTO_PROVISION": "false",
 }
 GMAIL = {
     **BASE, "MAIL_MODE": "gmail", "PUBLIC_BASE_URL": "https://gestion.slepllanquihue.cl",

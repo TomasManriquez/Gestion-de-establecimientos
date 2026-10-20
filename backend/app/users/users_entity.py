@@ -70,13 +70,19 @@ def is_object_id(value: str) -> bool:
     return isinstance(value, str) and len(value) == 24 and ObjectId.is_valid(value)
 
 
-def check_mode(is_slep_staff: bool, unit_id, rbd, positions) -> None:
+def check_mode(is_slep_staff: Optional[bool], unit_id, rbd, positions) -> None:
     """Invariante central de R1: funcionario SLEP XOR usuario de establecimiento.
+
+    `None` = sin asignar (alta automática con Google, C24): no puede tener unidad, rbd ni cargos.
+    Un usuario ya asignado no vuelve a `None`: la edición ignora los `null` del body.
 
     Una sola función para el modelo de alta y para la edición (el service la aplica sobre el
     documento ya fusionado), de modo que no haya dos versiones de la regla.
     """
-    if is_slep_staff:
+    if is_slep_staff is None:
+        if unit_id or rbd or positions:
+            raise ValueError("Un usuario sin asignar no puede tener unit_id, rbd ni positions")
+    elif is_slep_staff:
         if not unit_id:
             raise ValueError("Un funcionario SLEP debe tener unit_id")
         if rbd:
@@ -173,6 +179,12 @@ class UserCreate(_Fields):
         return self
 
 
+class UserCreateUnassigned(UserCreate):
+    """Solo para el alta automática (C24): `is_slep_staff` puede ser `None`. Ninguna ruta HTTP lo usa:
+    el alta manual y el CSV siguen validando con `UserCreate`, que exige asignación."""
+    is_slep_staff: Optional[bool] = None
+
+
 class UserAdminUpdate(_Fields):
     """PATCH del admin global. Sin access/status/auth_providers: tienen endpoints propios."""
     email: Optional[EmailStr] = Field(None, max_length=254)
@@ -237,7 +249,7 @@ class UserSummary(_Out):
     first_name: str = ""
     last_name: str = ""
     work_extension: Optional[str] = None
-    is_slep_staff: bool = False
+    is_slep_staff: Optional[bool] = None     # None = sin asignar
     unit_id: Optional[str] = None
     rbd: Optional[str] = None
     positions: List[str] = []
@@ -267,7 +279,7 @@ class UserMe(_Out):
     last_name: str = ""
     personal_phone: Optional[str] = None
     work_extension: Optional[str] = None
-    is_slep_staff: bool = False
+    is_slep_staff: Optional[bool] = None     # None = sin asignar
     unit_id: Optional[str] = None
     rbd: Optional[str] = None
     positions: List[str] = []

@@ -490,6 +490,8 @@ Son decisiones conscientes o condiciones del entorno, no errores pendientes de c
 | D30 | Las invitaciones masivas salen con `BackgroundTasks`, que no es una cola | `users_controller._invite_created` | Si el proceso se reinicia durante el envío, los usuarios restantes quedan `invited` con `invitation.sent: false` y sin error; no hay reintento automático | El admin reenvía (`POST /api/users/{id}/invitation`); se ve en la lista como «Sin enviar» |
 | D31 | `auth_service.py` importa `fastapi` (rompe L2 para ese archivo) | `auth_service.py` | `require_access` es una dependencia de FastAPI y vive junto a la lógica de auth | Excepción declarada en `test_BE45_*`; moverla a `auth_controller` exige tocar todos los controllers |
 | D32 | La plantilla CSV trae dos filas de ejemplo con correos válidos | `users_controller.import_template` | Importarla sin editar crearía dos usuarios de ejemplo (la vista previa los muestra antes) | Borrar las filas de ejemplo; está dicho en `03` §8.3 |
+| D33 | La interfaz de administración no conoce «sin asignar» (`is_slep_staff` nulo, F6) | `UsersTable.jsx:13`, `UserForm.jsx:24` | La tabla muestra a esas cuentas como de establecimiento y el formulario las abre en modo «establecimiento» (`!!null`): guardar sin completar rbd y cargos da `422`. Fuera de alcance de F6 (N17); el filtro de API `?assignment=unassigned` ya existe |
+| D34 | `verify_oauth2_token` descarga los certificados de Google en cada login | `auth/google_service.py` | Sin caché local. Aceptable a esta escala; si Google no responde, el login con Google falla con `401` y el de contraseña no se afecta |
 
 ### 5.4 Qué escala mal a partir de aquí
 
