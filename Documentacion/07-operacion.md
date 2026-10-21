@@ -208,8 +208,9 @@ ninguna prueba envía correo; `mailbox.fail_with` simula un fallo y `mailbox.las
 > falla un test de sesión (`BE12`, `BE32` o un test de `BE46` que usa un token recién emitido). Se
 > instrumentó `get_current_user` y se capturó un `ImmatureSignatureError` («token aún no válido, `iat`»):
 > **el reloj de pared del entorno salta hacia atrás** entre dos instantes del mismo test, y el token queda con
-> `iat` en el futuro. No es un defecto de F4 ni de F3. Mitigación posible, **no aplicada** porque toca `auth`
-> (punto único de falla): `leeway` de unos segundos en `jwt.decode`. Ver `05` §5.3c (D28).
+> `iat` en el futuro. No es un defecto de F4 ni de F3. **Mitigado** el 2026-10-19 con `leeway=10` en
+> `jwt.decode` (commit `95b6d1b`, `test_BE52_*`); un fallo aislado de `BE32` sigue siendo posible (depende
+> de que el cambio caiga en un segundo posterior al del login). Ver `05` §5.3c (D28).
 
 **Dependencias de test:** `pip install -r backend/requirements-dev.txt` (`pytest`,
 `pytest-asyncio`, `httpx`). Con el venv del proyecto sin `pip`, `uv pip install -r requirements-dev.txt`.

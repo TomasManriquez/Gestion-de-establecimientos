@@ -44,19 +44,25 @@ Empieza por [`Documentacion/00-README.md`](Documentacion/00-README.md): glosario
 
 ## Madurez: de alfa a beta
 
-Hoy es **alfa** porque una persona nueva todavía no puede completar su alta sola desde la interfaz: el
-backend de la invitación, el canje del enlace y el restablecimiento ya existen (F4, verificados contra una
-MongoDB real), pero faltan la pantalla `/definir-contrasena` y la casilla remitente de Gmail. Se considera
-**beta**, y la versión pasa a `0.3.0`, cuando se cumplan **todos** estos criterios:
+Hoy es **alfa** porque el alta de punta a punta todavía no se ha probado en producción: el backend ya la
+resuelve (F6: login con Google y alta automática como lector; F4: invitación y restablecimiento por enlace como
+vía alternativa), pero la alta automática está **desactivada fuera de desarrollo** hasta que el usuario decida
+activarla. Se considera **beta**, y la versión pasa a `0.3.0`, cuando se cumplan **todos** estos criterios:
 
-1. **Alta de punta a punta:** un usuario creado recibe la invitación por correo, define su
-   contraseña y entra. *Backend ✅ (F4); faltan la pantalla de contraseña y la casilla remitente (`07` §9).*
+1. **Alta de punta a punta = entrar con Google.** Quien tiene una cuenta del dominio permitido entra con Google y
+   obtiene su cuenta de lector sin que nadie la cree (alta automática, `GOOGLE_AUTO_PROVISION=true`), y un admin
+   global le asigna después su pertenencia y sus accesos. *Backend ✅ (F6, ADR-015, verificado con tests).
+   Falta: que el usuario active `GOOGLE_AUTO_PROVISION` en producción (sus requisitos SEC-1…6 y el retiro de
+   `licenses` ya están cumplidos), la consola de Google (`07` §10) y la interfaz para asignar cuentas «sin
+   asignar» (D33). La invitación por correo (F4) queda como vía para cuentas fuera de Google y necesita la
+   casilla remitente (`07` §9) y la pantalla `/definir-contrasena`, que ya no bloquean la beta.*
 2. **Protección del acceso:** rate limiting en el login, el restablecimiento y el canje de enlaces, y auditoría
    de los cambios de usuarios y accesos. *✅ F4; falta comprobar en producción que el proxy del host reenvía
    `X-Forwarded-For` (`07` §7).*
-3. **Brechas abiertas de seguridad y datos resueltas:** D5 (`$regex` sin escapar en los filtros del
-   directorio) y D6 (el año 2026 fijo en los pipelines del dashboard; si no se corrige, desde
-   enero de 2027 el dashboard muestra datos viejos sin avisar). Tabla en
+3. **Brechas abiertas de seguridad y datos resueltas:** ~~D5~~ (✅ F6, SEC-4) y D6 (el año 2026 fijo en los
+   pipelines del dashboard; si no se corrige, desde enero de 2027 el dashboard muestra datos viejos sin
+   avisar). Además, D35 (el límite por IP puede evadirse si el proxy del host *agrega* a `X-Forwarded-For`).
+   Tabla en
    [`05-guia-de-extension.md`](Documentacion/05-guia-de-extension.md) §5.
 4. **Producción ensayada:** un despliegue con `docker-compose.prod.yml` y un backup con su
    restauración probados al menos una vez (`07` §5 y §6).
@@ -70,12 +76,17 @@ el contrato.
 Más reciente arriba. **Despliegue** indica lo que hay que hacer al actualizar un entorno existente;
 **Brechas** remite a la tabla de deuda de `05` §5 (✅ resuelta, 🔸 sigue abierta).
 La numeración 0.x es una etiqueta de este documento: el repositorio aún no tiene tags de versión
-(`pre-usuarios-f3` y `pre-usuarios-f4`, los puntos de rollback de F3 y F4).
+(`pre-usuarios-f3`, `pre-usuarios-f4`, `pre-usuarios-f6` y `pre-usuarios-f6-s3`, los puntos de rollback de cada fase). F4 y F6 siguen
+**sin mergear a `master`**: viven encadenadas en `feature/usuarios-f4` → `feature/usuarios-f6` → `feature/usuarios-f6-s3`.
 
 ### Iteración 2 — 0.2.x (en curso, desde 2026-09-15)
 
 | Fecha | Tipo | Cambio | Despliegue | Brechas | Commit |
 |---|---|---|---|---|---|
+| 2026-10-20 | feat | **F6 S3 — Sesión en cookie `HttpOnly`** (`SameSite=Strict`, `Path=/api`) en lugar de `localStorage` (ADR-016) y diseño zero trust para recibir cuentas autoaprovisionadas; guía de revisión del proxy | `PUBLIC_BASE_URL` debe ser el **origen exacto del navegador** o toda escritura da `403 untrusted_origin` (en desarrollo, entrar por `localhost`, no `127.0.0.1`). Rollback: tag `pre-usuarios-f6-s3` | D35 🔸 | `864abd7` `40c89db` |
+| 2026-10-20 | feat | **F6 S2 — Login con Google y alta automática como lector** (ADR-015, C24): `POST /api/auth/google`, `GET /api/auth/config`, cuentas «sin asignar» (`is_slep_staff` nulo), filtro `assignment=unassigned`; **se retira el campo `licenses`** (N15) | Variable nueva **`GOOGLE_AUTO_PROVISION`** (obligatoria; en producción la activa solo el usuario); `google-auth` y `requests` (rebuild del backend); si hubo datos reales, `scripts/retire_licenses.py --apply` y rotar esas credenciales. Rollback: tag `pre-usuarios-f6` | D33 🔸 D34 🔸 | `cce0490` `f3fd20f` |
+| 2026-10-20 | feat | **F6 S1 — Línea base de seguridad (SEC-1…6):** `JWT_SECRET` ≥ 32 caracteres sin placeholders, claims `exp/iat/sub` obligatorios, `logout` y desactivación cortan todas las sesiones (`sessions_revoked_at`), `re.escape` en los filtros del directorio, sin CORS, cabeceras de seguridad y CSP en modo *Report-Only* | `JWT_SECRET` y `ADMIN_PASSWORD` se leen del `.env` también en desarrollo; `frontend/nginx.conf` cambia (rebuild del frontend) | D5 ✅ | `060f10b` |
+| 2026-10-19 | fix | `leeway=10` en la validación del JWT (reloj de WSL2) | Ninguno | D28 ✅ | `95b6d1b` |
 | 2026-10-09 | feat | **F4 — Primer acceso y operaciones masivas (backend):** correo con `MAIL_MODE=console\|gmail`, invitación, reenvío, restablecimiento y canje de enlaces de un solo uso; CSV con vista previa, alta masiva parcial y operaciones masivas; subrogancias y vínculo opcional contraparte↔usuario; auditoría de solo agregado y rate limiting de login (US-14…16, 19…22, 30…36, 45…47) | **`.env` con `MAIL_MODE` y `PUBLIC_BASE_URL`** (obligatorias); `docker compose up -d --build backend` (`httpx` nuevo; `Dockerfile.prod` cambia); índices nuevos al arrancar; backup previo; verificar la IP real tras el proxy del host. Rollback: tag `pre-usuarios-f4` | límites nuevos D26…D32 (`05` §5.3c) | `e98cdc8`…`a8d57b7` |
 | 2026-10-07 | fix | Menú lateral colapsable fluido: los íconos no se mueven al animar y el botón pasa a ser un tirador discreto sobre el borde | Ninguno (Vite recarga solo) | — | `e302957` |
 | 2026-10-07 | feat | **F5 — Vista de gestión de usuarios** en *Configuración › Usuarios*: lista con filtros en la URL, crear y editar, accesos por plataforma, desactivar y reactivar, acciones masivas (US-39, US-40) | Dependencias nuevas del frontend: `docker compose up -d --build --renew-anon-volumes frontend` (sin `-V` queda el `node_modules` viejo) | D18 ✅ D19 ✅ | `9a428a9` `7e252d1` |
@@ -88,10 +99,11 @@ La numeración 0.x es una etiqueta de este documento: el repositorio aún no tie
 | 2026-09-15 | feat | **Rutas y mapa:** migración a React Router (rutas `/dashboard`, `/establecimientos/:rbd`…, `ProtectedRoute`, `AppLayout`), shadcn/ui en las vistas existentes, campo `location`, índices de MongoDB e importador de coordenadas desde KMZ | Dependencias nuevas del frontend (rebuild); los índices se crean al arrancar el backend; el KMZ se importa a mano (`07` §4.2) | — | `3692afd` `e3d1914` `40114d3` |
 | 2026-09-15 | test | Primera suite de tests: backend (BE01–BE08, INT02) y frontend (FE00–FE06, INT01) | Ninguno | — | `f167cff` `5b0984e` |
 
-Pendiente de esta iteración: la interfaz de lo que F4 dejó en el backend (pantalla para definir la contraseña,
-reenviar y restablecer, importación CSV y acciones masivas contra `POST /api/users/bulk`), la página de unidades,
-«Mi perfil» y la casilla remitente de Gmail. Después, F6 (login con Google) y F7 (diseño de interconexión entre
-plataformas).
+Pendiente de esta iteración: la interfaz de administración sobre lo que F4 y F6 dejaron en el backend (asignar
+las cuentas «sin asignar», reenviar y restablecer, importación CSV, acciones masivas contra `POST /api/users/bulk`
+y, solo si se usa la vía por correo, `/definir-contrasena`), la página de unidades, «Mi perfil» y la casilla
+remitente de Gmail; y las decisiones del usuario sobre la recepción de cuentas autoaprovisionadas (Z1…Z3,
+`04` §9.6.1). F7 (interconexión entre plataformas) sigue siendo solo diseño.
 
 ### Iteración 1 — 0.1.x (2026-07-02 a 2026-09-08)
 
