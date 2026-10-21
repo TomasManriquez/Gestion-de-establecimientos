@@ -23,7 +23,7 @@ import { ADMIN, installGets, makeUser, usersListCalls } from './usersFixtures';
 const VIEWER = { ...ADMIN, id: 'u9', role: 'viewer', full_name: 'Visitante', access: [{ platform_id: 'datos', role: 'viewer' }] };
 
 function mountApp(me, path = '/configuracion/usuarios') {
-  localStorage.setItem('token', 'tok');
+  localStorage.setItem('token', 'token-antiguo');      // resto de una versión anterior: App debe purgarlo
   const base = installGets;
   base({ '/api/auth/me': () => me });
   // installGets resuelve rutas desconocidas con error: agregamos las que usa el Dashboard del layout.
@@ -48,7 +48,8 @@ describe('INT09: administración de usuarios de punta a punta', () => {
     await userEvent.setup().click(link);
     expect(await screen.findByRole('heading', { name: 'Usuarios' })).toBeInTheDocument();
     expect(await screen.findByText('Ana Pérez')).toBeInTheDocument();
-    expect(axios.defaults.headers.common.Authorization).toBe('Bearer tok');
+    expect(axios.defaults.headers.common.Authorization).toBeUndefined();   // sesión por cookie HttpOnly (ADR-016)
+    expect(localStorage.getItem('token')).toBeNull();                      // y el token antiguo se purgó
   });
 
   it('INT09-B: crear un usuario envía el POST y recarga la lista', async () => {

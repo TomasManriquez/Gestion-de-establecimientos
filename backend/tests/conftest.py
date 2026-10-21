@@ -12,6 +12,10 @@ os.environ["JWT_SECRET"] = "test-only-jwt-secret-not-for-deployments"
 os.environ["ADMIN_PASSWORD"] = "test-only-admin-password"
 os.environ["ALLOWED_EMAIL_DOMAINS"] = "slepllanquihue.cl"
 os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "admin@slepllanquihue.cl"
+os.environ["MAIL_MODE"] = "console"
+os.environ["PUBLIC_BASE_URL"] = "http://localhost:5173"
+os.environ["GOOGLE_AUTO_PROVISION"] = "false"     # cada test de alta automática la enciende con patch
+os.environ["GOOGLE_CLIENT_ID"] = "test-client-id.apps.googleusercontent.com"
 for _name in ("PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES"):
     os.environ.pop(_name, None)
 
@@ -61,16 +65,6 @@ SAMPLE_ESTABLISHMENT = {
         "phone_extensions": [],
     },
     "printers": {"owned": [], "leased": []},
-    "licenses": [
-        {
-            "name": "Plataforma SIGE",
-            "email": "admin@liceo.cl",
-            "password": "clave-secreta-sige",  # Campo sensible
-            "url": "https://sige.mineduc.cl",
-            "obs": "",
-            "is_new": False,
-        }
-    ],
 }
 
 SAMPLE_ESTABLISHMENT_2 = {
@@ -111,7 +105,6 @@ SAMPLE_ESTABLISHMENT_2 = {
         "phone_extensions": [],
     },
     "printers": {"owned": [], "leased": []},
-    "licenses": [],
 }
 
 SAMPLE_COUNTERPART = {
@@ -275,6 +268,14 @@ def seed_users(db, *users):
     return docs
 
 
+SESSION_COOKIE = "slep_session"
+
+
+def session_headers(response) -> dict:
+    """Authorization con el JWT que la respuesta entregó en la cookie de sesión (S3: ya no va en el cuerpo)."""
+    return {"Authorization": "Bearer " + response.cookies.get(SESSION_COOKIE)}
+
+
 def bearer_for(user: dict, **claims):
     """Cabecera Authorization con un JWT real para ese usuario (sub = str(_id))."""
     from app.auth.auth_service import auth_service
@@ -316,3 +317,30 @@ def prepare_org(fake_db, *users):
     if users:
         seed_users(fake_db, *users)
     return {d["code"]: str(d["_id"]) for d in fake_db.units.docs}
+
+
+# ─── Buzón de correo falso (ADR-012: en los tests se mockea mail_service) ────────────────
+class Mailbox:
+    """Registra los correos que el código de dominio intentó enviar. `fail_with` hace que `send` falle."""
+
+    def __init__(self):
+        self.messages, self.fail_with = [], None
+
+    async def send(self, to, subject, html, text):
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.messages.append({"to": to, "subject": subject, "html": html, "text": text})
+
+    def last_token(self):
+        """Token del último enlace enviado (va en el fragmento `#token=`)."""
+        import re
+        match = re.search(r"#token=([A-Za-z0-9_-]+)", self.messages[-1]["text"])
+        return match.group(1)
+
+
+@pytest.fixture(autouse=True)
+def mailbox():
+    from app.mail.mail_service import mail_service
+    box = Mailbox()
+    with patch.object(mail_service, "send", box.send):
+        yield box

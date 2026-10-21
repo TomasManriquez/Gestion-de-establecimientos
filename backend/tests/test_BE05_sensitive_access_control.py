@@ -1,13 +1,12 @@
 """
-test_BE05_licenses_access_control.py
+test_BE05_sensitive_access_control.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Tarea: BE-05 · Controlar acceso a campos sensibles según rol del usuario
 Correlaciones: Independiente · Complementa BE-03
 
 Verifica que:
-  - Un usuario admin recibe licenses[].password visible
-  - Un usuario no-admin recibe licenses[].password como "[REDACTED]"
-  - ssid_password también se redacta para no-admin
+  - ssid_password se redacta para no-admin y el admin lo recibe en claro
+  - (`licenses` se retiró en F6, N15: sus tests se eliminaron; ver test_BE58_licenses_retired.py)
   - find_by_rbd() acepta parámetro include_sensitive
   - El controller pasa include_sensitive según el rol del usuario autenticado
 """
@@ -38,61 +37,6 @@ def test_BE05_find_by_rbd_accepts_include_sensitive_param():
         f"El default de include_sensitive es {default}, se esperaba False. "
         "Por defecto debe redactar datos sensibles (principio de mínimo privilegio)."
     )
-
-
-# ─── Tests de redacción de licenses ──────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_BE05_non_admin_receives_redacted_license_password():
-    """BE-05: Usuario no-admin recibe licenses[].password == '[REDACTED]'."""
-    from app.establishments.establishments_service import EstablishmentsService
-
-    doc = copy.deepcopy(SAMPLE_ESTABLISHMENT)
-    mock_collection = MagicMock()
-    mock_collection.find_one = AsyncMock(return_value=doc)
-
-    with patch("app.establishments.establishments_service.db_service") as mock_db_svc:
-        mock_db_svc.db.establishments = mock_collection
-
-        svc = EstablishmentsService()
-        result = await svc.find_by_rbd("7722", include_sensitive=False)
-
-    assert result is not None
-    licenses = result.get("licenses", [])
-
-    for lic in licenses:
-        password = lic.get("password", "")
-        assert password == "[REDACTED]", (
-            f"licenses[].password es '{password}' para usuario no-admin. "
-            "Debe ser '[REDACTED]' cuando include_sensitive=False."
-        )
-
-
-@pytest.mark.asyncio
-async def test_BE05_admin_receives_real_license_password():
-    """BE-05: Usuario admin recibe licenses[].password real."""
-    from app.establishments.establishments_service import EstablishmentsService
-
-    doc = copy.deepcopy(SAMPLE_ESTABLISHMENT)
-    mock_collection = MagicMock()
-    mock_collection.find_one = AsyncMock(return_value=doc)
-
-    with patch("app.establishments.establishments_service.db_service") as mock_db_svc:
-        mock_db_svc.db.establishments = mock_collection
-
-        svc = EstablishmentsService()
-        result = await svc.find_by_rbd("7722", include_sensitive=True)
-
-    assert result is not None
-    licenses = result.get("licenses", [])
-
-    for lic in licenses:
-        password = lic.get("password", "")
-        assert password != "[REDACTED]", (
-            "licenses[].password está redactado para usuario admin con include_sensitive=True. "
-            "El admin debe ver las contraseñas reales."
-        )
-        assert password != "", "El admin recibió password vacío, se esperaba la clave real."
 
 
 # ─── Tests de redacción de ssid_password ──────────────────────────────────────

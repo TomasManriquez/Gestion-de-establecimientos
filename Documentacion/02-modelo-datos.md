@@ -30,7 +30,6 @@ erDiagram
         object general_info "embebido"
         object connectivity "embebido"
         object printers "embebido"
-        array licenses "embebido - SENSIBLE"
     }
     counterparts {
         ObjectId _id PK
@@ -83,7 +82,7 @@ endpoint de borrado de establecimientos, así que el escenario no es alcanzable 
 La regla aplicada, y la razón por la que este modelo se ve como se ve:
 
 **Se embebe lo que solo tiene sentido dentro de un establecimiento y se lee siempre junto a él.**
-`general_info`, `connectivity`, `printers` y `licenses` no se consultan nunca por sí solos —
+`general_info`, `connectivity` y `printers` no se consultan nunca por sí solos —
 no hay una pregunta legítima como "todas las impresoras arrendadas del servicio" que no pase
 por el establecimiento. Además su cardinalidad es acotada y no crece con el tiempo. Embebidos
 significan una sola lectura para armar la ficha completa.
@@ -122,7 +121,6 @@ Origen del esquema: `backend/app/establishments/establishments_entity.py`.
 | `general_info` | `GeneralInfo` | instancia vacía | Embebido 1:1. |
 | `connectivity` | `Connectivity` | instancia vacía | Embebido 1:1. |
 | `printers` | `Printers` | instancia vacía | Embebido: `{owned: [], leased: []}`. |
-| `licenses` | `List[LicenseCredential]` | `[]` | **Embebido y sensible.** |
 
 ### 3.2 Sub-esquemas embebidos
 
@@ -210,20 +208,11 @@ classDiagram
         +install_date: str
         +initial_counter: int
     }
-    class LicenseCredential {
-        +name: str
-        +email: str
-        +password: str
-        +url: str
-        +obs: str
-        +is_new: bool
-    }
 
     Establishment o-- Location
     Establishment *-- GeneralInfo
     Establishment *-- Connectivity
     Establishment *-- Printers
-    Establishment *-- "0..*" LicenseCredential
     Connectivity *-- "0..*" BamEntry
     Connectivity *-- Starlink
     Connectivity *-- InternalNetwork
@@ -253,7 +242,7 @@ central para todo lo demás:
 
 | Modelo | Uso | Campos |
 |---|---|---|
-| `Establishment` | Respuesta del detalle y del PUT | Todo, incluido `licenses` |
+| `Establishment` | Respuesta del detalle y del PUT | Todo el documento (`licenses` se retiró en F6) |
 | `EstablishmentUpdate` | Body del PUT | Los mismos que `Establishment` menos `rbd`/`rbd_dv`/`rbd_full`, **todos `Optional` con default `None`** |
 | `EstablishmentSummary` | Ítem del listado | `rbd`, `rbd_full`, `name`, `comuna`, `area_type`, `address`, `category`, `adp`, `covertura` |
 | `EstablishmentListResponse` | Envoltorio del listado | `items`, `total`, `page`, `page_size`, `total_pages` |
@@ -466,10 +455,7 @@ Este es el inventario que cualquier cambio debe respetar. Su enforcement está e
 
 | Campo | Ubicación | Naturaleza | Tratamiento |
 |---|---|---|---|
-| `licenses[].password` | `establishments` (embebido) | Credencial de plataforma externa (SIGE, etc.) | `[REDACTED]` para no-admin (`establishments_service.py:89-91`) |
-| `licenses[].email` | `establishments` | Usuario de esa credencial | **Sin redactar.** Viaja completo a cualquier autenticado. |
-| `connectivity.ssid_password` | `establishments` | Clave de la red WiFi del establecimiento | `[REDACTED]` para no-admin (`:92-93`) |
-| `licenses` (array completo) | `establishments` | — | **Excluido de `LISTING_PROJECTION`**: nunca aparece en el listado, para ningún rol |
+| `connectivity.ssid_password` | `establishments` | Clave de la red WiFi del establecimiento | `[REDACTED]` para `viewer` (`establishments_service.find_by_rbd`) |
 | `connectivity` (bloque) | `establishments` | Contiene el SSID y su clave | Excluido de `LISTING_PROJECTION` |
 | `general_info.director_email`, `director_phone` | `establishments` | Datos personales | Sin redactar. Excluidos del listado solo por no estar proyectados. |
 | `counterparts[].email`, `.phone` | `counterparts` | Datos personales de funcionarios | **Sin redactar ni restringir.** Cualquier autenticado lee todas las contrapartes. |
@@ -506,12 +492,13 @@ Claves de nivel raíz por registro: `rbd`, `rbd_dv`, `name`, `comuna`, `area_typ
 > paso, la base ya corriendo); el seeding ahora solo es responsable de *propagarlas* al crear
 > la base desde cero.
 >
-> 🔸 **BRECHA:** `est_doc` incluye `"licenses": item.get("licenses", [])`, pero
-> `establishments.json` **no tiene** la clave `licenses` en ningún registro. Todo el aparato
-> de `LicenseCredential`, la redacción de `password` y los tests BE-05 / INT-02 protegen hoy
-> un array que siempre se siembra vacío. La funcionalidad es correcta y los tests la cubren
-> con datos sintéticos; simplemente no hay dato real cargado por esa vía.
->
+> ✅ **`licenses` retirado (F6, N15).** El campo guardaba usuario y contraseña de plataformas externas en
+> claro y nunca tuvo datos reales (el JSON origen no lo trae). Se eliminaron el modelo `LicenseCredential`,
+> la redacción, la protección del marcador `[REDACTED]` para ese campo y el seeding. Un documento antiguo
+> que aún lo tenga en Mongo **no lo devuelve** el detalle (`find_by_rbd` lo descarta) y `PUT` lo ignora.
+> Para borrarlo de la base: `python scripts/retire_licenses.py` (simulación) y `--apply`; si había
+> credenciales reales, **rotarlas** en cada plataforma (borrarlas no las invalida y siguen en los respaldos).
+
 > 🔸 **BRECHA:** `rbd_full` no existe en el JSON origen, así que el seeding cae al fallback
 > `f"{rbd}"` (`:210`) y el `rbd_full` de todos los establecimientos queda igual al `rbd`, sin
 > el dígito verificador — aunque `rbd_dv` sí esté presente y se guarde aparte.
@@ -525,11 +512,11 @@ poblada requiere hoy vaciar las colecciones y reiniciar, o escribir en Mongo a m
 
 ## 9. 🧭 DISEÑO F2: colecciones de la feature de usuarios e IAM
 
-> **Estado por subsección (2026-10-02).** ✅ Implementado y verificado en F3: 9.1 (salvo
-> `auth_tokens`, `subrogations`, `audit_log`, `rate_limits` y `counterparts.user_id`), 9.2, 9.3,
-> 9.4, 9.5, 9.10 y 9.12 (salvo las transiciones por correo). 🧭 Pendiente: 9.6 `subrogations`
-> y 9.7 `auth_tokens` (F4), 9.8 `counterparts.user_id` (F4), 9.9 `audit_log` y `rate_limits` (F4).
-> La marca `🧭` se retira cuando la fase correspondiente lo implemente y un test lo verifique. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
+> **Estado por subsección (2026-10-09).** ✅ Implementado y verificado: 9.1 a 9.12 (F3: 9.2 a 9.5,
+> 9.10, 9.12; F4: 9.6 `subrogations`, 9.7 `auth_tokens`, 9.8 `counterparts.user_id`, 9.9 `audit_log` y
+> `rate_limits`, y las transiciones por correo de 9.12). Las colecciones de F4 se verificaron además contra una
+> MongoDB real desechable (índices únicos y TTL, `$inc` y upserts). La marca `🧭` se retira cuando la fase
+> correspondiente lo implementa y un test lo verifica. Decisiones: ADR-009 a ADR-014 (`06`). Nombres de colecciones
 > y campos en inglés, igual que los cinco módulos existentes (ver D23 en `05` §5).
 
 ### 9.1 Panorama
@@ -543,7 +530,7 @@ erDiagram
         string last_name
         string personal_phone "SENSIBLE Ley 19.628 y 21.719"
         string work_extension
-        bool is_slep_staff
+        bool is_slep_staff "nulo = sin asignar (alta automática con Google)"
         ObjectId unit_id FK "idx, solo si SLEP"
         string rbd FK "idx, solo si establecimiento"
         array positions "idx multikey, EstablishmentPosition"
@@ -555,6 +542,7 @@ erDiagram
         datetime updated_at
         ObjectId updated_by FK
         datetime disabled_at
+        datetime sessions_revoked_at "opcional; corta sesiones con iat <= este instante"
     }
     users_auth_providers {
         string provider "local o google"
@@ -754,7 +742,8 @@ Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente
   "invitation": {"sent_at": "ISODate", "expires_at": "ISODate", "last_error": null},
   "last_login_at": "ISODate", "last_activity_at": "ISODate",
   "created_at": "ISODate", "created_by": "ObjectId", "updated_at": "ISODate", "updated_by": "ObjectId",
-  "disabled_at": null
+  "disabled_at": null,
+  "sessions_revoked_at": null
 }
 ```
 
@@ -775,7 +764,7 @@ Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente
 
 | Invariante | Quién lo hace cumplir |
 |---|---|
-| `is_slep_staff=true` ⇒ `unit_id` con valor, `rbd` nulo y `positions` vacía. `false` ⇒ `rbd` con valor, `positions` con ≥ 1 elemento y `unit_id` nulo | `model_validator` de Pydantic |
+| `is_slep_staff=true` ⇒ `unit_id` con valor, `rbd` nulo y `positions` vacía. `false` ⇒ `rbd` con valor, `positions` con ≥ 1 elemento y `unit_id` nulo. **`null` (sin asignar, F6) ⇒ `unit_id`, `rbd` y `positions` vacíos**; solo el alta automática con Google lo admite (`UserCreateUnassigned`), el alta manual y el CSV exigen asignación, y un usuario ya asignado no vuelve a `null` (el PATCH ignora los `null`) | `check_mode` (compartida por el modelo de alta y la edición) |
 | `rbd` existe en `establishments` | `users_service`, vía `establishments_service` (L5) |
 | `unit_id` existe y la unidad está activa | `users_service`, vía `units_service` |
 | `access[].role` pertenece a `platforms.roles` de esa plataforma; una entrada por plataforma | `users_service`, vía `platforms_service` |
@@ -816,7 +805,7 @@ Sembradas: `iam` (roles `["admin"]`), `datos` y `selloverde` (`["admin","editor"
 `@slepllanquihue.cl`; el **web** es `*.slepllanquihue.gob.cl`. No son el mismo. Las credenciales
 y URLs de redirección de las plataformas consumidoras se diseñan en F7 (`04` §10).
 
-### 9.6 🧭 `subrogations` (propiedad de `units`, prioridad Could)
+### 9.6 ✅ `subrogations` (propiedad de `units`, prioridad Could)
 
 ```json
 {"_id":"ObjectId","unit_id":"ObjectId","subrogate_user_id":"ObjectId","starts_at":"ISODate",
@@ -826,35 +815,54 @@ y URLs de redirección de las plataformas consumidoras se diseñan en F7 (`04` �
 ```
 
 Colección aparte porque el historial crece sin límite (ADR-010). «Vigente» se calcula por fecha,
-sin jobs. Reglas: la registra el admin global; quien subroga está activo, no es la jefatura
-titular y pertenece al subárbol de la unidad; no se superponen dos vigentes en una unidad;
-`ends_at` es obligatorio salvo `VACANCIA`. **No transfiere permisos.**
+sin jobs. Reglas: la registra el admin global; quien subroga es un funcionario SLEP activo, no es la
+jefatura titular y pertenece a la unidad o a su subárbol; la unidad está activa; no se superponen dos no
+canceladas en una unidad (los intervalos contiguos sí caben); `ends_at` es obligatorio salvo `VACANCIA` y
+debe ser posterior a `starts_at`. **No transfiere permisos.** Cancelar fija `cancelled_at` y es idempotente.
+Las fechas son UTC sin zona. Índices: `(unit_id, cancelled_at, starts_at desc)` y `subrogate_user_id`.
+`current` (vigente hoy) no se guarda: se calcula al leer (`units_service._subrogation_public`).
 
-### 9.7 🧭 `auth_tokens` (propiedad de `auth`)
+### 9.7 ✅ `auth_tokens` (propiedad de `auth`)
 
 ```json
 {"_id":"ObjectId","user_id":"ObjectId","purpose":"invite|reset","token_hash":"sha256(…)",
   "expires_at":"ISODate","used_at":"ISODate|null","created_by":"ObjectId","created_at":"ISODate"}
 ```
 
-El token (`secrets.token_urlsafe(32)`) solo viaja en el correo; la base guarda su hash. Índice TTL
-sobre `expires_at`. Emitir uno nuevo invalida el anterior del mismo usuario y propósito.
-Vigencia propuesta: 72 h (`invite`) y 24 h (`reset`).
+El token (`secrets.token_urlsafe(32)`) solo viaja en el correo; la base guarda su sha256 (64 hex).
+**Hay un único documento por `(user_id, purpose)`** y emitir uno nuevo lo reemplaza con un `upsert`: invalidar
+el anterior y emitir el nuevo es la misma operación atómica (ajuste respecto del borrador, que borraba y
+volvía a insertar). Índices: único `(user_id, purpose)`, único `token_hash` y TTL sobre `expires_at`
+(`expireAfterSeconds: 0`). Vigencia: 72 h (`invite`) y 24 h (`reset`). El canje es un
+`find_one_and_update` con `used_at: null` y `expires_at > ahora`: solo una petición gana. Un documento ya
+usado permanece hasta que el TTL lo borre, y un token usado no se vuelve a canjear aunque el usuario
+cambie de estado (`test_BE46_*`).
 
-### 9.8 🧭 `counterparts`: cambio
+### 9.8 ✅ `counterparts`: cambio
 
-Se agrega `user_id: Optional[str] = None`, nunca obligatorio (ADR-011). El backfill es un script
-con dry-run por defecto que empareja por correo normalizado.
+Se agrega `user_id: Optional[str] = None`, nunca obligatorio (ADR-011). Si viene, se valida contra `users`
+(`422 user_not_found`); en `PUT`, `""` desvincula y omitirlo lo conserva. El backfill es
+`backend/scripts/backfill_counterpart_users.py`: ensayo por defecto, empareja por correo normalizado y solo
+escribe con `--apply` (sin pisar un vínculo existente salvo `--overwrite`).
 
-### 9.9 🧭 `audit_log` y `rate_limits` (ADR-014)
+### 9.9 ✅ `audit_log` y `rate_limits` (ADR-014)
 
 ```json
 {"_id":"ObjectId","at":"ISODate","actor_id":"ObjectId","action":"user.create|access.grant|…",
   "target_type":"user|unit|subrogation","target_id":"…","changes":{"campo":["antes","después"]},"bulk_id":"string|null"}
 ```
 
-`audit_log` es solo de agregado; `changes` jamás contiene hashes, contraseñas ni tokens.
-`rate_limits` guarda `{key, count, expires_at}` con índice TTL.
+`audit_log` es solo de agregado (el service no expone ninguna operación que edite o borre; un test lo
+verifica sobre el AST); `changes` jamás contiene hashes, contraseñas ni tokens y `personal_phone` se enmascara
+(`[REDACTED]`). `actor_id` es `null` para acciones del sistema (arranque, seed). `bulk_id` agrupa un lote. Las
+acciones son: `user.create|update|disable|enable|invite|password_reset|password_set|autoprovision` (esta última: alta automática con Google, `actor_id` nulo),
+`access.grant|revoke`, `unit.create|update|move|deactivate|activate|head`, `platform.update`,
+`subrogation.create|cancel`. Una operación fallida (409) o sin cambios reales no deja registro. Índices:
+`(at desc)`, `(target_type, target_id, at desc)`, `(actor_id, at desc)` y `bulk_id` (disperso).
+
+`rate_limits` guarda `{key, count, expires_at}`; la clave es `<alcance>:<sha256[:32]>` de lo que se limita
+(correo, IP, id), así que no contiene datos en claro. Índices: único `key` y TTL sobre `expires_at`. Es una
+ventana fija por clave: al vencer, la siguiente `hit` abre una nueva.
 
 ### 9.10 ✅ Migración del admin sembrado
 

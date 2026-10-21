@@ -76,7 +76,6 @@ const MOCK_FICHA_7722 = {
   general_info: { director: 'Juan Pérez', category: '7. LICEO POLITÉCNICO', adp: 'Si' },
   connectivity: { internet_provider: 'TELSUR', ssid: 'LiceoRed', ssid_password: '[REDACTED]' },
   printers: { owned: [], leased: [] },
-  licenses: [{ name: 'SIGE', email: 'admin@liceo.cl', password: '[REDACTED]' }],
 };
 
 const MOCK_COUNTERPARTS = [{ _id: 'cp1', rbd: '7722', role: 'TI', origin: 'SLEP', name: 'Carlos TI', email: '', phone: '' }];
@@ -229,7 +228,6 @@ describe('INT-01: Flujo completo de usuario autenticado', () => {
 
   it('INT-01-F: La respuesta de la ficha tiene passwords redactados ([REDACTED])', async () => {
     // Verificar que los datos mock simulan la respuesta correcta de BE-05
-    expect(MOCK_FICHA_7722.licenses[0].password).toBe('[REDACTED]');
     expect(MOCK_FICHA_7722.connectivity.ssid_password).toBe('[REDACTED]');
   });
 

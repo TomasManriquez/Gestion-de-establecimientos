@@ -12,7 +12,7 @@ Verifica que:
 import ast
 from pathlib import Path
 from fastapi.testclient import TestClient
-from tests.conftest import ADMIN_USER, seed_users, user_with_password, bearer_for
+from tests.conftest import ADMIN_USER, seed_users, session_headers, user_with_password, bearer_for
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -34,9 +34,12 @@ def test_BE09_users_module_has_exactly_three_files():
 
 
 def test_BE09_auth_does_not_access_users_collection():
+    """`auth` es dueño de `auth_tokens` desde F4 (ADR-012), así que ya puede importar `db_service`;
+    lo que sigue prohibido es tocar la colección `users`: todo acceso a usuarios pasa por `users_service`."""
     for name in ("auth_service.py", "auth_controller.py", "auth_entity.py"):
         path = APP / "auth" / name
-        assert "app.database.database_service" not in _imports(path), f"{name} importa db_service"
+        if name != "auth_service.py":
+            assert "app.database.database_service" not in _imports(path), f"{name} importa db_service"
         tree = ast.parse(path.read_text(encoding="utf-8"))
         collections = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         assert "users" not in collections, f"{name} referencia una colección .users"
@@ -55,9 +58,9 @@ def test_BE09_login_and_me_contract_unchanged(fake_db):
 
     r = client.post("/api/auth/login", json={"username": "admin@slepllanquihue.cl", "password": "una-clave-larga-de-prueba"})
     assert r.status_code == 200
-    assert set(r.json()) == {"access_token", "token_type"} and r.json()["token_type"] == "bearer"
+    assert set(r.json()) == {"expires_in"}                                  # S3: el token va solo en la cookie
 
-    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"})
+    me = client.get("/api/auth/me", headers=session_headers(r))
     assert me.status_code == 200
     body = me.json()
     assert {"username", "full_name", "role"} <= set(body)                   # contrato original
@@ -65,5 +68,5 @@ def test_BE09_login_and_me_contract_unchanged(fake_db):
     assert body["role"] == "admin" and body["full_name"] == "Administrador SLEP"
     assert {"id", "email", "access"} <= set(body)                            # aditivo
 
-    anon = client.get("/api/auth/me")
+    anon = TestClient(app).get("/api/auth/me")                              # cliente sin la cookie de la sesión anterior
     assert anon.status_code == 401 and anon.headers["www-authenticate"] == "Bearer"

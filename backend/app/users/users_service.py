@@ -1,3 +1,5 @@
+import csv
+import io
 import logging
 import math
 import re
@@ -9,24 +11,23 @@ from bson import ObjectId
 from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
+from app.audit.audit_entity import AuditAction, AuditTarget
+from app.audit.audit_service import audit_service, diff
 from app.config import settings
 from app.database.database_service import db_service
 from app.establishments.establishments_service import establishments_service
 from app.platforms.platforms_service import platforms_service
 from app.units.units_entity import HeadCandidate
 from app.units.units_service import units_service
-from app.users.users_entity import (UserAdminUpdate, UserConflict, UserCreate, UserInvalid,
-                                    UserNotFound, UserSelfUpdate, check_mode, normalize_email)
+from app.users.users_entity import (BULK_LIMIT, CSV_COLUMNS, CSV_REQUIRED, BulkRequest, UserAdminUpdate, UserConflict,
+                                    UserCreate, UserCreateUnassigned, UserInvalid, UserNotFound, UserSelfUpdate, check_mode, normalize_email)
 
 logger = logging.getLogger("users")
 
 # `last_activity_at` se escribe como máximo una vez cada tanto por usuario (supuesto A5).
 ACTIVITY_THROTTLE = timedelta(minutes=5)
-# Tope por lote de altas y de operaciones masivas (supuesto A2).
-BULK_MAX_ITEMS = 200
 # Unidad a la que se asigna el admin sembrado (Q4). Si no existe, se usa la raíz.
 BOOTSTRAP_ADMIN_UNIT_CODE = "AF-TI"
-INVITATION_NOT_CONFIGURED = "mail_not_configured"
 
 # Proyección de inclusión del listado: personal_phone y auth_providers quedan fuera por
 # omisión (lista blanca, igual que LISTING_PROJECTION de establecimientos).
@@ -35,6 +36,11 @@ USERS_LISTING_PROJECTION = {
     "is_slep_staff": 1, "unit_id": 1, "rbd": 1, "positions": 1, "status": 1,
     "access": 1, "invitation": 1, "last_login_at": 1, "last_activity_at": 1,
 }
+
+
+# Campos de la persona que se auditan como {campo: [antes, después]}
+AUDITED_FIELDS = ("first_name", "last_name", "email", "personal_phone", "work_extension",
+                  "is_slep_staff", "unit_id", "rbd", "positions")
 
 
 def _utcnow() -> datetime:
@@ -97,6 +103,40 @@ class UsersService:
         doc = await db_service.db.users.find_one(query)
         return _stringify(doc) if doc else None
 
+    @staticmethod
+    def now() -> datetime:
+        return _utcnow()
+
+    async def find_by_google_subject(self, subject: str) -> Optional[dict]:
+        if not isinstance(subject, str) or not subject:
+            return None
+        doc = await db_service.db.users.find_one(
+            {"auth_providers": {"$elemMatch": {"provider": "google", "subject": subject}}})
+        return _stringify(doc) if doc else None
+
+    async def link_google(self, user: dict, subject: str) -> Optional[dict]:
+        """Vincula la cuenta de Google a una cuenta existente y activa a las `invited`. El vínculo es
+        atómico (solo si aún no tiene proveedor `google`); `None` si otro vínculo ganó la carrera o el
+        `subject` ya pertenece a otra cuenta (índice único)."""
+        oid = _oid(user["_id"])
+        now = _utcnow()
+        try:
+            linked = await db_service.db.users.update_one(
+                {"_id": oid, "status": {"$ne": "disabled"}, "auth_providers.provider": {"$ne": "google"}},
+                {"$push": {"auth_providers": {"provider": "google", "subject": subject, "linked_at": now}},
+                 "$set": {"updated_at": now}})
+        except DuplicateKeyError:
+            return None
+        if not linked.modified_count:
+            return None
+        changes = {"auth_provider": [None, "google"]}
+        activated = await db_service.db.users.update_one({"_id": oid, "status": "invited"},
+                                                         {"$set": {"status": "active", "updated_at": now}})
+        if activated.modified_count:
+            changes["status"] = ["invited", "active"]
+        await audit_service.record(None, AuditAction.USER_UPDATE, AuditTarget.USER, str(oid), changes)
+        return await self.find_by_id(str(oid))
+
     async def find_for_session(self, sub: str) -> Optional[dict]:
         """Resuelve el `sub` del JWT: `str(_id)` y, mientras dure la compatibilidad, el username legado."""
         if not isinstance(sub, str) or not sub:
@@ -135,6 +175,7 @@ class UsersService:
                          kind: Optional[str] = None, rbd: Optional[str] = None,
                          position: Optional[str] = None, platform: Optional[str] = None,
                          role: Optional[str] = None, status: Optional[str] = None,
+                         only_ids: Optional[List[str]] = None, assignment: Optional[str] = None,
                          page: int = 1, page_size: int = 100) -> dict:
         query: Dict = {}
         and_clauses: List[dict] = []
@@ -150,6 +191,8 @@ class UsersService:
         if level:
             ids = [ObjectId(i) for i in await units_service.ids_by_level(level)]
             and_clauses.append({"unit_id": {"$in": ids}})
+        if assignment == "unassigned":
+            query["is_slep_staff"] = None          # null o ausente: sin asignar (alta automática, C24)
         if kind == "slep":
             query["is_slep_staff"] = True
         elif kind == "establishment":
@@ -166,6 +209,8 @@ class UsersService:
             query["access.role"] = role
         if status:
             query["status"] = status
+        if only_ids is not None:            # p. ej. «subrogando ahora»: los ids los calcula el controller (ADR-013)
+            and_clauses.append({"_id": {"$in": [o for o in map(_oid, only_ids) if o is not None]}})
         if and_clauses:
             query["$and"] = and_clauses
 
@@ -179,18 +224,24 @@ class UsersService:
     # ══ Alta: UNA sola ruta para alta individual, CSV, bulk y seed (R6) ═════════
     async def create_many(self, items: List[dict], actor_id: Optional[str], dry_run: bool = False,
                           status: str = "invited", local_password_hash: Optional[str] = None,
-                          must_change_password: bool = False, bulk_id: Optional[str] = None) -> dict:
+                          must_change_password: bool = False, bulk_id: Optional[str] = None,
+                          unassigned: bool = False, auth_providers: Optional[List[dict]] = None,
+                          access: Optional[List[dict]] = None,
+                          audit_action: AuditAction = AuditAction.USER_CREATE) -> dict:
         """normalizar -> validar -> resolver referencias en lote -> detectar duplicados
-        (dentro del lote y contra la base) -> insertar. `status` y `local_password_hash` son
-        opciones internas (las usa el bootstrap): ningún body HTTP las puede fijar."""
+        (dentro del lote y contra la base) -> insertar. `status`, `local_password_hash`,
+        `unassigned`, `auth_providers`, `access` y `audit_action` son opciones internas (las usan el
+        bootstrap y el alta automática con Google, C24): ningún body HTTP las puede fijar."""
+        explicit_bulk = bulk_id
         bulk_id = bulk_id or uuid.uuid4().hex
+        audit_bulk = explicit_bulk or (bulk_id if len(items) > 1 else None)   # una alta suelta no es una operación masiva
         results: List[dict] = [{"index": i, "status": "pending", "id": None, "errors": []} for i in range(len(items))]
         parsed: Dict[int, UserCreate] = {}
 
         # 1. Validación (las mismas reglas del modelo para toda ruta de entrada)
         for i, raw in enumerate(items):
             try:
-                parsed[i] = UserCreate.model_validate(raw)
+                parsed[i] = (UserCreateUnassigned if unassigned else UserCreate).model_validate(raw)
             except ValidationError as exc:
                 results[i].update(status="invalid", errors=_validation_errors(exc))
 
@@ -235,7 +286,8 @@ class UsersService:
             if dry_run:
                 results[i]["status"] = "ok"
                 continue
-            doc = self._new_document(u, status, actor, now, local_password_hash, must_change_password)
+            doc = self._new_document(u, status, actor, now, local_password_hash, must_change_password,
+                                     auth_providers, access)
             try:
                 inserted = await db_service.db.users.insert_one(doc)
             except DuplicateKeyError:
@@ -243,14 +295,20 @@ class UsersService:
                     "field": "email", "code": "duplicate", "message": "Ya existe un usuario con ese correo"}])
                 continue
             results[i].update(status="created", id=str(inserted.inserted_id))
+            await audit_service.record(
+                actor_id, audit_action, AuditTarget.USER, str(inserted.inserted_id),
+                {"email": [None, u.email], "is_slep_staff": [None, u.is_slep_staff],
+                 "unit_id": [None, u.unit_id], "rbd": [None, u.rbd], "positions": [None, [p.value if hasattr(p, "value") else p for p in u.positions]]},
+                audit_bulk)
 
         created = sum(1 for r in results if r["status"] in ("created", "ok"))
         return {"bulk_id": bulk_id, "dry_run": dry_run, "total": len(items), "created": created,
-                "failed": len(items) - created, "items": results}
+                "succeeded": created, "failed": len(items) - created, "items": results}
 
     @staticmethod
-    def _new_document(u: UserCreate, status: str, actor, now, password_hash, must_change) -> dict:
-        providers = []
+    def _new_document(u: UserCreate, status: str, actor, now, password_hash, must_change,
+                      auth_providers=None, access=None) -> dict:
+        providers = [dict(p) for p in (auth_providers or [])]
         if password_hash:
             providers.append({"provider": "local", "hashed_password": password_hash,
                               "password_changed_at": None, "must_change_password": must_change})
@@ -259,9 +317,9 @@ class UsersService:
             "personal_phone": u.personal_phone, "work_extension": u.work_extension,
             "is_slep_staff": u.is_slep_staff, "unit_id": _oid(u.unit_id), "rbd": u.rbd,
             "positions": [p.value for p in u.positions],
-            "status": status, "auth_providers": providers, "access": [],
-            # Hasta que `auth` emita invitaciones (F4) nadie envió nada: se dice tal cual.
-            "invitation": ({"sent_at": None, "expires_at": None, "last_error": INVITATION_NOT_CONFIGURED}
+            "status": status, "auth_providers": providers, "access": [dict(a) for a in (access or [])],
+            # Sin intento de envío todavía: `sent` es falso. `auth.send_invitation` lo actualiza.
+            "invitation": ({"sent_at": None, "expires_at": None, "last_error": None}
                            if status == "invited" else None),
             "last_login_at": None, "last_activity_at": None,
             "created_at": now, "created_by": actor, "updated_at": now, "updated_by": actor, "disabled_at": None,
@@ -278,7 +336,7 @@ class UsersService:
         raise UserInvalid(row["errors"])
 
     # ══ Edición ════════════════════════════════════════════════════════════════
-    async def update(self, user_id: str, data: UserAdminUpdate, actor_id: Optional[str]) -> dict:
+    async def update(self, user_id: str, data: UserAdminUpdate, actor_id: Optional[str], bulk_id: Optional[str] = None) -> dict:
         current = await self._load(user_id)
         changes = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
         positions = changes.get("positions")
@@ -320,7 +378,16 @@ class UsersService:
             await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": to_set})
         except DuplicateKeyError:
             raise UserConflict("Ya existe un usuario con ese correo", "duplicate", field="email")
-        return await self.find_by_id(user_id)
+        updated = await self.find_by_id(user_id)
+        await self._audit_changes(actor_id, AuditAction.USER_UPDATE, current, updated, bulk_id=bulk_id)
+        return updated
+
+    async def _audit_changes(self, actor_id, action, current: dict, updated: dict, fields=AUDITED_FIELDS,
+                             bulk_id: Optional[str] = None) -> None:
+        before = _stringify({f: current.get(f) for f in fields})
+        changes = diff(before, {f: updated.get(f) for f in fields}, fields)
+        if changes:
+            await audit_service.record(actor_id, action, AuditTarget.USER, str(current["_id"]), changes, bulk_id)
 
     async def update_self(self, user_id: str, data: UserSelfUpdate) -> dict:
         """C19: solo teléfono y anexo. El tipo `UserSelfUpdate` ya hace imposible tocar otra cosa."""
@@ -330,7 +397,10 @@ class UsersService:
             changes["updated_at"] = _utcnow()
             changes["updated_by"] = current["_id"]
             await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": changes})
-        return await self.find_by_id(user_id)
+        updated = await self.find_by_id(user_id)
+        await self._audit_changes(user_id, AuditAction.USER_UPDATE, current, updated,
+                                  fields=("personal_phone", "work_extension"))
+        return updated
 
     # ══ Estado (soft delete, C9) ═══════════════════════════════════════════════
     async def _count_other_active_iam_admins(self, exclude_id) -> int:
@@ -338,7 +408,7 @@ class UsersService:
             "_id": {"$ne": exclude_id}, "status": "active",
             "access": {"$elemMatch": {"platform_id": "iam", "role": "admin"}}})
 
-    async def disable(self, user_id: str, actor_id: Optional[str]) -> dict:
+    async def disable(self, user_id: str, actor_id: Optional[str], bulk_id: Optional[str] = None) -> dict:
         current = await self._load(user_id)
         if current["status"] == "disabled":
             return await self.find_by_id(user_id)
@@ -349,11 +419,14 @@ class UsersService:
             raise UserConflict("No se puede desactivar al último admin global activo", "last_admin")
         now = _utcnow()
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
-            "status": "disabled", "disabled_at": now, "updated_at": now, "updated_by": _oid(actor_id)}})
+            "status": "disabled", "disabled_at": now, "sessions_revoked_at": now,
+            "updated_at": now, "updated_by": _oid(actor_id)}})
         await units_service.clear_head_for_user(str(current["_id"]))     # Q8
+        await audit_service.record(actor_id, AuditAction.USER_DISABLE, AuditTarget.USER, str(current["_id"]),
+                                   {"status": [current["status"], "disabled"]}, bulk_id)
         return await self.find_by_id(user_id)
 
-    async def enable(self, user_id: str, actor_id: Optional[str]) -> dict:
+    async def enable(self, user_id: str, actor_id: Optional[str], bulk_id: Optional[str] = None) -> dict:
         """Reactiva: `active` si tiene contraseña o Google vinculado; si no, `invited` (A4)."""
         current = await self._load(user_id)
         if current["status"] != "disabled":
@@ -362,10 +435,13 @@ class UsersService:
         now = _utcnow()
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "status": new_status, "disabled_at": None, "updated_at": now, "updated_by": _oid(actor_id)}})
+        await audit_service.record(actor_id, AuditAction.USER_ENABLE, AuditTarget.USER, str(current["_id"]),
+                                   {"status": ["disabled", new_status]}, bulk_id)
         return await self.find_by_id(user_id)
 
     # ══ Accesos por plataforma ═════════════════════════════════════════════════
-    async def set_access(self, user_id: str, platform_id: str, role: str, actor_id: Optional[str]) -> dict:
+    async def set_access(self, user_id: str, platform_id: str, role: str, actor_id: Optional[str],
+                         bulk_id: Optional[str] = None) -> dict:
         current = await self._load(user_id)
         roles = await platforms_service.allowed_roles(platform_id)
         if roles is None:
@@ -378,9 +454,14 @@ class UsersService:
         access = [a for a in current.get("access", []) if a.get("platform_id") != platform_id] + [entry]
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "access": access, "updated_at": now, "updated_by": _oid(actor_id)}})
+        previous = next((a.get("role") for a in current.get("access", []) if a.get("platform_id") == platform_id), None)
+        if previous != role:
+            await audit_service.record(actor_id, AuditAction.ACCESS_GRANT, AuditTarget.USER, str(current["_id"]),
+                                       {"platform_id": platform_id, "role": [previous, role]}, bulk_id)
         return await self.find_by_id(user_id)
 
-    async def revoke_access(self, user_id: str, platform_id: str, actor_id: Optional[str]) -> dict:
+    async def revoke_access(self, user_id: str, platform_id: str, actor_id: Optional[str],
+                            bulk_id: Optional[str] = None) -> dict:
         current = await self._load(user_id)
         if platform_id == "iam" and _is_iam_admin(current) and current["status"] == "active" \
                 and await self._count_other_active_iam_admins(current["_id"]) == 0:
@@ -389,9 +470,162 @@ class UsersService:
         now = _utcnow()
         await db_service.db.users.update_one({"_id": current["_id"]}, {"$set": {
             "access": access, "updated_at": now, "updated_by": _oid(actor_id)}})
+        previous = next((a.get("role") for a in current.get("access", []) if a.get("platform_id") == platform_id), None)
+        if previous is not None:
+            await audit_service.record(actor_id, AuditAction.ACCESS_REVOKE, AuditTarget.USER, str(current["_id"]),
+                                       {"platform_id": platform_id, "role": [previous, None]}, bulk_id)
         return await self.find_by_id(user_id)
 
     # ══ Sesión y credenciales (las usa `auth`, nunca al revés) ═════════════════
+    # ══ Operaciones masivas (E5) ═══════════════════════════════════════════════
+    async def find_many(self, user_ids: List[str]) -> List[dict]:
+        out = []
+        for uid in user_ids:
+            doc = await self.find_by_id(uid)
+            if doc is not None:
+                out.append(doc)
+        return out
+
+    async def bulk(self, request: BulkRequest, actor_id: str) -> dict:
+        """Aplica UNA operación a una lista de usuarios y devuelve el resultado de cada uno.
+
+        Se ejecuta en serie y en el orden recibido, y cada ítem pasa por el mismo método que la
+        operación individual, así que las invariantes (último admin global, auto-desactivación,
+        modo SLEP/establecimiento) se evalúan sobre el estado real a medida que avanza el lote:
+        con dos únicos admins, desactivar a ambos deja al primero en `ok` y al segundo en `last_admin`.
+        Los errores de la operación misma (plataforma o rol inexistente, unidad inactiva) se
+        detectan antes de tocar a nadie y fallan el pedido completo.
+        """
+        op = request.operation
+        if op.op == "assign_unit":
+            if op.unit_id not in await units_service.get_active_ids([op.unit_id]):
+                raise UserInvalid([{"field": "unit_id", "code": "unit_not_found", "message": "La unidad no existe o está inactiva"}])
+        elif op.op in ("grant_access", "revoke_access"):
+            roles = await platforms_service.allowed_roles(op.platform_id)
+            if roles is None:
+                raise UserNotFound(f"Platform {op.platform_id} not found")
+            if op.op == "grant_access" and op.role not in roles:
+                raise UserInvalid([{"field": "role", "code": "invalid_role",
+                                    "message": f"El rol '{op.role}' no existe en la plataforma '{op.platform_id}' (válidos: {', '.join(roles)})"}])
+        bulk_id = uuid.uuid4().hex
+        actions = {
+            "assign_unit": lambda uid: self.update(uid, UserAdminUpdate(unit_id=op.unit_id), actor_id, bulk_id),
+            "grant_access": lambda uid: self.set_access(uid, op.platform_id, op.role, actor_id, bulk_id),
+            "revoke_access": lambda uid: self.revoke_access(uid, op.platform_id, actor_id, bulk_id),
+            "disable": lambda uid: self.disable(uid, actor_id, bulk_id),
+            "enable": lambda uid: self.enable(uid, actor_id, bulk_id),
+        }
+        results: List[dict] = []
+        for i, uid in enumerate(request.user_ids):
+            row = {"index": i, "status": "ok", "id": uid, "errors": []}
+            try:
+                await actions[op.op](uid)
+            except UserNotFound:
+                row.update(status="not_found", id=None if _oid(uid) is None else uid,
+                           errors=[{"field": "id", "code": "not_found", "message": "El usuario no existe"}])
+            except UserConflict as exc:
+                row.update(status={"self_disable": "self", "last_admin": "last_admin"}.get(exc.code, "invalid"),
+                           errors=[{"field": exc.field or "_", "code": exc.code, "message": exc.message}])
+            except UserInvalid as exc:
+                mismatch = any(e.get("code") == "invalid_combination" for e in exc.errors)
+                row.update(status="mode_mismatch" if mismatch else "invalid", errors=exc.errors)
+            results.append(row)
+        ok = sum(1 for r in results if r["status"] == "ok")
+        return {"bulk_id": bulk_id, "dry_run": False, "total": len(results), "created": 0,
+                "succeeded": ok, "failed": len(results) - ok, "items": results}
+
+    # ── CSV → JSON (C10): sin reglas propias, el resultado es el body de `bulk-create` ──────────
+    @staticmethod
+    def _decode_csv(raw: bytes) -> str:
+        if not raw.strip():
+            raise UserInvalid([{"field": "file", "code": "empty_file", "message": "El archivo está vacío"}])
+        if b"\x00" in raw:
+            raise UserInvalid([{"field": "file", "code": "not_csv", "message": "El archivo no es un CSV de texto"}])
+        for encoding in ("utf-8-sig", "cp1252"):        # Excel en español guarda en cp1252
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise UserInvalid([{"field": "file", "code": "bad_encoding", "message": "No se pudo leer la codificación (usa UTF-8)"}])
+
+    async def parse_csv(self, raw: bytes) -> List[dict]:
+        """Devuelve `[{row, data, errors}]`. Los errores de archivo (cabeceras, tamaño) lanzan `UserInvalid`;
+        los de cada fila quedan en su `errors`."""
+        text = self._decode_csv(raw)
+        first_line = text.split("\n", 1)[0]
+        delimiter = ";" if first_line.count(";") > first_line.count(",") else ","
+        records = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        header = [h.strip().lower() for h in (records[0] if records else [])]
+        if len(set(header)) != len(header):
+            raise UserInvalid([{"field": "file", "code": "duplicate_columns", "message": "Hay columnas repetidas en la cabecera"}])
+        unknown = [h for h in header if h not in CSV_COLUMNS]
+        if unknown:
+            raise UserInvalid([{"field": "file", "code": "unknown_columns",
+                                "message": f"Columnas desconocidas: {', '.join(unknown)}. Válidas: {', '.join(CSV_COLUMNS)}"}])
+        missing = [c for c in CSV_REQUIRED if c not in header]
+        if missing:
+            raise UserInvalid([{"field": "file", "code": "missing_columns", "message": f"Faltan columnas obligatorias: {', '.join(missing)}"}])
+        body = [(n, rec) for n, rec in enumerate(records[1:], start=2) if any(cell.strip() for cell in rec)]
+        if not body:
+            raise UserInvalid([{"field": "file", "code": "empty_file", "message": "El archivo no tiene filas de datos"}])
+        if len(body) > BULK_LIMIT:
+            raise UserInvalid([{"field": "file", "code": "too_many_rows",
+                                "message": f"El archivo tiene {len(body)} filas; el máximo es {BULK_LIMIT}"}])
+        units_by_code = {u["code"]: u["_id"] for u in await units_service.find_all(status="active")}
+        rows = []
+        for number, rec in body:
+            errors: List[dict] = []
+            if len(rec) > len(header):
+                errors.append({"field": "_", "code": "too_many_columns", "message": "La fila tiene más celdas que la cabecera"})
+            cells = {name: (rec[i].strip() if i < len(rec) else "") for i, name in enumerate(header)}
+            unit_code = cells.get("unit_code", "").upper()
+            rbd = cells.get("rbd", "")
+            unit_id = None
+            if unit_code:
+                unit_id = units_by_code.get(unit_code)
+                if unit_id is None:
+                    errors.append({"field": "unit_code", "code": "unit_not_found",
+                                   "message": f"La unidad «{unit_code}» no existe o está inactiva"})
+            if unit_code and rbd:
+                errors.append({"field": "_", "code": "invalid_combination", "message": "Indica unit_code o rbd, no ambos"})
+            elif not unit_code and not rbd:
+                errors.append({"field": "_", "code": "invalid_combination",
+                               "message": "Cada fila necesita unit_code (funcionario SLEP) o rbd (establecimiento)"})
+            positions = [p.strip().upper() for p in cells.get("positions", "").split("|") if p.strip()]
+            rows.append({"row": number, "errors": errors, "data": {
+                "email": cells.get("email", ""), "first_name": cells.get("first_name", ""), "last_name": cells.get("last_name", ""),
+                "personal_phone": cells.get("personal_phone") or None, "work_extension": cells.get("work_extension") or None,
+                "is_slep_staff": bool(unit_code), "unit_id": unit_id, "rbd": rbd or None, "positions": positions}})
+        return rows
+
+    async def preview_import(self, raw: bytes, actor_id: str) -> dict:
+        """Vista previa del CSV: el mismo pipeline del alta en modo `dry_run`, sin escribir nada."""
+        rows = await self.parse_csv(raw)
+        candidates = [(i, r) for i, r in enumerate(rows) if not r["errors"]]
+        if candidates:
+            result = await self.create_many([r["data"] for _, r in candidates], actor_id, dry_run=True)
+            first_row: Dict[str, int] = {}
+            for _, r in candidates:
+                first_row.setdefault(normalize_email(r["data"]["email"]), r["row"])
+            for (i, row), item in zip(candidates, result["items"]):
+                for err in item["errors"]:
+                    if err["code"] == "duplicate_in_batch":
+                        # El índice del lote no es la fila del archivo (las filas ya inválidas no entran): se reescribe.
+                        err = {**err, "message": f"Correo repetido: ya aparece en la fila {first_row[normalize_email(row['data']['email'])]}"}
+                    rows[i]["errors"].append(err)
+        valid = sum(1 for r in rows if not r["errors"])
+        return {"total": len(rows), "valid": valid, "invalid": len(rows) - valid, "rows": rows}
+
+    async def set_invitation(self, user_id: str, sent_at: Optional[datetime], expires_at: Optional[datetime],
+                             last_error: Optional[str]) -> None:
+        """Resultado del último envío de la invitación (lo escribe `auth.send_invitation`)."""
+        await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {
+            "invitation": {"sent_at": sent_at, "expires_at": expires_at, "last_error": last_error}}})
+
+    async def revoke_sessions(self, user_id: str) -> None:
+        """Corta todas las sesiones emitidas hasta ahora (`sessions_revoked_at`, SEC-3)."""
+        await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {"sessions_revoked_at": _utcnow()}})
+
     async def touch_login(self, user_id: str) -> None:
         await db_service.db.users.update_one({"_id": _oid(user_id)}, {"$set": {"last_login_at": _utcnow()}})
 

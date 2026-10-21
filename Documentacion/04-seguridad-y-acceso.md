@@ -1,10 +1,10 @@
 # 04 · Seguridad y control de acceso
 
-> **Estado (2026-10-02, rama `feature/usuarios-f3`).** Las secciones 1 a 8 describen el código
-> **tal como queda tras la fase F3** (identidad en el módulo `users`, `require_access`, sesión
-> revocable, política de contraseñas). La §9 conserva el diseño completo y marca con ✅ lo ya
-> implementado y con 🧭 lo que sigue pendiente (primer acceso por correo, Google, auditoría y
-> límites de intentos). La §10 es el marco de interconexión (F7), solo diseño.
+> **Estado (2026-10-09, rama `feature/usuarios-f4`).** Las secciones 1 a 8 describen el código
+> **tal como queda tras las fases F3 y F4** (identidad en el módulo `users`, `require_access`, sesión
+> revocable, política de contraseñas, primer acceso por enlace, auditoría y límite de intentos). La §9
+> conserva el diseño completo y marca con ✅ lo implementado y con 🧭 lo pendiente (F7). El login con Google (F6) está implementado.
+> La §10 es el marco de interconexión (F7), solo diseño.
 
 ---
 
@@ -30,10 +30,10 @@ sequenceDiagram
     else válidas
         AS->>US: touch_login
         AC->>AS: create_access_token({sub: str(_id), role, iat, exp})
-        AC-->>C: 200 {access_token, token_type}
+        AC-->>C: 200 {expires_in} + Set-Cookie slep_session (HttpOnly, SameSite=Strict)
     end
 
-    C->>AC: GET /api/... + Authorization: Bearer TOKEN
+    C->>AC: GET /api/... + cookie slep_session (o Authorization: Bearer)
     AC->>AS: Depends(require_access(plataforma, roles))
     AS->>AS: jwt.decode (firma y exp), sub malformado -> 401
     AS->>US: find_for_session(sub)
@@ -49,7 +49,7 @@ lo rechaza antes con 422). Si el usuario no existe se verifica contra un hash de
 igualar el tiempo de respuesta.
 
 **Emisión:** payload `{sub: str(_id), role, iat, exp}` firmado HS256 con `settings.JWT_SECRET`
-(sin default, T9). Expiración por defecto 180 minutos. `role` va en el token por compatibilidad
+(sin default, T9; mínimo 32 caracteres y sin valores de ejemplo ni públicos, SEC-1, `test_BE51_*`). Expiración por defecto 180 minutos. `role` va en el token por compatibilidad
 pero **no se usa nunca para autorizar**.
 
 **Verificación (`get_current_user`):** decodifica, extrae `sub` y **vuelve a leer el usuario**.
@@ -61,25 +61,36 @@ Esa relectura es la decisión de diseño más importante del módulo:
 > en un escenario de alto tráfico sería el primer candidato a caché, reintroduciendo
 > conscientemente una ventana de propagación.
 
-Devuelve `401` si: firma o `exp` inválidos, `sub` ausente o malformado (un objeto de operadores
-da `401`, no `500`), usuario inexistente, usuario que **no está `active`** (`invited` o
-`disabled`), o token emitido **antes del último cambio de contraseña** (`iat` menor que
-`password_changed_at`, comparado al segundo). Todo fallo es el mismo `401` con
+Devuelve `401` si: firma o `exp` inválidos, falta alguno de los claims `exp`, `iat` o `sub`
+(`options={"require": [...]}`, SEC-2; el algoritmo está fijado a HS256, así que `alg: none` y HS512
+se rechazan), `sub` ausente o malformado (un objeto de operadores da `401`, no `500`), usuario
+inexistente, usuario que **no está `active`** (`invited` o `disabled`), token emitido **antes del
+último cambio de contraseña** (`iat` menor que `password_changed_at`, comparado al segundo) o
+token emitido **hasta el instante de la última revocación** (`iat <= sessions_revoked_at`, §9.4). Todo fallo es el mismo `401` con
 `WWW-Authenticate: Bearer`; no se distingue el motivo hacia afuera.
 
 El `sub` aceptado es `str(_id)`. Mientras dure la compatibilidad también se acepta el username
 legado del admin sembrado (`sub = "admin"`). Se retira una versión después de F3.
 
-**Lado cliente** (`frontend/src/App.jsx:26-44`, `Login.jsx:36-40`): el token se guarda en
-`localStorage`, se instala como `axios.defaults.headers.common['Authorization']`, y un
-interceptor de respuesta cierra la sesión ante **cualquier `401`**. Por eso un endpoint que
-valida una contraseña (cambio propio) responde `400` y nunca `401` ante la clave actual
-errónea. Al montar la app, si hay token se llama `GET /api/auth/me`.
+**Cookie de sesión (✅ F6 S3, ADR-016).** El JWT se entrega **solo** en `Set-Cookie: slep_session`
+(`HttpOnly`, `SameSite=Strict`, `Path=/api`, `Max-Age` = vigencia, `Secure` si `PUBLIC_BASE_URL` es https) y
+nunca en el cuerpo: un XSS ya no tiene un token que robar (`test_BE59_*`, `test_FE18_*`). `_issue_token` sigue
+siendo el único punto de emisión. `get_current_user` toma el token de la cabecera `Authorization` (clientes no
+navegador; tiene prioridad) o, si no hay, de la cookie. **Con cookie**, toda petición que no sea GET/HEAD/OPTIONS
+exige `Origin == PUBLIC_BASE_URL` (si no, `403 untrusted_origin`): `SameSite=Strict` no frena a un sitio
+*hermano* (otro subdominio del mismo dominio registrable cuenta como «same-site»); el `Origin` sí. La cabecera
+Bearer no es una credencial ambiental, así que no pasa por ese control. No hay CORS (SEC-5), por lo que
+ningún origen ajeno puede leer respuestas.
 
-> 🔸 **BRECHA:** el token vive en `localStorage`, accesible desde JavaScript, por lo que
-> cualquier XSS en la SPA lo exfiltra. La alternativa habitual (cookie `HttpOnly` + `SameSite`)
-> exigiría CSRF tokens y cambiar el esquema Bearer. Es una decisión consciente de simplicidad,
-> pero no está registrada como tal en ningún ADR.
+**Lado cliente** (`App.jsx`, `Login.jsx`, `AppLayout.jsx`): no se guarda nada en el navegador. Al montar,
+`App` llama `GET /api/auth/me`; un `401` significa «sin sesión». Un interceptor de respuesta cierra la sesión de
+la vista ante **cualquier `401`**, por eso un endpoint que valida una contraseña (cambio propio) responde `400`
+y nunca `401` ante la clave actual errónea. `App` purga el `token` que versiones anteriores dejaron en
+`localStorage`. El cierre de sesión llama `POST /api/auth/logout`, que revoca las sesiones y borra la cookie.
+
+> ✅ **RESUELTO (F6 S3):** la brecha «token en `localStorage`» (robo por XSS) quedó cerrada. Siguen
+> abiertos los límites de §7: la CSP está en `Report-Only` y un XSS aún podría *usar* la sesión desde la
+> propia página (hacer peticiones como la persona mientras dure la visita), aunque ya no puede *llevarse* el token.
 
 ---
 
@@ -107,7 +118,7 @@ Cada usuario tiene `access[]`: una entrada `{platform_id, role}` por plataforma 
 | `GET /`, `/docs`, `/redoc`, `/openapi.json`, `POST /api/auth/login`, `/login-form`, `/logout`, `GET /api/auth/password-policy` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `GET /api/auth/me`, `GET`/`PATCH /api/users/me`, `POST /api/auth/password`, `GET /api/units*` | ❌ 401 | ✅ | ✅ | ✅ | ✅ |
 | `GET` de establecimientos, contrapartes, métricas y analytics | ❌ 401 | ✅ | ✅ | ✅ | solo si además tiene rol en `datos` |
-| Detalle de establecimiento: `licenses[].password` y `ssid_password` | — | ❌ `[REDACTED]` | ✅ en claro | ✅ en claro | según su rol en `datos` |
+| Detalle de establecimiento: `connectivity.ssid_password` | — | ❌ `[REDACTED]` | ✅ en claro | ✅ en claro | según su rol en `datos` |
 | `PUT /api/establishments/{rbd}`, `POST`/`PUT` contrapartes, `PUT` métricas | ❌ 401 | ❌ 403 | ✅ | ✅ | según su rol en `datos` |
 | `DELETE /api/counterparts/{id}` | ❌ 401 | ❌ 403 | ❌ 403 | ✅ | según su rol en `datos` |
 | `/api/users/*` (salvo `/me`), escritura en `/api/units/*`, `/api/platforms/*` | ❌ 401 | ❌ 403 | ❌ 403 | ❌ 403 | ✅ |
@@ -117,7 +128,7 @@ todas las rutas de datos, y `GET /api/auth/me` le devuelve `role: "none"`. Un `r
 en `access[]` no concede nada. Ejecutada por HTTP real en `test_INT03_role_matrix_over_http`.
 
 > **El editor ve credenciales en claro (C20) — confirmado por el usuario el 2026-10-06.** Antes
-> solo las veía el admin. Las credenciales de licencias y del WiFi de los establecimientos son de
+> solo las veía el admin. La credencial del WiFi de los establecimientos es de
 > uso público dentro de la institución, así que el riesgo se acepta de forma explícita. Si algún día
 > dejaran de serlo, `SENSITIVE_ROLES` en `auth_entity.py` pasa a `{admin}` y el resto de las
 > garantías (incluida la protección de la sobrescritura, §3.2) sigue valiendo.
@@ -137,7 +148,7 @@ probable al modificar el listado o el detalle.
 
 `LISTING_PROJECTION` (`establishments_service.py:6-17`) es una proyección **de inclusión**:
 enumera los 10 campos que se leen y MongoDB descarta todo lo demás en el servidor de base de
-datos. `connectivity`, `printers` y `licenses` no viajan siquiera dentro del proceso Python.
+datos. `connectivity` y `printers` no viajan siquiera dentro del proceso Python.
 
 Esta protección es **por lista blanca**, y eso importa: un campo sensible nuevo en el documento
 queda protegido en el listado **por omisión**. Es el mecanismo robusto de los dos.
@@ -147,8 +158,7 @@ queda protegido en el listado **por omisión**. Es el mecanismo robusto de los d
 `find_by_rbd(rbd, include_sensitive=False)` (`establishments_service.py:84-95`) sustituye por
 la cadena literal `"[REDACTED]"`:
 
-- cada `licenses[].password` no vacío;
-- `connectivity.ssid_password` si no está vacío.
+- `connectivity.ssid_password` si no está vacío. (`licenses[].password` se redactaba también; el campo se retiró en F6, N15.)
 
 El controller decide el booleano (`establishments_controller.py`, `include_sensitive = ctx.role in
 SENSITIVE_ROLES`): solo `viewer` recibe `[REDACTED]`. El service nunca sabe qué es un rol; el
@@ -159,7 +169,7 @@ modo que su respuesta tampoco devuelve credenciales a quien no corresponde (cier
 **El marcador `[REDACTED]` nunca se persiste.** Un cliente que recibió el detalle redactado y lo
 reenvía completo en el `PUT` (así lo hace `EditFicha.jsx:35` y `:173-175`) no destruye las
 credenciales: `_resolve_redacted_markers` conserva el valor almacenado si hay uno equivalente
-(misma posición y mismo `name` en las licencias; el `ssid_password` existente) y responde `422`
+(el `ssid_password` existente) y responde `422`
 si no lo hay. Verificado por `test_BE13_*` y `test_INT04_*`.
 
 Esta protección es **por lista negra**, con dos entradas literales. Un campo sensible nuevo
@@ -171,8 +181,8 @@ Esta protección es **por lista negra**, con dos entradas literales. Un campo se
 > el valor real queda expuesto. Lo robusto sería no leerlo (proyección de exclusión) cuando no
 > se necesita.
 >
-> 🔸 **BRECHA:** `licenses[].email` — el usuario de cada credencial externa — **no se redacta**.
-> Media credencial viaja completa a cualquier autenticado.
+> ✅ **RESUELTO (N15, F6):** `licenses` se retiró. Ya no hay `licenses[].email` sin redactar ni contraseñas
+> de plataformas externas guardadas por la aplicación.
 
 ---
 
@@ -184,15 +194,13 @@ rompa está cambiando una garantía de seguridad, no un detalle de implementaci�
 | Invariante | Test que lo protege | Qué se rompe si se viola |
 |---|---|---|
 | `LISTING_PROJECTION` existe como constante exportable de `establishments_service` | `test_BE03_listing_projection_constant_exists` | Cualquier refactor que la haga local o inline |
-| La proyección **excluye** `licenses`, `connectivity`, `printers` | `test_BE03_listing_projection_excludes_sensitive_fields` | Agregar cualquiera de los tres a la proyección "para que la UI no pida el detalle" |
+| La proyección **excluye** `licenses` (retirado), `connectivity`, `printers` | `test_BE03_listing_projection_excludes_sensitive_fields` | Agregar cualquiera de los tres a la proyección "para que la UI no pida el detalle" |
 | La proyección **incluye** los campos que el directorio necesita | `test_BE03_listing_projection_includes_required_fields` | Quitar un campo del listado y romper la tabla del frontend |
 | `find_all()` pasa efectivamente la proyección al cursor | `test_BE03_find_all_applies_projection_to_cursor` | Declarar la constante y olvidar usarla |
 | Ningún documento del listado tiene `licenses` | `test_BE03_find_all_result_has_no_licenses_field` | Regresión del anterior, verificada sobre el resultado |
 | `find_by_rbd()` **no** usa la proyección del listado | `test_BE06_find_by_rbd_returns_full_document_not_projected` | "Unificar" ambas lecturas en una sola con proyección — vaciaría la ficha |
 | El payload del listado completo pesa < 50 KB | `test_BE03` (docstring) | Reintroducir bloques pesados en el listado |
 | `find_by_rbd()` acepta `include_sensitive` | `test_BE05_find_by_rbd_accepts_include_sensitive_param` | Cambiar la firma sin adecuar el controller |
-| No-admin recibe `licenses[].password == "[REDACTED]"` | `test_BE05_non_admin_receives_redacted_license_password` | Quitar o invertir la redacción |
-| Admin recibe la contraseña real | `test_BE05_admin_receives_real_license_password` | Redactar siempre (rompería la función de la ficha para TI) |
 | No-admin recibe `ssid_password == "[REDACTED]"` | `test_BE05_non_admin_receives_redacted_ssid_password` | Olvidar el segundo campo al refactorizar |
 | Admin recibe el `ssid_password` real | `test_BE05_admin_receives_real_ssid_password` | — |
 | El controller pasa `include_sensitive=True` solo para admin | `test_BE05_controller_passes_include_sensitive_true_for_admin` / `..._false_for_viewer` | Mover la decisión de rol al service, o hardcodearla |
@@ -219,27 +227,12 @@ comportamiento de MongoDB ni la existencia física de los índices.
 
 ## 5. CORS
 
-`main.py:35-41`:
-
-```python
-allow_origins=["*"]
-allow_credentials=True
-allow_methods=["*"]
-allow_headers=["*"]
-```
-
-En la práctica el frontend propio no depende de esto: va por rutas relativas detrás del mismo
-origen (Nginx o el proxy de Vite), así que nunca hace una petición cross-origin.
-`allow_origins=["*"]` afecta solo a clientes servidos desde otro origen.
-
-> 🔸 **BRECHA:** `allow_origins=["*"]` junto a `allow_credentials=True` es una combinación que
-> la especificación CORS prohíbe; los navegadores la rechazan y el middleware de Starlette
-> responde con el origen reflejado. El efecto neto es **permitir credenciales desde cualquier
-> origen**. El propio código lo admite en un comentario (`main.py:37`:
-> `# In production, specify exact domains`). Como el esquema es Bearer y el token va en una
-> cabecera que el atacante no puede inyectar desde otro origen sin XSS, el riesgo práctico es
-> menor que el aparente — pero es una configuración a corregir y una lista de orígenes por
-> variable de entorno es la forma esperada.
+> ✅ **RESUELTO (SEC-5, F6):** el backend ya **no monta `CORSMiddleware`** (`main.py`). El
+> frontend va por rutas relativas detrás del mismo origen (Nginx o el proxy de Vite, ADR-008), así
+> que ningún origen ajeno necesita leer respuestas: el navegador las bloquea (`test_BE54_*`).
+> `Retry-After` sigue siendo legible desde el mismo origen. Si alguna vez se sirve el frontend
+> desde otro origen, hay que agregar una **lista explícita** de orígenes por variable de entorno,
+> nunca `*` con credenciales.
 
 ---
 
@@ -253,7 +246,7 @@ la variable (`ConfigError`). `repr(settings)` no vuelca valores.
 |---|---|---|
 | `MONGODB_URL` | `mongodb://localhost:27017` | — (falla ruidosamente al conectar) |
 | `DATABASE_NAME` | `slep_llanquihue` | — |
-| `JWT_SECRET` | **ninguno** | obligatoria, no vacía |
+| `JWT_SECRET` | **ninguno** | obligatoria, ≥ 32 caracteres, distinta de los valores públicos del repositorio (SEC-1) |
 | `ADMIN_PASSWORD` | **ninguno** | obligatoria; solo se usa para crear el admin con la base vacía |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `180` | entero ≥ 1 |
 | `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | obligatoria; debe pertenecer a `ALLOWED_EMAIL_DOMAINS` |
@@ -266,10 +259,12 @@ la variable (`ConfigError`). `repr(settings)` no vuelca valores.
 > queda ningún secreto del repositorio en `config.py` (`test_BE14_jwt_secret_and_admin_password_have_no_default`).
 > `Settings` valida en rango y falla con un mensaje útil (ya no un `ValueError` en el import).
 >
-> 🔸 **BRECHA:** `docker-compose.yml` (desarrollo) sigue fijando `JWT_SECRET` y `ADMIN_PASSWORD`
-> como literales para poder levantar el entorno. Son valores solo de desarrollo, comentados como
-> tales, pero un despliegue que copie ese archivo los heredaría. Producción no los tiene: usa
-> `${JWT_SECRET}` y `${ADMIN_PASSWORD}` del `.env`.
+> ✅ **RESUELTO (SEC-1, F6):** `docker-compose.yml` (desarrollo) ya no trae secretos literales: lee
+> `${JWT_SECRET}` y `${ADMIN_PASSWORD}` del `.env` de la raíz y no levanta sin ellos. `Settings`
+> exige `JWT_SECRET` de al menos 32 caracteres y rechaza los valores que estuvieron versionados
+> (guardados como sha256 para no reescribirlos en el código) y los marcadores `CAMBIA_ESTO…` de la
+> plantilla, también para `ADMIN_PASSWORD` (`test_BE51_*`). Los valores legados siguen en el
+> historial de git: **cualquier despliegue que los haya usado debe rotarlos**.
 >
 > 🔸 **BRECHA:** para `/docs` y `/openapi.json` públicos, ver §7.
 
@@ -289,17 +284,20 @@ siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATA
 |---|---|
 | TLS | Fuera del repositorio. Nginx escucha en `:80` y se publica en `127.0.0.1:8080` |
 | MongoDB en producción | No publicada al host; auth root habilitada |
-| Rate limiting | **No existe** — el login admite intentos ilimitados |
-| Bloqueo por intentos fallidos | **No existe** |
-| Auditoría de accesos | **No existe** — ningún registro de quién leyó o modificó qué |
-| Validación de entrada | Pydantic con `extra="forbid"` y tipos escalares en toda la feature de usuarios (`test_INT08_*`). En establecimientos, `$regex` sin escapar (D5, ver `03` §3.4); en la búsqueda de usuarios sí se escapa con `re.escape` |
-| Cabeceras de seguridad (CSP, HSTS, X-Frame-Options) | **No configuradas** en `nginx.conf` |
+| Rate limiting | ✅ Login, canje de enlaces, reenvío y restablecimiento (§9.5). Sin Redis: colección `rate_limits` con TTL |
+| Bloqueo por intentos fallidos | **Deliberadamente no hay bloqueo de cuenta**: el límite es por (cuenta + IP), para que un tercero no pueda dejar inutilizable la cuenta de otro |
+| Auditoría de cambios | ✅ `audit_log` de solo agregado: quién cambió qué en usuarios, accesos, unidades, plataformas y subrogancias. **Las lecturas no se auditan** (ADR-014) |
+| Validación de entrada | Pydantic con `extra="forbid"` y tipos escalares en toda la feature de usuarios (`test_INT08_*`). Los filtros de texto de establecimientos y la búsqueda de usuarios escapan el input con `re.escape` (D5 cerrada en F6, `test_INT10_*`) |
+| Cabeceras de seguridad | ✅ (SEC-6, `test_BE55_*`) `nginx.conf` define `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` y una **CSP en modo `Report-Only`** (pasa a enforzada cuando se verifique en el navegador sin violaciones). **HSTS no va en este nginx** (escucha en `:80`, el TLS termina afuera): debe ponerlo el terminador TLS (`07` §5.3) |
 | `/openapi.json`, `/docs` | **Públicos** — exponen el esquema completo a cualquiera |
 | Secretos en el repositorio | `establishments.json` y los `.xlsx`/`.json` de `Documentacion/` están git-ignored. `config.py` ya no contiene ningún secreto (D2 resuelta); `docker-compose.yml` de desarrollo sí tiene valores literales solo-desarrollo |
 
-> 🔸 **BRECHA:** sin rate limiting ni bloqueo, `POST /api/auth/login` admite fuerza bruta
-> ilimitada. El default `admin123` ya no existe (D2), pero el límite de intentos sigue pendiente:
-> es la épica de endurecimiento de la feature (ADR-014, F4).
+> ✅ **Cerrado en F4:** el login ya no admite fuerza bruta ilimitada (5 fallos por cuenta e IP, 30 por IP, en
+> 15 minutos; `429` con `Retry-After`). Queda una condición operativa: **la IP real del cliente debe llegar
+> al backend**. nginx la deja en `X-Forwarded-For` y Gunicorn la aplica con `--forwarded-allow-ips`, pero
+> **hay un proxy del host delante** (`127.0.0.1:8080`) cuya configuración no está en el repositorio: si no
+> reenvía `X-Forwarded-For`, todas las peticiones parecerían venir de una misma IP y el límite por IP se
+> compartiría entre todos. Verificarlo en el primer despliegue (`07` §7).
 
 ---
 
@@ -318,12 +316,12 @@ siete variables críticas (`MONGO_ROOT_*`, `JWT_SECRET`, `ADMIN_PASSWORD`, `DATA
 
 ---
 
-## 9. 🧭 DISEÑO F2: modelo de acceso por plataforma
+## 9. Modelo de acceso por plataforma (✅ F3, F4 y F6)
 
-> **Estado por subsección.** ✅ Implementado y verificado en F3: 9.1 (flujo, sin las partes de
-> correo y Google), 9.2, 9.3, 9.4 y de 9.5 la política de contraseñas, el cambio propio y el
-> bootstrap del admin. 🧭 Pendiente: de 9.5 la invitación y el restablecimiento por correo (F4);
-> 9.6 login con Google (F6); y la auditoría y el rate limiting de ADR-014 (F4).
+> **Estado por subsección.** ✅ Implementado y verificado: 9.1 (flujo, sin la parte de Google), 9.2, 9.3,
+> 9.4, 9.5 completa (F3: política, cambio propio y bootstrap; F4: invitación, reenvío, restablecimiento y
+> canje por enlace, rate limiting), 9.6 (login con Google y alta automática, F6, ADR-015), 9.7 y 9.8. La
+> auditoría de ADR-014 también (F4).
 > Decisiones: ADR-009 (acceso y roles), ADR-012 (primer acceso),
 > ADR-013 (dependencias) y ADR-014 (auditoría y límites) en `06`. Modelo de datos en `02` §9;
 > contrato en `03` §8. **Documento obligatorio antes de tocar `auth/`:** F3 y F6 tocan un punto
@@ -348,9 +346,9 @@ sequenceDiagram
     AS->>AS: status == active, bcrypt.checkpw sobre el proveedor local
     AS-->>AC: usuario | None
     AC->>AS: create_access_token({sub: str(_id), iat, exp})
-    AC-->>C: 200 {access_token, token_type}
+    AC-->>C: 200 {expires_in} + Set-Cookie slep_session
 
-    C->>AC: GET /api/establishments/7722 + Bearer
+    C->>AC: GET /api/establishments/7722 + cookie
     AC->>AS: Depends(require_access("datos", {admin, editor, viewer}))
     AS->>AS: jwt.decode (firma, exp)
     AS->>US: get(sub)
@@ -388,7 +386,7 @@ editar) y `viewer` (solo ver); `iam` solo tiene `admin`. Reemplaza la matriz de 
 | Operación en `datos` | `viewer` | `editor` | `admin` |
 |---|---|---|---|
 | `GET` de establecimientos, contrapartes, métricas y analytics | ✅ | ✅ | ✅ |
-| Ver `licenses[].password` y `ssid_password` en claro | ❌ redactado | ✅ | ✅ |
+| Ver `ssid_password` en claro | ❌ redactado | ✅ | ✅ |
 | `PUT` / `POST` de ficha, contrapartes y métricas | ❌ `403` | ✅ | ✅ |
 | `DELETE /api/counterparts/{id}` | ❌ `403` | ❌ `403` | ✅ |
 | `/api/users/*` (salvo `/me`), escritura en `/api/units/*` y `/api/platforms/*`, `/api/audit` | solo con `iam/admin` | solo con `iam/admin` | solo con `iam/admin` |
@@ -397,7 +395,7 @@ editar) y `viewer` (solo ver); `iam` solo tiene `admin`. Reemplaza la matriz de 
 **`datos/admin` no es `iam/admin`**: separación de funciones (C12). **Sin acceso a `datos` ⇒ `403`**
 en todas las rutas de datos, aunque el usuario esté autenticado.
 
-> ⚠️ **Amplía quién ve secretos.** Hoy solo el admin ve `licenses[].password` y `ssid_password`.
+> ⚠️ **Amplía quién ve secretos.** Hoy solo el admin ve `ssid_password`.
 > Con esta matriz también los ve el `editor` (lectura confirmada de la respuesta N10). Si esa
 > lectura fuera errónea, `include_sensitive` queda solo para `admin` y la protección contra la
 > sobrescritura de secretos redactados (9.7) deja de ser inalcanzable solo por diseño.
@@ -411,6 +409,14 @@ en todas las rutas de datos, aunque el usuario esté autenticado.
   usuario; la comparación se hace truncada al segundo para no rechazar el token emitido en el
   mismo segundo del cambio. Cambiar o restablecer la contraseña cierra todas las sesiones previas.
   El cambio propio devuelve un token nuevo para que la sesión actual continúe.
+- **Revocación sin estado (SEC-3):** `users.sessions_revoked_at` (ausente = sin corte, no necesita
+  migración). Se rechaza el token con `iat <= sessions_revoked_at` (aquí el segundo del corte
+  también se invalida, a diferencia de la contraseña: un logout inmediato al login debe cortar ese
+  token). Lo fijan `POST /api/auth/logout` y la **desactivación**; reactivar a la persona **no**
+  revive los tokens anteriores. Restablecer o cambiar la contraseña ya corta por
+  `password_changed_at`. **El logout corta todas las sesiones de la persona** (todos sus
+  dispositivos): es la forma sin estado, no hay lista de tokens. Sirve también a las cuentas de
+  Google, que no tienen `password_changed_at` (`test_BE53_*`).
 - Un usuario `disabled` o `invited` con token vigente recibe `401` en la siguiente request.
 - Todo fallo de autenticación sigue siendo el mismo `401` con `WWW-Authenticate: Bearer`.
 - `last_login_at` se escribe en cada login; `last_activity_at` como máximo cada 5 minutos por
@@ -426,7 +432,22 @@ en todas las rutas de datos, aunque el usuario esté autenticado.
   atomicidad del canje: ADR-012 y `02` §9.7. Todo fallo de canje responde igual, sin distinguir
   usado, vencido o inexistente.
 - **Restablecer** (solo `iam/admin`) usa el mismo mecanismo con `purpose: reset`. El admin nunca
-  ve ni define la contraseña.
+  ve ni define la contraseña. El enlace anterior sigue sirviendo hasta que se canjee el nuevo; al canjearlo
+  se fija `password_changed_at` y **se cierran todas las sesiones abiertas** (`test_BE46_*`, y verificado
+  contra MongoDB real).
+- **Enlaces (ADR-012):** el token va en el fragmento y el enlace se arma con `PUBLIC_BASE_URL`, nunca con la
+  cabecera `Host` (`test_BE46_link_uses_public_base_url_not_the_request_host`). Usado, vencido, inexistente o de
+  un usuario que ya no está en el estado esperado devuelven **el mismo `400`**. Una contraseña que incumple la
+  política da `422` y no consume el enlace. No hay ningún endpoint que envíe un correo arbitrario.
+- **Límites de intentos (ADR-014).** Ventana fija de 15 min salvo los envíos (1 h). Login: **5 fallos por
+  (cuenta + IP)** y **30 por IP**; el acierto limpia el contador de la cuenta. Canje de enlaces: 10 fallos por
+  IP. Reenvío y restablecimiento: 5 por usuario destinatario y 60 por administrador. Responde `429` con
+  `Retry-After` y se evalúa **antes** de verificar la contraseña (un bloqueado no paga bcrypt). Cuenta
+  inexistente, desactivada o con clave errónea cuentan y responden igual. La IP sale de `request.client`
+  (nunca de la cabecera a mano). Si `rate_limits` falla, **el limitador no bloquea** (fail-open) y deja un
+  `ERROR` en el log: la autenticación depende de esa misma base.
+- **Auditoría (ADR-014).** Ver `02` §9.9. Si la escritura del registro falla, el cambio **no** se revierte:
+  queda un `CRITICAL` y la respuesta lleva `X-Audit-Status: failed`.
 - **Política (variables de entorno, C17).** `PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH` y
   `PASSWORD_REQUIRE_CHAR_CLASSES` (0 a 4); un valor fuera de rango impide el arranque.
   Los defaults siguen **NIST SP 800-63B-4** (rev. 4, 26-ago-2025), §3.1.1.2: mínimo **15**
@@ -442,16 +463,110 @@ en todas las rutas de datos, aunque el usuario esté autenticado.
 - **Admin sembrado:** `BOOTSTRAP_ADMIN_EMAIL` obligatoria y sin default; con la base vacía, la
   contraseña inicial sale de `ADMIN_PASSWORD` con `must_change_password: true` (`02` §9.10).
 
-### 9.6 Login con Google
+### 9.6 Login con Google (✅ F6, ADR-015)
 
-El frontend obtiene un `id_token` con Google Identity Services y lo envía a `POST
-/api/auth/google`. El backend lo verifica con `google-auth` (en un hilo, porque la verificación
-es síncrona): firma, `aud == GOOGLE_CLIENT_ID`, `iss`, expiración, `email_verified`, y que el
-claim **`hd`** esté en `ALLOWED_EMAIL_DOMAINS` (no basta con el dominio del correo). **No hay
-auto-provisión:** el correo debe existir en `users`; un usuario `invited` pasa a `active` y se
-vincula `auth_providers: {provider: "google", subject, linked_at}`. Un usuario ya vinculado cuyo
-`sub` de Google no coincide, un usuario `disabled` y un correo desconocido reciben el mismo `401`.
-Todos los correos son `@slepllanquihue.cl` (también los del personal de establecimientos).
+El frontend obtiene un `id_token` con Google Identity Services (`Login.jsx`) y lo envía a `POST
+/api/auth/google`. Implementación: `auth/google_service.py`; la sesión sale de `_issue_token`, el único
+punto de emisión (no hay una segunda ruta). Todo fallo responde el mismo `401` de las demás rutas, sin
+revelar la causa, y el `credential` no se escribe en ningún log (el motivo, sin el token, queda en el log
+del servidor). Orden:
+
+1. **Límite por IP** (`google-ip`, 30 rechazos en 15 min, `429` con `Retry-After`); los logins correctos
+   no cuentan.
+2. **`google-auth`** (`id_token.verify_oauth2_token` en `asyncio.to_thread`, porque es síncrono): firma,
+   `aud == GOOGLE_CLIENT_ID` y `exp`, con `clock_skew_in_seconds=10` (mismo motivo que el `leeway` de D28).
+3. **Comprobaciones explícitas:** `iss` en (`accounts.google.com`, `https://accounts.google.com`),
+   `email_verified is True` (el booleano, no un texto), `hd` presente, dentro de `ALLOWED_EMAIL_DOMAINS`
+   **y** igual al dominio del correo (una cuenta personal de Gmail no trae `hd`), `sub` no vacío e `iat`
+   de no más de 5 minutos (acota la reutilización de un `id_token` robado sin guardar estado).
+4. **Persona:** por (`google`, `subject`); si no, por correo normalizado. `invited` pasa a `active` y se
+   vincula el proveedor; `active` sin vínculo se vincula; vinculada a **otro** `subject`, `disabled` o
+   `invited` sin poder vincularse → `401`. El vínculo es atómico y nunca reactiva a un `disabled`.
+5. **No existe:** con `GOOGLE_AUTO_PROVISION=true` se crea (G1, G2) por el pipeline de `users_service`
+   (`create_many`, sin segunda ruta de creación): `status: active`, `access: [{datos, viewer}]`,
+   `is_slep_staff: null` y sin unidad, rbd ni cargos; nombre y apellido salen de `given_name` y
+   `family_name`. El rol sale del servidor, **nunca** de una claim. Se audita como `user.autoprovision`
+   (actor `null`). Con `false`, el mismo `401`. Dos logins simultáneos del mismo correo crean una sola
+   cuenta: el índice único de `email` frena al segundo, que recupera la cuenta.
+6. Emite el token (`_issue_token`) y actualiza `last_login_at`.
+
+`hd` en el cliente (`initialize({hd})`) es solo una pista de interfaz y **no protege nada**.
+
+> ⚠️ **Pertenecer al dominio no es ser funcionario (G4).** El dominio incluye estudiantes y cuentas de
+> servicio, y la decisión de dar `viewer` en `datos` a cualquiera de ellos la tomó el responsable
+> (N16, N18) porque `datos` es público dentro de la organización. Todo recurso que no sea público (por
+> ejemplo, el futuro `/personas`) se protege con un acceso explícito por plataforma lógica, nunca con el
+> dominio del correo ni con `is_slep_staff`.
+>
+> 🔸 **Límite conocido:** `verify_oauth2_token` descarga los certificados de Google en cada login (no hay
+> caché local). A esta escala es aceptable; si Google no responde, el login con Google falla con `401` y
+> el ingreso con contraseña no se afecta.
+>
+> ✅ **`licenses` ya está retirado (N15).** Uno de los dos requisitos previos a la activación de
+> `GOOGLE_AUTO_PROVISION` en producción queda cumplido. Falta, si existió algún despliegue con datos reales
+> en `licenses`, ejecutar `scripts/retire_licenses.py --apply` y **rotar esas credenciales** (`02` §5). Lo que
+> un `viewer` ve en el detalle es `ssid_password` redactado y datos de contacto del establecimiento
+> (`director_email`, `director_phone`, §3). La activación la decide el responsable.
+
+### 9.6.1 🧭 DISEÑO · Recepción de las cuentas autoaprovisionadas (mínimo privilegio y zero trust)
+
+> **Estado: propuesta para decisión del responsable. No está implementada** (salvo lo marcado ✅). No cambia
+> G1 (la cuenta nace `viewer` en `datos`); define el **formato del registro de entrada**, qué se confía de
+> Google y qué se vuelve a verificar, y los controles que acotan el daño si el dominio se abusa o una cuenta se
+> compromete. Premisa de G4: **pertenecer al dominio no significa ser funcionario.**
+
+**Principios aplicados.** (1) *Nunca confiar, siempre verificar:* cada petición vuelve a leer a la persona y su
+rol sale del documento, no del token ✅ (ADR-009); cada login vuelve a validar firma, `aud`, `iss`, `hd`,
+`email_verified` e `iat` ✅. (2) *Mínimo privilegio:* denegar por defecto; el único permiso automático es
+lectura de `datos`; todo lo demás lo concede un `iam/admin`, con auditoría ✅. (3) *Suponer la brecha:* acotar
+cuánto puede crear un abuso, cuánto dura una cuenta olvidada y qué ve una cuenta no verificada.
+
+**Formato del registro de entrada.** Qué se guarda de lo que Google entrega y qué no:
+
+| Dato | Origen | Se guarda | Confianza |
+|---|---|---|---|
+| `sub` | `id_token` verificado | ✅ `auth_providers[google].subject` (inmutable; vínculo único) | Alta: identifica a la persona, no el correo |
+| `email` | `id_token`, con `email_verified=true` y `hd` = dominio | ✅ `email` (normalizado) | Media: el correo puede reasignarse; el vínculo real es `sub` |
+| `given_name`, `family_name` | `id_token` | ✅ `first_name`, `last_name` (recortados a 80) | Baja: solo para mostrar; nunca para decidir permisos |
+| `picture`, `locale`, `name`, `exp`, `jti`… | `id_token` | ❌ se descartan (minimización de datos) | — |
+| Rol, plataformas, unidad, cargos | **servidor** (nunca el token) | ✅ `access: [{datos, viewer}]`, `is_slep_staff: null` | Es la decisión del sistema |
+| Credencial de Google (`credential`) | navegador | ❌ jamás (ni en logs) ✅ | — |
+
+Documento resultante (✅ hoy salvo `provisioning`, 🧭 propuesto):
+
+```json
+{
+  "email": "persona@slepllanquihue.cl", "first_name": "…", "last_name": "…",
+  "status": "active", "is_slep_staff": null, "unit_id": null, "rbd": null, "positions": [],
+  "access": [{"platform_id": "datos", "role": "viewer", "granted_at": "ISODate", "granted_by": null}],
+  "auth_providers": [{"provider": "google", "subject": "…", "linked_at": "ISODate"}],
+  "provisioning": {"source": "google", "at": "ISODate", "vetted": false}
+}
+```
+
+`provisioning.vetted` (🧭): `false` hasta que un `iam/admin` confirme que la persona es quien dice y qué es
+(funcionario, docente, estudiante). Quien tiene `vetted: false` está **sin verificar por una persona**, aunque
+Google la haya autenticado.
+
+**Controles propuestos** (cada uno cierra un riesgo concreto; la columna *Costo* indica qué hay que construir):
+
+| # | Riesgo | Control | Estado | Costo |
+|---|---|---|---|---|
+| Z1 | Alta masiva (abuso del dominio, un script con miles de cuentas de estudiantes) | **Tope global de altas automáticas** por hora (p. ej. 30). Al superarlo, el login nuevo responde el mismo `401` y se registra un aviso; las cuentas existentes siguen entrando | 🧭 | Variable `GOOGLE_AUTO_PROVISION_MAX_PER_HOUR` (obligatoria, 4 archivos de despliegue) + contador en `rate_limits` |
+| Z2 | Una cuenta no verificada ve datos personales | **Enmascarar contactos personales** (`director_email`, `director_phone`, correos y teléfonos de contrapartes) para `vetted: false`, igual que hoy se redacta `ssid_password` para `viewer`. El directorio y las fichas siguen visibles | 🧭 **Requiere decisión:** cambia lo que N18 aceptó | Un campo y una condición en la redacción; el frontend ya tolera `[REDACTED]` |
+| Z3 | Cuenta olvidada o de quien ya no está | **Caducidad por inactividad**: pasar a `disabled` tras N días sin `last_activity_at` (p. ej. 180) y solo si `vetted: false`; reingresar con Google la reactiva como lector nueva | 🧭 | Tarea programada o chequeo perezoso en el login |
+| Z4 | Cuenta de Google comprometida | Acotar la sesión: TTL de 180 min ✅, revocación inmediata al desactivar ✅ y `logout` que corta todas las sesiones ✅; **la suspensión en Google no corta una sesión ya abierta** hasta que expire | ✅ / límite conocido | Reducir el TTL o consultar a Google con refresh cada X min (fuera de alcance, §6 de F6) |
+| Z5 | Un permiso que se «pega» | Los permisos solo se **amplían** por una acción de `iam/admin` auditada (`access.grant`); el alta automática **nunca** modifica una cuenta existente (rol, unidad, estado) ✅ (`test_BE56_*`) | ✅ | — |
+| Z6 | Plataformas futuras heredan el acceso por el dominio | Todo recurso no público exige acceso explícito por plataforma lógica; nunca el dominio ni `is_slep_staff` (G4) | ✅ regla | Revisar en cada ADR de módulo nuevo |
+| Z7 | Nadie mira las cuentas nuevas | Cola de revisión: `GET /api/users?assignment=unassigned` ✅; falta un recuento visible y la acción «marcar verificada» | 🧭 | UI de administración (N17) + endpoint `POST /api/users/{id}/vet` |
+| Z8 | Reutilización de un `id_token` robado | `iat` ≤ 5 min ✅; no se guarda estado (sin `jti` ni nonce, fuera de alcance) | ✅ / límite conocido | — |
+| Z9 | Enumeración o fuerza bruta sobre `/api/auth/google` | Mismo `401` para todo fallo ✅; 30 rechazos por IP en 15 min ✅. **La IP debe ser la real**: depende del proxy del host (D35) | ✅ + D35 | Corregir D35 |
+
+**Orden recomendado (menor costo primero):** D35 (corrección de IP, afecta a todo el rate limiting) → Z1 (tope
+global) → Z7 (cola visible) → Z2 y Z3 (cambian la experiencia: exigen tu decisión).
+
+**Decisiones que quedan para el responsable.** (a) ¿Z2: los contactos personales se enmascaran a las cuentas
+no verificadas? (b) ¿Z3: caducidad por inactividad y a cuántos días? (c) ¿Z1: valor del tope por hora?
 
 ### 9.7 Invariantes por protegerse y su test previsto
 
@@ -465,24 +580,35 @@ Los IDs siguen la numeración real (último existente: BE08, INT02, FE05).
 | `sub = str(_id)`; sesiones cortadas por desactivación y por cambio de contraseña | `test_BE11_*` |
 | `hashed_password`, `token_hash` y `personal_phone` (a terceros) no aparecen en ninguna respuesta | `test_INT07_*` (recorre el JSON, patrón INT02) |
 | Siempre queda un `iam/admin` activo, también en masa; nadie se desactiva a sí mismo | `test_BE29_*`, `test_BE41_*`, `test_BE44_*` |
-| Inyección de operadores, regex sin escapar (D5) y asignación masiva | `test_INT08_*` y los `422` de cada historia |
-| Variables de identidad y secretos sin default; todas declaradas en compose y plantilla | `test_BE14_*` |
+| Inyección de operadores, regex sin escapar (D5) y asignación masiva | `test_INT08_*` (toda ruta de escritura nueva debe estar en su tabla) y los `422` de cada historia |
+| Variables de identidad y secretos sin default; todas declaradas en compose y plantilla | `test_BE14_*`, `test_BE42_*` |
+| Enlace de un solo uso; solo el hash en la base; el token no aparece en la base, el audit ni los logs | `test_BE46_*` |
+| El correo no es un relay: no existe ningún endpoint de envío; el link no usa `Host`; sin inyección de cabeceras | `test_BE46_*`, `test_BE43_*` |
+| Límite de intentos por cuenta+IP y por IP, sin DoS dirigido, sin evadirlo con `X-Forwarded-For` | `test_BE47_*` |
+| El audit es solo de agregado, sin credenciales, y un fallo no revierte ni se oculta | `test_BE44_*` |
+| El CSV no escribe en la vista previa; el lote es parcial; las invariantes de admin valen dentro del lote | `test_BE48_*` |
+| La subrogancia no concede permisos | `test_BE49_a_subrogation_grants_no_permission` |
+| El script de consentimiento no escribe el token a disco ni a un log | `test_BE50_*` |
+| Los módulos respetan el grafo de dependencias (ADR-013) | `test_BE45_*` |
 
 ### 9.8 Configuración
 
-Variables nuevas, sin default en las de identidad y secreto (la norma de D2): `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `PUBLIC_BASE_URL`, `GMAIL_SENDER_ADDRESS`,
-`GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; y, por decisión de la fase F3,
+Variables nuevas, sin default en las de identidad y secreto (la norma de D2): `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_SENDER_ADDRESS`,
+`GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (las cuatro últimas solo son obligatorias con `MAIL_MODE=gmail`); y, por decisión de la fase F3,
 `JWT_SECRET` y `ADMIN_PASSWORD` también pierden su default. `MAIL_MODE` (`gmail` o `console`) decide si hacen falta las credenciales de Gmail; ver ADR-012 y `07` §2.1. Con defaults razonables y validación
 de rango: la política de contraseñas. Detalle y archivos a actualizar: `07` §2.
 
 ### 9.9 Brechas que este diseño cierra y las que deja abiertas
 
 **Cierra:** D2 (defaults de `JWT_SECRET` y `ADMIN_PASSWORD`), D3 (`viewer` escribe), D4 (`PUT` sin
-redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting (si se
-implementa E9), y el login ilimitado.
-**Sigue abierta:** token en `localStorage` (§1), CORS `*` (§5), cabeceras de seguridad (§7),
-`/docs` y `/openapi.json` públicos, redacción de `licenses[].email` y de los datos de
-contrapartes (§3), y MFA.
+redactar), la ausencia de `require_admin`, la ausencia de auditoría y de rate limiting, y el login ilimitado.
+**Cierra (F6, S1):** CORS `*` (§5), D5 (regex sin escapar), el secreto de desarrollo versionado, la ausencia de cabeceras de seguridad (CSP aún en `Report-Only`) y el logout sin efecto.
+**Cierra (F6, S3):** el token en `localStorage` (§1: cookie `HttpOnly`, ADR-016).
+**Sigue abierta:**`/docs` y `/openapi.json` públicos, la redacción de los datos de contrapartes (§3), y MFA.
+**Límites conocidos de F4** (registrados en `05` §5.3c): el modo `console` escribe el enlace completo en el
+log (solo desarrollo); un atacante distribuido en muchas IPs puede probar 5 contraseñas por IP contra una
+cuenta (el diseño evita el bloqueo de cuenta a propósito); el reloj de pared del entorno de desarrollo
+(WSL2) puede saltar hacia atrás y hacer fallar un token recién emitido o un test de sesión.
 
 ---
 

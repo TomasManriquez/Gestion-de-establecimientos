@@ -26,7 +26,6 @@ const MOCK_ESTABLISHMENT = {
   general_info: { director: 'Juan Pérez', category: '7. LICEO POLITÉCNICO', adp: 'Si' },
   connectivity: { internet_provider: 'TELSUR', ssid: 'Red', ssid_password: '[REDACTED]' },
   printers: { owned: [], leased: [] },
-  licenses: [{ name: 'SIGE', email: 'admin@liceo.cl', password: '[REDACTED]' }],
 };
 
 const MOCK_COUNTERPARTS = [
@@ -42,7 +41,7 @@ const MOCK_ESTABLISHMENT_2 = {
   name: 'ESCUELA BÁSICA FRUTILLAR',
   comuna: 'FRUTILLAR', area_type: 'RURAL', address: 'Av. Rural',
   general_info: { director: 'María López', category: '6. RURAL MULTIGRADO', adp: 'No' },
-  connectivity: {}, printers: { owned: [], leased: [] }, licenses: [],
+  connectivity: {}, printers: { owned: [], leased: [] },
 };
 
 describe('FE-02: FichaEstablecimiento — Lectura desde useParams()', () => {

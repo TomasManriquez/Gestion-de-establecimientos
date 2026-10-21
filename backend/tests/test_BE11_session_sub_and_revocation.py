@@ -31,7 +31,7 @@ def me(c, headers=None):
 
 
 def raw_token(payload, secret=None, exp_delta=timedelta(minutes=5)):
-    body = {"exp": datetime.now(timezone.utc) + exp_delta, **payload}
+    body = {"exp": datetime.now(timezone.utc) + exp_delta, "iat": int(time.time()), **payload}  # SEC-2: exp, iat y sub son obligatorios
     return {"Authorization": "Bearer " + jwt.encode(body, secret or settings.JWT_SECRET, algorithm="HS256")}
 
 
@@ -39,7 +39,7 @@ def test_BE11_token_sub_is_object_id_string(fake_db):
     docs = seed_users(fake_db, user_with_password(ADMIN_USER, PASSWORD))
     c = client()
     r = c.post("/api/auth/login", json={"username": "admin@slepllanquihue.cl", "password": PASSWORD})
-    payload = jwt.decode(r.json()["access_token"], settings.JWT_SECRET, algorithms=["HS256"])
+    payload = jwt.decode(r.cookies["slep_session"], settings.JWT_SECRET, algorithms=["HS256"])
     assert payload["sub"] == str(docs[0]["_id"])
     assert "@" not in payload["sub"] and "iat" in payload and isinstance(payload["iat"], int)
 
@@ -85,7 +85,7 @@ def test_BE11_all_auth_failures_same_401(fake_db):
     c = client()
     cases = {
         "sin token": {},
-        "firma inválida": raw_token({"sub": ADMIN_USER["_id"]}, secret="otro-secreto"),
+        "firma inválida": raw_token({"sub": ADMIN_USER["_id"]}, secret="otro-secreto-distinto-de-al-menos-32-caracteres"),
         "vencido": raw_token({"sub": ADMIN_USER["_id"]}, exp_delta=timedelta(minutes=-5)),
         "sin sub": raw_token({"foo": "bar"}),
         "usuario inexistente": raw_token({"sub": "6600000000000000000000ff"}),

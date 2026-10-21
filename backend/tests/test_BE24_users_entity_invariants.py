@@ -9,11 +9,12 @@ Verifica que el estado inválido es imposible de construir:
   - positions es un enum cerrado de 10 valores (sin ENCARGADO_CONVIVENCIA)
   - el correo se normaliza y su dominio está en ALLOWED_EMAIL_DOMAINS
   - formatos de teléfono y anexo, longitudes máximas y extra='forbid'
+  - sin asignar (`is_slep_staff` nulo, C24): solo el alta automática lo admite, y sin unidad, rbd ni cargos
 """
 import pytest
 from pydantic import ValidationError
 from app.users.users_entity import (
-    UserCreate, UserAdminUpdate, UserSelfUpdate, EstablishmentPosition, User, UserSummary, UserMe,
+    UserCreate, UserCreateUnassigned, UserAdminUpdate, check_mode, UserSelfUpdate, EstablishmentPosition, User, UserSummary, UserMe,
 )
 from app.counterparts.counterparts_entity import CounterpartRole
 
@@ -161,3 +162,37 @@ def test_BE24_response_models_never_declare_hashes():
     assert "personal_phone" not in UserSummary.model_fields          # el listado no lo proyecta
     assert "auth_providers" not in UserSummary.model_fields
     assert "personal_phone" in User.model_fields and "personal_phone" in UserMe.model_fields
+
+
+# ─── Sin asignar (alta automática con Google, C24) ───────────────────────────
+
+def unassigned(**kw):
+    base = dict(email="nueva.cuenta@slepllanquihue.cl", first_name="Nueva", last_name="Cuenta", is_slep_staff=None)
+    base.update(kw)
+    return UserCreateUnassigned(**base)
+
+
+def test_BE24_unassigned_is_valid_only_for_the_automatic_signup_model():
+    assert unassigned().is_slep_staff is None
+    for kwargs in (dict(is_slep_staff=None), {}):       # alta manual y CSV siguen exigiendo asignación
+        with pytest.raises(ValidationError):
+            UserCreate(email="x.y@slepllanquihue.cl", first_name="X", last_name="Y", **kwargs)
+
+
+@pytest.mark.parametrize("extra", [dict(unit_id=UNIT), dict(rbd="7722"), dict(positions=["DOCENTE"])])
+def test_BE24_unassigned_cannot_carry_unit_rbd_or_positions(extra):
+    with pytest.raises(ValidationError, match="sin asignar"):
+        unassigned(**extra)
+
+
+def test_BE24_check_mode_accepts_none_only_when_empty():
+    check_mode(None, None, None, [])
+    for args in ((None, UNIT, None, []), (None, None, "7722", []), (None, None, None, ["DOCENTE"])):
+        with pytest.raises(ValueError):
+            check_mode(*args)
+
+
+def test_BE24_responses_admit_null_is_slep_staff():
+    base = dict(_id="6600000000000000000000b1", status="active")
+    assert UserSummary(**base).is_slep_staff is None
+    assert UserMe(**base).is_slep_staff is None

@@ -1,23 +1,38 @@
+import logging
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
-from app.auth.auth_service import auth_service, require_access
-from app.auth.auth_entity import (AccessContext, AccessSummary, ChangePasswordRequest, LoginRequest, PLATFORM_DATOS,
-                                  PasswordPolicy, Token, UserResponse)
+from app.auth.auth_service import SESSION_COOKIE, _credentials_exception, auth_service, client_ip, rate_limited_http, require_access
+from app.auth.google_service import GoogleLoginError, google_login_service
+from app.auth.auth_entity import (AccessContext, AccessSummary, AuthConfig, ChangePasswordRequest, GOOGLE_IP_LIMIT,
+                                  GOOGLE_WINDOW_SECONDS, GoogleLoginRequest, InvalidLink, LoginRequest,
+                                  LOGIN_ACCOUNT_LIMIT, LOGIN_IP_LIMIT, LOGIN_WINDOW_SECONDS, PLATFORM_DATOS, PasswordPolicy,
+                                  PasswordPolicyError, REDEEM_IP_LIMIT, REDEEM_WINDOW_SECONDS, RateLimited,
+                                  SessionStarted, SetPasswordRequest, UserResponse)
 from app.users.users_entity import UserNotFound
 from app.users.users_service import users_service
 
+logger = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _issue_token(user: dict) -> dict:
-    """El `sub` es str(_id): estable, nunca el correo ni el username (C6)."""
+def _cookie_attrs() -> dict:
+    """Atributos de la cookie de sesión (ADR-016). `Path=/api`: solo viaja hacia la API. `SameSite=Strict`:
+    SPA y API son de mismo origen. Los mismos atributos hacen falta para borrarla."""
+    return {"path": "/api", "httponly": True, "samesite": "strict", "secure": settings.SESSION_COOKIE_SECURE}
+
+
+def _issue_token(user: dict, response: Response) -> dict:
+    """ÚNICO punto por donde sale una sesión (login, login-form, Google, cambio de contraseña): emite el
+    JWT y lo entrega como cookie `HttpOnly`, no en el cuerpo. El `sub` es str(_id): estable, nunca el
+    correo ni el username (C6)."""
+    ttl = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth_service.create_access_token(
-        data={"sub": str(user["_id"]), "role": datos_role(user) or "none"},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+        data={"sub": str(user["_id"]), "role": datos_role(user) or "none"}, expires_delta=ttl)
+    response.set_cookie(SESSION_COOKIE, access_token, max_age=int(ttl.total_seconds()), **_cookie_attrs())
+    response.headers["Cache-Control"] = "no-store"
+    return {"expires_in": int(ttl.total_seconds())}
 
 
 def datos_role(user: dict):
@@ -33,32 +48,87 @@ def _unauthorized() -> HTTPException:
     )
 
 
-@router.post("/login", response_model=Token)
-async def login_for_access_token(payload: LoginRequest):
+async def _limited_login(request: Request, login: str, password: str) -> dict:
+    """Login con límite por (cuenta + IP) y por IP (ADR-014). Cuenta inexistente, desactivada o con
+    clave errónea cuentan igual y responden igual, así que el límite no revela qué cuentas existen.
+    El límite incluye la IP a propósito: un tercero no puede dejar inutilizable la cuenta de otro."""
+    ip = client_ip(request)
+    account_key = auth_service.rate_key("login-account", ip, login.strip().lower())
+    ip_key = auth_service.rate_key("login-ip", ip)
+    try:
+        await auth_service.rate_guard([(account_key, LOGIN_ACCOUNT_LIMIT), (ip_key, LOGIN_IP_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
+    user = await auth_service.authenticate_user(login, password)
+    if not user:
+        await auth_service.rate_hit(account_key, LOGIN_WINDOW_SECONDS)
+        await auth_service.rate_hit(ip_key, LOGIN_WINDOW_SECONDS)
+        raise _unauthorized()
+    await auth_service.rate_clear(account_key)
+    return user
+
+
+@router.post("/login", response_model=SessionStarted)
+async def login_for_access_token(payload: LoginRequest, request: Request, response: Response):
     """
     JSON Login endpoint. `username` acepta el correo o, mientras dure la compatibilidad, el
-    username legado.
+    username legado. Responde 429 con `Retry-After` al superar el límite de intentos fallidos.
     """
-    user = await auth_service.authenticate_user(payload.username, payload.password)
-    if not user:
-        raise _unauthorized()
-    return _issue_token(user)
+    return _issue_token(await _limited_login(request, payload.username, payload.password), response)
 
-@router.post("/login-form", response_model=Token)
-async def login_for_access_token_form(form_data: OAuth2PasswordRequestForm = Depends()):
+@router.get("/config", response_model=AuthConfig)
+async def get_auth_config():
+    """Pública: el frontend no tiene variables de entorno (ADR-008) y necesita el client id de Google
+    para dibujar el botón antes de que haya sesión. El client id no es secreto."""
+    return {"google_client_id": settings.GOOGLE_CLIENT_ID}
+
+
+@router.post("/google", response_model=SessionStarted)
+async def login_with_google(payload: GoogleLoginRequest, request: Request, response: Response):
+    """Login con Google Identity Services (C24). Pública. Todo fallo es el mismo 401 de las demás rutas,
+    sin revelar la causa; el `credential` no se registra en ningún log. Los rechazos cuentan para el
+    límite por IP (429 con `Retry-After`). La sesión sale de `_issue_token`, el único punto de emisión."""
+    ip_key = auth_service.rate_key("google-ip", client_ip(request))
+    try:
+        await auth_service.rate_guard([(ip_key, GOOGLE_IP_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
+    try:
+        claims = await google_login_service.verify(payload.credential)
+        user = await google_login_service.resolve_user(claims)
+    except GoogleLoginError as exc:
+        logger.info("Login con Google rechazado: %s", exc.reason)
+        await auth_service.rate_hit(ip_key, GOOGLE_WINDOW_SECONDS)
+        raise _credentials_exception()
+    await users_service.touch_login(user["_id"])
+    return _issue_token(user, response)
+
+
+@router.post("/login-form", response_model=SessionStarted)
+async def login_for_access_token_form(request: Request, response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
     """
     Form-url-encoded Login endpoint (standard for Swagger UI)
     """
-    user = await auth_service.authenticate_user(form_data.username, form_data.password)
-    if not user:
-        raise _unauthorized()
-    return _issue_token(user)
+    return _issue_token(await _limited_login(request, form_data.username, form_data.password), response)
 
-@router.post("/logout")
-async def logout():
-    # JWT is stateless, so we just acknowledge logout.
-    # The client discards the token.
-    return {"message": "Successfully logged out"}
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(request: Request):
+    """Corta TODAS las sesiones de la persona (`sessions_revoked_at`): es la forma sin estado, no hay
+    lista de tokens. Borra la cookie de sesión. Responde 204 aunque el token ya no sirva (vencido,
+    revocado, malformado, ausente): cerrar sesión nunca falla para quien la cierra. Única excepción: una
+    petición con cookie y `Origin` ajeno (403), para que un sitio hermano no pueda cerrar sesiones."""
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(SESSION_COOKIE, **_cookie_attrs())
+    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+    try:
+        token = auth_service.resolve_token(request, bearer if scheme.lower() == "bearer" else None)
+        user = await auth_service.authenticate_token(token)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise
+        return response
+    await users_service.revoke_sessions(user["_id"])
+    return response
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(ctx: AccessContext = Depends(require_access(None))):
@@ -84,8 +154,9 @@ async def get_password_policy():
             "require_char_classes": settings.PASSWORD_REQUIRE_CHAR_CLASSES}
 
 
-@router.post("/password", response_model=Token)
-async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext = Depends(require_access(None))):
+@router.post("/password", response_model=SessionStarted)
+async def change_own_password(payload: ChangePasswordRequest, response: Response,
+                              ctx: AccessContext = Depends(require_access(None))):
     """Cambio de contraseña propio (C19). Devuelve un token nuevo: el cambio fija
     `password_changed_at`, lo que invalida el token con el que se llamó.
 
@@ -109,4 +180,28 @@ async def change_own_password(payload: ChangePasswordRequest, ctx: AccessContext
     except UserNotFound:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials",
                             headers={"WWW-Authenticate": "Bearer"})
-    return _issue_token(updated)
+    return _issue_token(updated, response)
+
+
+@router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
+async def set_password(payload: SetPasswordRequest, request: Request):
+    """Canje del enlace de invitación o de restablecimiento (pública: aún no hay sesión).
+
+    Todo fallo del enlace responde el mismo 400, sin distinguir usado, vencido o inexistente. Una
+    contraseña que incumple la política responde 422 y NO consume el enlace. No devuelve token:
+    la persona entra después con su correo y la contraseña recién definida."""
+    ip_key = auth_service.rate_key("redeem-ip", client_ip(request))
+    try:
+        await auth_service.rate_guard([(ip_key, REDEEM_IP_LIMIT)])
+    except RateLimited as exc:
+        raise rate_limited_http(exc)
+    try:
+        await auth_service.redeem_link(payload.token, payload.password)
+    except InvalidLink:
+        await auth_service.rate_hit(ip_key, REDEEM_WINDOW_SECONDS)       # adivinar enlaces cuesta intentos
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={
+            "code": "invalid_or_expired_link",
+            "message": "El enlace no es válido o ya venció. Pide a un administrador que te envíe uno nuevo."})
+    except PasswordPolicyError as exc:
+        raise HTTPException(422, detail=exc.violations)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

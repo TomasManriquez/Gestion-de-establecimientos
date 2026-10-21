@@ -182,13 +182,7 @@ def test_INT02_detail_with_non_admin_token_returns_redacted_passwords():
     )
     data = response.json()
 
-    # Verificar licenses
-    for lic in data.get("licenses", []):
-        pw = lic.get("password", "")
-        assert pw == "[REDACTED]", (
-            f"Usuario viewer recibió password='{pw}'. "
-            "Debe ser '[REDACTED]' para usuarios sin rol admin."
-        )
+    assert "licenses" not in data          # campo retirado (N15)
 
     # Verificar ssid_password
     ssid_pw = data.get("connectivity", {}).get("ssid_password", "")
@@ -218,13 +212,6 @@ def test_INT02_detail_with_admin_token_returns_real_passwords():
         f"Cuerpo: {response.text}"
     )
     data = response.json()
-
-    for lic in data.get("licenses", []):
-        pw = lic.get("password", "")
-        assert pw != "[REDACTED]", (
-            "Admin recibió '[REDACTED]' en un password. "
-            "El admin debe ver las contraseñas reales."
-        )
 
     ssid_pw = data.get("connectivity", {}).get("ssid_password", "")
     assert ssid_pw != "[REDACTED]", (

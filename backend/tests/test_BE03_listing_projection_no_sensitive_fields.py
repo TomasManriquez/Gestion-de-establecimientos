@@ -226,10 +226,7 @@ async def test_BE06_find_by_rbd_returns_full_document_not_projected():
         "find_by_rbd() no retorna connectivity. "
         "La proyección del listado no debe aplicarse en el endpoint de detalle."
     )
-    assert "licenses" in result, (
-        "find_by_rbd() no retorna licenses. "
-        "La ficha completa (para admin) debe incluir todos los campos."
-    )
+    assert "licenses" not in result, "`licenses` se retiró (N15): el detalle no debe devolverlo"
     assert "printers" in result, (
         "find_by_rbd() no retorna printers. "
         "La ficha técnica incluye datos de impresoras."

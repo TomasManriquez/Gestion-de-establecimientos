@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from bson import ObjectId
 from pydantic import (BaseModel, ConfigDict, EmailStr, Field, computed_field,
@@ -70,13 +70,19 @@ def is_object_id(value: str) -> bool:
     return isinstance(value, str) and len(value) == 24 and ObjectId.is_valid(value)
 
 
-def check_mode(is_slep_staff: bool, unit_id, rbd, positions) -> None:
+def check_mode(is_slep_staff: Optional[bool], unit_id, rbd, positions) -> None:
     """Invariante central de R1: funcionario SLEP XOR usuario de establecimiento.
+
+    `None` = sin asignar (alta automática con Google, C24): no puede tener unidad, rbd ni cargos.
+    Un usuario ya asignado no vuelve a `None`: la edición ignora los `null` del body.
 
     Una sola función para el modelo de alta y para la edición (el service la aplica sobre el
     documento ya fusionado), de modo que no haya dos versiones de la regla.
     """
-    if is_slep_staff:
+    if is_slep_staff is None:
+        if unit_id or rbd or positions:
+            raise ValueError("Un usuario sin asignar no puede tener unit_id, rbd ni positions")
+    elif is_slep_staff:
         if not unit_id:
             raise ValueError("Un funcionario SLEP debe tener unit_id")
         if rbd:
@@ -173,6 +179,12 @@ class UserCreate(_Fields):
         return self
 
 
+class UserCreateUnassigned(UserCreate):
+    """Solo para el alta automática (C24): `is_slep_staff` puede ser `None`. Ninguna ruta HTTP lo usa:
+    el alta manual y el CSV siguen validando con `UserCreate`, que exige asignación."""
+    is_slep_staff: Optional[bool] = None
+
+
 class UserAdminUpdate(_Fields):
     """PATCH del admin global. Sin access/status/auth_providers: tienen endpoints propios."""
     email: Optional[EmailStr] = Field(None, max_length=254)
@@ -237,7 +249,7 @@ class UserSummary(_Out):
     first_name: str = ""
     last_name: str = ""
     work_extension: Optional[str] = None
-    is_slep_staff: bool = False
+    is_slep_staff: Optional[bool] = None     # None = sin asignar
     unit_id: Optional[str] = None
     rbd: Optional[str] = None
     positions: List[str] = []
@@ -267,7 +279,7 @@ class UserMe(_Out):
     last_name: str = ""
     personal_phone: Optional[str] = None
     work_extension: Optional[str] = None
-    is_slep_staff: bool = False
+    is_slep_staff: Optional[bool] = None     # None = sin asignar
     unit_id: Optional[str] = None
     rbd: Optional[str] = None
     positions: List[str] = []
@@ -292,15 +304,95 @@ class FieldError(BaseModel):
 
 class BulkItemResult(BaseModel):
     index: int
-    status: str
+    status: str            # created | ok | invalid | duplicate | not_found | last_admin | self | mode_mismatch
     id: Optional[str] = None
     errors: List[FieldError] = []
+    invitation: Optional[str] = None      # "queued" en un alta masiva: el correo sale después de responder
 
 
 class BulkResult(BaseModel):
     bulk_id: str
     dry_run: bool
     total: int
-    created: int
+    created: int           # altas creadas (o válidas, en un dry-run)
+    succeeded: int = 0     # ítems que quedaron aplicados: altas creadas u operaciones masivas en `ok`
     failed: int
     items: List[BulkItemResult]
+
+
+# ─── Operaciones masivas (R5, E5) ────────────────────────────────────────────
+BULK_LIMIT = 200                       # UNA constante para CSV, bulk-create y bulk (03 §8.3)
+MAX_CSV_BYTES = 1024 * 1024            # 1 MiB
+CSV_REQUIRED = ("email", "first_name", "last_name")
+CSV_OPTIONAL = ("personal_phone", "work_extension", "unit_code", "rbd", "positions")
+CSV_COLUMNS = CSV_REQUIRED + CSV_OPTIONAL
+
+
+class BulkCreateRequest(BaseModel):
+    """Alta masiva parcial: cada ítem se valida con las mismas reglas del alta individual (R6) y los
+    inválidos no frenan a los demás. Los ítems son diccionarios planos: lo que no cumpla `UserCreate`
+    (tipos, campos extra, operadores de Mongo) vuelve como `invalid` en su fila."""
+    model_config = ConfigDict(extra="forbid")
+    items: List[Dict[str, Any]] = Field(..., min_length=1, max_length=BULK_LIMIT)
+    dry_run: bool = False
+
+
+class _BulkOp(BaseModel):
+    model_config = STRICT
+
+
+class AssignUnit(_BulkOp):
+    op: Literal["assign_unit"]
+    unit_id: str = Field(..., min_length=24, max_length=24)
+
+    _uid = field_validator("unit_id")(_check_object_id)
+
+
+class GrantAccess(_BulkOp):
+    op: Literal["grant_access"]
+    platform_id: str = Field(..., min_length=1, max_length=30)
+    role: str = Field(..., min_length=1, max_length=20)
+
+
+class RevokeAccess(_BulkOp):
+    op: Literal["revoke_access"]
+    platform_id: str = Field(..., min_length=1, max_length=30)
+
+
+class DisableUsers(_BulkOp):
+    op: Literal["disable"]
+
+
+class EnableUsers(_BulkOp):
+    op: Literal["enable"]
+
+
+BulkOperation = Annotated[Union[AssignUnit, GrantAccess, RevokeAccess, DisableUsers, EnableUsers], Field(discriminator="op")]
+
+
+class BulkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_ids: List[str] = Field(..., min_length=1, max_length=BULK_LIMIT)
+    operation: BulkOperation
+
+    @field_validator("user_ids")
+    @classmethod
+    def _ids(cls, v):
+        if any(not isinstance(i, str) or not 1 <= len(i) <= 64 for i in v):
+            raise ValueError("Cada identificador debe ser un texto de hasta 64 caracteres")
+        if len(set(v)) != len(v):
+            raise ValueError("user_ids no admite identificadores repetidos")
+        return v
+
+
+class ImportRow(BaseModel):
+    row: int                                  # número de fila en la planilla (la cabecera es la 1)
+    data: Dict[str, Any]                      # exactamente un ítem de `bulk-create`
+    errors: List[FieldError] = []
+
+
+class ImportPreview(BaseModel):
+    total: int
+    valid: int
+    invalid: int
+    rows: List[ImportRow]

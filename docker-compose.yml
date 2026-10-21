@@ -21,16 +21,27 @@ services:
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
       - DATABASE_NAME=slep_llanquihue
-      - JWT_SECRET=super-secret-slep-key-2026-llanquihue-digital-management
-      # Solo desarrollo: valores literales para poder levantar el entorno. En produccion
-      # ninguno tiene default (ver docker-compose.prod.yml y .env.production.template).
+      - JWT_SECRET=${JWT_SECRET:?define JWT_SECRET en el .env de la raiz}
+      # Secretos: se leen del .env de la raiz (no versionado); sin ellos compose no levanta.
+      # JWT_SECRET: >= 32 caracteres (python -c "import secrets; print(secrets.token_hex(64))").
       - ACCESS_TOKEN_EXPIRE_MINUTES=180
-      - ADMIN_PASSWORD=dev-only-admin-password-change-me
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?define ADMIN_PASSWORD en el .env de la raiz}
       - BOOTSTRAP_ADMIN_EMAIL=admin@slepllanquihue.cl
       - ALLOWED_EMAIL_DOMAINS=slepllanquihue.cl
       - PASSWORD_MIN_LENGTH=15
       - PASSWORD_MAX_LENGTH=64
       - PASSWORD_REQUIRE_CHAR_CLASSES=0
+      # Correo: en desarrollo el mensaje (con su enlace) sale por el log del backend.
+      # `console` solo se acepta con PUBLIC_BASE_URL en localhost. Para probar el envío
+      # real: MAIL_MODE=gmail y las cuatro variables de abajo en el .env de la raiz.
+      - MAIL_MODE=${MAIL_MODE:-console}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:5173}
+      - GMAIL_SENDER_ADDRESS=${GMAIL_SENDER_ADDRESS:-}
+      - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      # Alta automática de cuentas del dominio como lector (C24). Sin default: true solo en desarrollo.
+      - GOOGLE_AUTO_PROVISION=${GOOGLE_AUTO_PROVISION:?define GOOGLE_AUTO_PROVISION (true o false) en el .env de la raiz}
     volumes:
       - ./backend:/app
     depends_on:

@@ -1,11 +1,19 @@
 # Prompt · Feature: gestión de usuarios, unidades organizacionales y acceso centralizado (IAM)
 
 > **Uso:** mensaje inicial de una sesión nueva de agente, abierta en la raíz del repositorio.
-> **Versión 3.1 (2026-09-30).** La v2 incorporó las respuestas P1 a P12. La v3 incorporó las
+> **Versión 3.2 (2026-10-19).** La v2 incorporó las respuestas P1 a P12. La v3 incorporó las
 > respuestas N1 a N10, el requisito estricto de shadcn para el frontend, el hilo de Stack Overflow
-> sobre CSV y el marco de interconexión de la sección 8. La v3.1 cierra N2, N11 y N12. Verificado contra el repo en el commit
+> sobre CSV y el marco de interconexión de la sección 8. La v3.1 cierra N2, N11 y N12. La v3.2
+> incorpora el **alta automática como lector con Google (C24)**, que reordena las fases (§7).
+> Verificado contra el repo en el commit
 > `5b0984e` más los cambios locales sin commitear (`backend/app/database/seed_service.py`,
 > `.gitignore`, `CLAUDE.md`, `Documentacion/`).
+>
+> **Estado (2026-10-19): F3, F4 y F5 están implementadas** (F5 mergeada en `master`, PR #1) y
+> documentadas en `Documentacion/`. Quedan F6 (Google) y F7 (IAM, solo diseño). **El trabajo
+> vigente tiene su propio prompt: `.agents/prompts/fase-seguridad-google.md`.** Las secciones de
+> este documento sobre E0 a E7 son el diseño histórico de lo ya construido y no se vuelven a
+> planificar.
 
 ---
 
@@ -50,7 +58,7 @@ tu cuenta.
 | C4 | **La autorización se resuelve con una dependencia de FastAPI**, `require_access(platform, roles)`, que en el controller devuelve un `AccessContext` (id del usuario y su rol en la plataforma). El service nunca recibe `current_user`. **El filtro de alcance (`ScopeFilter`) queda diferido** hasta el primer módulo que filtre datos por unidad. | No hay restricción de visibilidad en esta feature (C13): los roles solo limitan acciones. |
 | C5 | **D3, D4 y la sobrescritura de secretos redactados (§10) se corrigen antes** de cualquier endpoint nuevo de escritura. | Si no, los roles quedan montados sobre un modelo en el que el rol no restringe nada. |
 | C6 | El `sub` del JWT pasa de `username` a `str(_id)`, con compatibilidad hacia atrás en `get_current_user`. El `sub` es estable y nunca es el correo. | Los usuarios de Google no tienen username, y un correo puede cambiar. Además es el identificador que heredarán las demás plataformas (§8). |
-| C7 | Google: el backend verifica el `id_token` (no se usa el authorization code flow). El alta es **por invitación** (`status: "invited"`) y no hay auto-provisión. | Evita que cualquier cuenta del dominio entre sola. |
+| C7 | Google: el backend verifica el `id_token` (no se usa el authorization code flow). Quién obtiene cuenta lo define C24. | Para el login solo hace falta saber quién es la persona: no se necesitan refresh tokens ni acceso a las APIs de Google. |
 | C8 | **`establishments` es la única fuente de establecimientos.** No se carga ni se versiona ningún CSV de establecimientos. | Respuesta P2. |
 | C9 | **Eliminar un usuario = desactivarlo** (soft delete). | Respuesta P8. |
 | C10 | **CSV: carga parcial con dry-run.** El CSV se traduce a JSON con la biblioteca estándar (`csv`, `io`, `codecs`) y ese JSON es exactamente el body del endpoint de alta masiva. No se usa pandas. | Respuestas P1 y P9. Ver §4.1. |
@@ -67,6 +75,7 @@ tu cuenta.
 | C21 | **Los correos se envían con Gmail API**, reutilizando el cliente OAuth que ya existe (`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`). Una casilla remitente dedicada da su consentimiento **una sola vez** con el scope `gmail.send`, y el backend guarda el refresh token como secreto. | Respuesta N2. Detalle en §4.1 y §7. |
 | C22 | **`positions` es una lista con al menos un valor** para los usuarios de establecimiento. Lo habitual es un solo valor; tener varios es excepcional. | Respuesta N11. |
 | C23 | **El enum de cargos incluye `DOCENTE` y `ASISTENTE_EDUCACION` y no incluye `ENCARGADO_CONVIVENCIA`.** | Respuesta N12. |
+| C24 | **Alta automática con Google como lector.** Cuando una persona con cuenta del dominio permitido entra con Google y todavía no existe, el backend le crea la cuenta con `status: "active"`, `access: [{platform_id: "datos", role: "viewer"}]` y pertenencia **sin asignar** (R12). El rol sale **siempre** del servidor y nunca de datos del token de Google ni del cliente. Se controla con `GOOGLE_AUTO_PROVISION` (variable obligatoria, sin default). **Es la única excepción a C12**: el admin global sigue siendo quien crea cuentas a mano, quien otorga cualquier rol superior a `viewer` y quien asigna unidad o establecimiento. | Respuesta del 2026-10-19: el contenido de `datos` es de acceso público dentro de la organización, y el universo de establecimientos y funcionarios es demasiado grande y cambia demasiado para precargarlo a mano. Reemplaza la invitación obligatoria que C7 fijaba antes. **Condición para activarla en producción:** las brechas bloqueantes de §10 cerradas y con test. |
 
 ---
 
@@ -78,8 +87,10 @@ Numerados para poder trazarlos. Cada historia de usuario debe citar los `R` que 
 (teléfono laboral interno) y los campos del documento `users` propuesto (estado, proveedores de
 autenticación, accesos, última actividad, auditoría). Un booleano **funcionario SLEP**: si es
 `true`, el usuario pertenece a una **unidad**; si es `false`, a un **establecimiento** (`rbd`).
-Siempre uno de los dos: nunca ambos, nunca ninguno. Los usuarios de establecimiento tienen
-**cargo** (enum, §3.1) para filtrar y buscar en implementaciones futuras.
+Siempre uno de los dos, nunca ambos. **La única excepción** es el estado transitorio *sin
+asignar* de las cuentas que crea el alta automática con Google (R12, C24), que un admin global
+resuelve después. Los usuarios de establecimiento tienen **cargo** (enum, §3.1) para filtrar y
+buscar en implementaciones futuras.
 
 **R2 · Unidad organizacional.** Entidad propia con id, código, nombre libre y un **nivel
 jerárquico estricto** del 1 al 5. Estructura real a sembrar:
@@ -138,6 +149,13 @@ enlace de un solo uso (C16).
 información del usuario está hecha en NestJS con PostgreSQL y también arranca con un único admin
 sembrado. Marco de diseño en §8.
 
+**R12 · Alta automática con Google (lector).** Una persona con cuenta del dominio permitido entra
+con el botón de Google sin que nadie la haya creado antes y obtiene el rol `viewer` en `datos`
+(C24). Queda **sin asignación** (sin unidad ni establecimiento) hasta que un admin global la
+asigne (N14: no se asigna nada de forma automática, ni siquiera a los directores). Nombre y apellido
+se toman de la constancia de Google. El alta usa el mismo pipeline de R6, con
+`actor_id="system:google"`: no hay una segunda ruta de creación.
+
 ---
 
 ## 3. Modelo de datos de partida (hipótesis que el diagrama de la Fase 1 valida o corrige)
@@ -156,7 +174,7 @@ documentación y sigue la convención del código.
   "last_name": "…",
   "personal_phone": "+56912345678",
   "work_extension": "4521",
-  "is_slep_staff": false,
+  "is_slep_staff": "true | false | null (sin asignar)",
   "unit_id": "ObjectId | null",
   "rbd": "7722 | null",
   "positions": ["DOCENTE", "PIE_ENCARGADO"],
@@ -205,9 +223,12 @@ documentación y sigue la convención del código.
   `BOOTSTRAP_ADMIN_EMAIL`, una variable obligatoria sin default (T9).
 
 **Invariantes, cada uno con su test:**
-- `is_slep_staff = true` ⇒ `unit_id` tiene valor, `rbd` es null y `positions` está vacía. Si es
-  `false`, entonces `rbd` tiene valor, `positions` tiene al menos un elemento y `unit_id` es null.
-  Se valida con un `model_validator` de Pydantic.
+- La pertenencia tiene tres estados. `is_slep_staff = true` ⇒ `unit_id` tiene valor, `rbd` es
+  null y `positions` está vacía. `is_slep_staff = false` ⇒ `rbd` tiene valor, `positions` tiene al
+  menos un elemento y `unit_id` es null. **`is_slep_staff = null` (sin asignar)** ⇒ los tres son
+  null y `positions` está vacía. Este último estado solo lo crea el alta automática con Google
+  (R12, C24); el alta manual y el CSV exigen una asignación, y un usuario ya asignado no puede
+  volver a `null`. Se valida con un `model_validator` de Pydantic.
 - `rbd` existe en `establishments`. Lo valida el service a través de `establishments_service`
   (L5, C8).
 - `unit_id` existe y la unidad está activa.
@@ -352,7 +373,7 @@ google); `unit_id`; `rbd`; `positions` (multikey); `access.platform_id`; `status
 | Patrón | Dónde | Qué resuelve |
 |---|---|---|
 | **Módulo por dominio** (ADR-007) | `users/`, `units/`, `platforms/`, cada uno con exactamente tres archivos | Mantiene la predictibilidad del árbol. Un cuarto archivo en un módulo necesita un ADR. |
-| **Un único pipeline de creación** | `users_service.create_many(items, actor_id, dry_run) -> BulkResult`; `create(item)` es `create_many([item])` | **R6.** El alta individual, el CSV, el seed y la futura provisión IAM pasan por las mismas validaciones: normalizar → resolver referencias (`unit_code` → `unit_id`, `rbd`) en lote → detectar duplicados dentro del lote y contra la base → insertar → auditar → emitir invitación. El service recibe `actor_id: str`, no el usuario (L3). |
+| **Un único pipeline de creación** | `users_service.create_many(items, actor_id, dry_run) -> BulkResult`; `create(item)` es `create_many([item])` | **R6.** El alta individual, el CSV, el seed y la futura provisión IAM pasan por las mismas validaciones: normalizar → resolver referencias (`unit_code` → `unit_id`, `rbd`) en lote → detectar duplicados dentro del lote y contra la base → insertar → auditar → emitir invitación (solo en el alta manual y el CSV, no en el alta automática de C24). El service recibe `actor_id: str`, no el usuario (L3). |
 | **Bootstrap desde el módulo dueño** | `users_service.ensure_bootstrap_admin()` y `units_service.ensure_bootstrap_units()`, llamados desde el `lifespan` de `main.py` | Reemplazan `_seed_admin_user` de `seed_service.py`. El seed usa los mismos pipelines, y `database` no importa módulos de dominio. |
 | **CSV → JSON con la biblioteca estándar** (C10) | Ver el detalle debajo de esta tabla | **R6.** El CSV no tiene reglas propias: se traduce al mismo JSON del alta masiva. |
 | **Unión discriminada para operaciones masivas** | `BulkOperation = Annotated[Union[AssignUnit, GrantAccess, RevokeAccess, Disable, Enable], Field(discriminator="op")]`; en el service, un `dict` de `op` → método | **R5.** Un solo endpoint `POST /api/users/bulk`. |
@@ -541,7 +562,11 @@ registro en `audit_log`, si se aprueba §3.7.
 
 **T9 · Configuración sin defaults peligrosos.** Ninguna variable secreta o de identidad tiene
 default (D2): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_SENDER_ADDRESS`,
-`GMAIL_REFRESH_TOKEN`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS` y `PUBLIC_BASE_URL`. Si falta alguna, la app no arranca. La política de
+`GMAIL_REFRESH_TOKEN`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `PUBLIC_BASE_URL` y `GOOGLE_AUTO_PROVISION` (que obliga a decidir de forma
+explícita, en cada entorno, si el alta automática está activa). Si falta alguna, la app no
+arranca. **Cada variable pasa a ser obligatoria en la fase que introduce el código que la usa:**
+las de Gmail solo desde E3, de modo que el login con Google (F3) no depende del consentimiento
+de Gmail. La política de
 contraseñas sí tiene defaults, porque no es un secreto, pero se valida al arrancar: un valor
 fuera de rango impide el arranque con un mensaje claro.
 
@@ -552,6 +577,22 @@ compruebe:
 - que no hay colores crudos, `space-y-*` ni `z-index` manual en los archivos nuevos.
 
 Esto último se puede verificar con un `grep` sobre esos archivos. Incluye el comando en el CA.
+
+**T11 · Alta automática con Google (C24).** La verificación del token y el chequeo de dominio
+son la única puerta de entrada, así que cada punto necesita un test:
+- El backend valida la firma, `aud`, `iss`, `exp`, `email_verified == true`, `hd` igual a un
+  dominio de `ALLOWED_EMAIL_DOMAINS` y el sufijo del correo. El parámetro `hd` que el frontend
+  envía a Google es solo una pista de interfaz y no protege nada. Test: un token de otro dominio,
+  sin `hd` o con `email_verified=false` devuelve `401` y **no crea ningún documento**.
+- La cuenta nueva siempre es `viewer` en `datos`, sin acceso a `iam`, y ninguna claim del token
+  modifica el rol. Test sobre el documento creado.
+- Dos logins simultáneos de un mismo correo nuevo crean un solo usuario (índice único de `email`
+  y manejo de `DuplicateKeyError`).
+- Un usuario `disabled` no entra, y volver a iniciar sesión con Google no lo reactiva.
+- Un usuario que ya existe (por ejemplo, el admin) entra por su correo y **no** se le cambia el
+  rol ni la pertenencia al iniciar sesión con Google.
+- Con `GOOGLE_AUTO_PROVISION` en falso, un correo sin cuenta recibe el mismo `401` que cualquier otro
+  fallo (no se revela si la cuenta existe) y no se crea nada.
 
 ---
 
@@ -573,7 +614,8 @@ Publícalo como Artifact. Si tu entorno no lo permite, déjalo como `.md` con Me
    jefaturas, más un ejemplo de subrogancia vigente. Tiene que mostrar `parent_id` y `ancestors`
    de al menos un nodo de nivel 4.
 3. **Un `stateDiagram` del ciclo de vida del usuario**: `invited → active → disabled → active`,
-   con el evento que dispara cada transición (invitación enviada, primer acceso, desactivación,
+   más la entrada directa a `active` por alta automática con Google (C24), con el evento que
+   dispara cada transición (invitación enviada, primer acceso, alta automática, desactivación,
    reactivación, invitación vencida y reenvío).
 
 Cada diagrama va seguido de una explicación en prosa (convención de `00` §5).
@@ -619,7 +661,7 @@ justifica cada cambio.
 | E5 · Operaciones masivas | `POST /api/users/bulk`, CSV → JSON con vista previa, `bulk-create` parcial, plantilla. |
 | E6 · Frontend de administración | Vista `/usuarios`, filtros en la URL, modal, selección múltiple, vista previa del CSV y guard de rol, todo conforme a §4.3. |
 | E7 · Contrapartes ↔ usuarios | `user_id` opcional, backfill con dry-run, visualización en la ficha. |
-| E8 · Google | Según C7 y C11. |
+| E8 · Google y alta automática | Botón de Google en el login, verificación del `id_token`, alta automática como `viewer` con pertenencia sin asignar (C24, R12, T11), sin asignación automática (N14). **Es la historia central de F6.** |
 | E9 · Endurecimiento (propuesta del agente) | `audit_log`; rate limiting del login, del reset y del canje de enlaces (`04` §7). |
 | E10 · IAM | Una única historia de tipo spike: producir el ADR de §8, sin implementación. |
 
@@ -658,12 +700,13 @@ justifica cada cambio.
 - **Modal, toggle y filtros:** según R5 y §4.3.
   - Al cambiar el `Switch` "Funcionario SLEP" se limpian los campos del otro modo.
   - Los filtros son: unidad (decide si incluye el subárbol), nivel, tipo, establecimiento, cargo,
-    plataforma, rol, estado y "subrogando ahora". Se guardan en los query params (patrón de
+    plataforma, rol, estado, "sin asignar" (cuentas del alta automática, para que el admin las
+    encuentre y las asigne) y "subrogando ahora". Se guardan en los query params (patrón de
     FE01).
 
 ### 1c · Preguntas abiertas y supuestos
 
-Presenta N13 de §9.2, confirma la lectura de C20 y agrega las que encuentres. Cada ítem dice qué
+Presenta N13 y N18 de §9.2, confirma la lectura de C20 y agrega las que encuentres. Cada ítem dice qué
 cambia según la respuesta e incluye tu recomendación.
 
 ### Gate
@@ -681,10 +724,11 @@ muestra la salida real de los tests.
 | Fase | Contenido | Notas |
 |---|---|---|
 | F2 · Documentación de diseño | ADR-009 (acceso por plataforma, roles, plataforma `iam`, `ScopeFilter` diferido), ADR-010 (unidades jerárquicas y subrogancias), ADR-011 (vínculo opcional contraparte ↔ usuario, enmienda a ADR-002), ADR-012 (primer acceso por correo y módulo de envío). Nota de reevaluación en ADR-001 y enmienda a ADR-006. Borradores de `02`, `03` y `04` actualizados. | Si se decide, mover los índices de cada colección nueva a su módulo. |
-| F3 · Backend núcleo | E0, E1, E2, E2b, E4 | **Toca un punto único de falla (auth).** Aplica la regla 4: punto de restauración y BE03/BE05/INT02 en verde antes y después, con la salida visible. |
-| F4 · Primer acceso y masivo | E3, E5, E1b | |
-| F5 · Frontend | E6, la vista de E2b y la parte visual de E7 | Conforme a §4.3. |
-| F6 · Google | E8 | Regla 4 otra vez. |
+| F3 · Backend núcleo | E0, E1, E2, E2b, E4 | ✅ Implementada. Punto de restauración: tag `pre-usuarios-f3`. |
+| F4 · Primer acceso y masivo | E3, E5, E1b | ✅ Implementada. Punto de restauración: tag `pre-usuarios-f4`. |
+| F5 · Frontend | E6, la vista de E2b y la parte visual de E7 | ✅ Implementada y mergeada (PR #1). Conforme a §4.3. |
+| F4b · Interfaz de F4 | Pantalla `/definir-contrasena`, reenviar y restablecer, importación CSV y acciones masivas contra `/bulk` | ⏸ **En espera: va después de F6** (decisión del usuario, 2026-10-19). Al retomarla, reformular el criterio 1 de beta del README: con C24, el alta de punta a punta es entrar con Google. |
+| F6 · Google y seguridad base | E8, C24, T11 y la línea base de seguridad | **Vigente.** Prompt propio: `fase-seguridad-google.md`. Regla 4: `auth` es punto único de falla. |
 | F7 · IAM | ADR de §8 | Solo diseño. |
 
 **Impacto en despliegue ya conocido (regla 3).** Confírmalo en cada fase:
@@ -705,7 +749,7 @@ muestra la salida real de los tests.
   agente no puede hacer: debe dejarlas como checklist para el usuario en `07-operacion.md`.
 - **Frontend:** cada componente de shadcn agregado puede traer dependencias `@radix-ui/*`. Revisa
   con `--dry-run` qué agrega cada `add`. Todo eso obliga a reconstruir la imagen.
-- **Variables nuevas:** `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `PUBLIC_BASE_URL`,
+- **Variables nuevas:** `GOOGLE_AUTO_PROVISION`, `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `PUBLIC_BASE_URL`,
   `PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH`, `PASSWORD_REQUIRE_CHAR_CLASSES`,
   `GMAIL_SENDER_ADDRESS`, `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`.
   Todas van a los dos compose y a la plantilla.
@@ -844,6 +888,12 @@ TLS.
 | N2 | Transporte del correo | Gmail API con el cliente OAuth existente | C21, §4.1 |
 | N11 | `positions`: ¿lista o valor único? | Lista con al menos un valor; los casos con varios serán puntuales | C22, §3.1 |
 | N12 | Ajustes al enum de cargos | Agregar `DOCENTE` y `ASISTENTE_EDUCACION`; no agregar `ENCARGADO_CONVIVENCIA` | C23, §3.1 |
+| — | Alta automática como lector con Google (2026-10-19) | El contenido es público en la organización y el universo es demasiado grande y dinámico para cargarlo a mano | C24, R12, T11 |
+| N14 | ¿Asignar establecimiento y cargo al director que coincide? | **No.** Las cuentas nuevas quedan sin asignar | C24, R12 |
+| N15 | ¿Redactar `licenses[].email` para el `viewer`? | No hace falta: `licenses` se dará de baja. Se retira antes de activar C24 en producción (recomendado) | `fase-seguridad-google.md` G3 |
+| N16 | ¿El dominio incluye cuentas que no son de funcionarios? | **Sí:** estudiantes y cuentas de servicio | N18, G4 |
+| N17 | ¿Se reduce E3? | La prioridad es F6; el cierre del segmento de creación de usuarios queda para después | `fase-seguridad-google.md` G5 |
+| N18 | ¿Restringir el dominio, aceptarlo o volver a invitación? | **Se acepta**: el contenido de `datos` es público en la organización | `fase-seguridad-google.md` G4 |
 
 ### 9.2 Abiertas (inclúyelas en 1c)
 
@@ -856,6 +906,10 @@ TLS.
 
 ## 10. Brechas del repo que afectan la feature (repórtalas, no las ocultes)
 
+- **Condiciones de activación de C24 en producción.** D3, D4 y la sobrescritura del marcador ya
+  están cerradas (F3: BE12, BE13, INT03, INT04). Siguen pendientes la decisión N18 (el dominio
+  incluye estudiantes y cuentas de servicio), el retiro de `licenses` (N15) y los controles SEC
+  de `fase-seguridad-google.md`.
 - **🔸 BRECHA nueva, destructiva: sobrescritura de secretos redactados.**
   - `EditFicha.jsx:35` obtiene la ficha, que a un no-admin le llega con `licenses[].password` y
     `connectivity.ssid_password` cambiados por `"[REDACTED]"`.
@@ -886,5 +940,44 @@ TLS.
 2. Link al Artifact de diagramas.
 3. Historias de usuario agrupadas por épica.
 4. Matriz de trazabilidad.
-5. Preguntas abiertas (N13, la confirmación de C20 y las que agregues).
+5. Preguntas abiertas (N13, N18, la confirmación de C20 y las que agregues).
 6. Detente y espera la aprobación.
+
+---
+
+## 12. Después de cerrar esta feature: proteger recursos nuevos (por ejemplo, `/personas`)
+
+**No se implementa hasta cerrar la feature** (decisión del usuario, 2026-10-19). Se deja escrito
+para no perder el diseño.
+
+**Principio.** El acceso a un recurso lo da un acceso explícito en `users.access[]`, no el dominio
+del correo ni `is_slep_staff`. Con C24 y N16, pertenecer al dominio no significa ser funcionario, y
+las cuentas automáticas quedan sin unidad. El permiso que el admin otorga en masa **es** la marca de
+"funcionario" para ese recurso. La unidad de Personas puede tener un dashboard y esa decisión no
+cambia el modelo: es un recurso más.
+
+**Receta para cada recurso nuevo.**
+1. **Plataforma lógica.** Agrégala a `PLATFORMS_SEED` (`platforms_entity.py`) con su `_id` y sus
+   roles (como `iam`). **Trampa verificada:** `ensure_bootstrap_platforms` solo siembra cuando la
+   colección está vacía, y la API de plataformas no tiene `POST` (solo `GET` y `PATCH`). En la base
+   ya poblada, la plataforma nueva no aparecería. Hay que cambiar el bootstrap para insertar las que
+   falten, por `_id` y de forma idempotente. No hace falta un endpoint nuevo.
+2. **Backend.** Un módulo con los tres archivos y **toda** ruta con
+   `Depends(require_access("personas", {...}))` (lectura: viewer, editor, admin; escritura: editor,
+   admin). `test_BE12_every_route_declares_access_or_is_allowlisted` falla si una ruta no lo
+   declara. El dato nunca se envía al frontend para ocultarlo ahí: el backend es la frontera.
+3. **Tests.** Matriz por rol sobre HTTP (patrón de INT03), incluido el caso "tiene `datos/admin`
+   pero no `personas`" → `403`, y las rutas de escritura nuevas en la tabla de INT08.
+4. **Frontend.** Ruta bajo `<RequireAccess platform="personas" roles={[...]} />` (hoy solo se usa
+   para `iam`, `App.jsx:109`), ítem del menú visible solo si `hasAccess(...)`, y la etiqueta en
+   `format.js`. **`RequireAccess.jsx` tiene fijo el texto "administrar usuarios"**: hazlo genérico.
+   Todo esto es experiencia de usuario; el backend responde `403` igualmente.
+5. **Conceder.** Con las acciones masivas que ya existen (`GrantAccess`) desde la tabla de usuarios.
+
+**Lo difícil no es la ruta, es saber a quién concederla.** Las cuentas automáticas no tienen
+unidad y el dominio incluye estudiantes. Opción a evaluar cuando llegue el momento: exportar de
+Workspace el grupo de funcionarios y conceder por lista de correos.
+
+**Es otra cosa** que una unidad vea solo sus filas (el inventario de la unidad A y no el de la B):
+eso es el `ScopeFilter` diferido en C4. Proteger una ruta responde "¿puedes entrar?"; el filtro de
+alcance responde "¿qué filas ves?".

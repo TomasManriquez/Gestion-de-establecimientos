@@ -169,8 +169,7 @@ export default function EditFicha() {
         location: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined,
         general_info: est.general_info,
         connectivity: est.connectivity,
-        printers: est.printers,
-        licenses: est.licenses
+        printers: est.printers
       };
       await axios.put(`/api/establishments/${est.rbd}`, estPayload);
 

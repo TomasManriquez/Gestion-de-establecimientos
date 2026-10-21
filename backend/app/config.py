@@ -1,6 +1,8 @@
+import hashlib
 import os
 import re
 from typing import List, Mapping, Optional
+from urllib.parse import urlsplit
 
 
 class ConfigError(RuntimeError):
@@ -8,6 +10,19 @@ class ConfigError(RuntimeError):
 
 
 _DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+_EMAIL_RE = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
+_LOCAL_HOSTS = ("localhost", "127.0.0.1")
+MAIL_MODES = ("gmail", "console")
+
+# SEC-1: un secreto de firma corto o conocido equivale a no tener secreto. Los valores rechazados
+# estuvieron versionados en git (compose de desarrollo). Se guardan como sha256 (en minúsculas) para
+# no volver a escribirlos en el código (BE14 lo comprueba); `_PLACEHOLDER_PREFIX` cubre la plantilla.
+JWT_SECRET_MIN_LENGTH = 32
+_KNOWN_WEAK_SECRET_HASHES = frozenset({
+    "2a815a289afe616641e3a72e930d429def113af3a642e96a4b356ad415622140",
+    "e22c24cd6775d31d6b9d783acc334bb81c004e8c612c8267c2c7ba8cf90417d7",
+})
+_PLACEHOLDER_PREFIX = "cambia_esto"
 
 
 class Settings:
@@ -24,6 +39,8 @@ class Settings:
         "MONGODB_URL", "DATABASE_NAME", "JWT_SECRET", "ACCESS_TOKEN_EXPIRE_MINUTES",
         "ADMIN_PASSWORD", "BOOTSTRAP_ADMIN_EMAIL", "ALLOWED_EMAIL_DOMAINS",
         "PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES",
+        "MAIL_MODE", "PUBLIC_BASE_URL", "GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN",
+        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_AUTO_PROVISION",
     )
 
     PROJECT_NAME: str = "SLEP Llanquihue - Gestión de Establecimientos"
@@ -37,7 +54,12 @@ class Settings:
 
         # Seguridad: sin default (D2)
         self.JWT_SECRET: str = self._required("JWT_SECRET")
+        if len(self.JWT_SECRET) < JWT_SECRET_MIN_LENGTH:
+            raise ConfigError(f"JWT_SECRET debe tener al menos {JWT_SECRET_MIN_LENGTH} caracteres "
+                              '(genera uno con: python -c "import secrets; print(secrets.token_hex(64))")')
+        self._reject_known_secret("JWT_SECRET", self.JWT_SECRET)
         self.ADMIN_PASSWORD: str = self._required("ADMIN_PASSWORD")
+        self._reject_known_secret("ADMIN_PASSWORD", self.ADMIN_PASSWORD)
         self.ACCESS_TOKEN_EXPIRE_MINUTES: int = self._int("ACCESS_TOKEN_EXPIRE_MINUTES", 180, minimum=1)
 
         # Identidad: sin default
@@ -57,6 +79,44 @@ class Settings:
         if self.PASSWORD_MIN_LENGTH > self.PASSWORD_MAX_LENGTH:
             raise ConfigError("PASSWORD_MIN_LENGTH no puede ser mayor que PASSWORD_MAX_LENGTH")
 
+        # Correo (ADR-012). MAIL_MODE y PUBLIC_BASE_URL son obligatorias y sin default: el enlace
+        # de invitación se arma con PUBLIC_BASE_URL. Las credenciales de Gmail solo se exigen en
+        # modo `gmail`; en `console` (solo desarrollo) el mensaje se escribe en el log.
+        self.MAIL_MODE: str = self._required("MAIL_MODE").strip().lower()
+        if self.MAIL_MODE not in MAIL_MODES:
+            raise ConfigError(f"MAIL_MODE debe ser uno de {', '.join(MAIL_MODES)} (recibido: {self.MAIL_MODE!r})")
+        self.PUBLIC_BASE_URL: str = self._base_url(self._required("PUBLIC_BASE_URL"))
+        # Cookie de sesión (S3, ADR-016): `Secure` cuando la aplicación se sirve por https. En desarrollo
+        # (http://localhost) no puede ser `Secure` o el navegador la rechazaría.
+        self.SESSION_COOKIE_SECURE: bool = urlsplit(self.PUBLIC_BASE_URL).scheme == "https"
+        host = urlsplit(self.PUBLIC_BASE_URL).hostname or ""
+        local = host in _LOCAL_HOSTS
+        self.GMAIL_SENDER_ADDRESS: str = self._get("GMAIL_SENDER_ADDRESS", "").strip().lower()
+        self.GMAIL_REFRESH_TOKEN: str = self._get("GMAIL_REFRESH_TOKEN", "").strip()
+        self.GOOGLE_CLIENT_ID: str = self._get("GOOGLE_CLIENT_ID", "").strip()
+        self.GOOGLE_CLIENT_SECRET: str = self._get("GOOGLE_CLIENT_SECRET", "").strip()
+        # Alta automática con Google (C24, G1). Obligatoria y sin default: activarla es una decisión
+        # de despliegue explícita, nunca un olvido. `true` o `false`, nada más.
+        raw_provision = self._required("GOOGLE_AUTO_PROVISION").strip().lower()
+        if raw_provision not in ("true", "false"):
+            raise ConfigError(f"GOOGLE_AUTO_PROVISION debe ser true o false (recibido: {raw_provision!r})")
+        self.GOOGLE_AUTO_PROVISION: bool = raw_provision == "true"
+        if self.MAIL_MODE == "console":
+            # Que no pueda quedar activo en producción sin querer: el log sale con el enlace.
+            if not local:
+                raise ConfigError(
+                    "MAIL_MODE=console solo se permite con PUBLIC_BASE_URL en localhost o 127.0.0.1 "
+                    f"(recibido: {host!r}); usa MAIL_MODE=gmail"
+                )
+        else:
+            for name in ("GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
+                if not getattr(self, name):
+                    raise ConfigError(f"Con MAIL_MODE=gmail es obligatoria la variable: {name}")
+            if not _EMAIL_RE.match(self.GMAIL_SENDER_ADDRESS):
+                raise ConfigError("GMAIL_SENDER_ADDRESS debe ser una dirección de correo válida")
+            if urlsplit(self.PUBLIC_BASE_URL).scheme != "https" and not local:
+                raise ConfigError("Con MAIL_MODE=gmail, PUBLIC_BASE_URL debe usar https (el enlace lleva un token)")
+
     def __repr__(self) -> str:  # nunca volcar secretos en logs ni en tracebacks
         return "<Settings (valores ocultos)>"
 
@@ -71,6 +131,12 @@ class Settings:
             raise ConfigError(f"Variable de entorno obligatoria sin definir: {name}")
         return value
 
+    @staticmethod
+    def _reject_known_secret(name: str, value: str) -> None:
+        folded = value.strip().lower()
+        if hashlib.sha256(folded.encode()).hexdigest() in _KNOWN_WEAK_SECRET_HASHES or folded.startswith(_PLACEHOLDER_PREFIX):
+            raise ConfigError(f"{name} es un valor de ejemplo o un valor público del repositorio: define uno propio")
+
     def _int(self, name: str, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
         raw = self._env.get(name)
         if raw is None or raw.strip() == "":
@@ -83,6 +149,17 @@ class Settings:
             raise ConfigError(f"{name} debe ser >= {minimum} (recibido: {value})")
         if maximum is not None and value > maximum:
             raise ConfigError(f"{name} debe ser <= {maximum} (recibido: {value})")
+        return value
+
+    @staticmethod
+    def _base_url(raw: str) -> str:
+        """Origen público sin barra final ni ruta: se le añade `/definir-contrasena#token=…`."""
+        value = raw.strip().rstrip("/")
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ConfigError(f"PUBLIC_BASE_URL debe ser una URL http(s) con host (recibido: {raw.strip()!r})")
+        if parts.path or parts.query or parts.fragment or parts.username or parts.password:
+            raise ConfigError("PUBLIC_BASE_URL debe ser solo el origen (esquema, host y puerto), sin ruta ni credenciales")
         return value
 
     @staticmethod

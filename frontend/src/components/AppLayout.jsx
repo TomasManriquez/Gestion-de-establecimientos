@@ -48,9 +48,8 @@ export default function AppLayout({ currentUser, onLogout }) {
   });
 
   const handleLogout = async () => {
+    // El servidor revoca las sesiones y borra la cookie HttpOnly; si falla, igual se cierra la vista.
     try { await axios.post('/api/auth/logout'); } catch {}
-    localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
     onLogout();
     navigate('/login', { replace: true });
   };

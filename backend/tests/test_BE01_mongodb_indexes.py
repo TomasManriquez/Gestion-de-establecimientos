@@ -45,6 +45,10 @@ async def test_BE01_indexes_created_on_establishments_rbd():
     mock_db.metrics.create_index = AsyncMock()
     mock_db.users = MagicMock(); mock_db.users.create_index = AsyncMock()
     mock_db.units = MagicMock(); mock_db.units.create_index = AsyncMock()
+    mock_db.audit_log = MagicMock(); mock_db.audit_log.create_index = AsyncMock()
+    mock_db.auth_tokens = MagicMock(); mock_db.auth_tokens.create_index = AsyncMock()
+    mock_db.rate_limits = MagicMock(); mock_db.rate_limits.create_index = AsyncMock()
+    mock_db.subrogations = MagicMock(); mock_db.subrogations.create_index = AsyncMock()
 
     svc = DatabaseService()
     svc.db = mock_db
@@ -74,6 +78,10 @@ async def test_BE01_indexes_created_on_metrics_rbd_year_compound():
     mock_db.metrics.create_index = AsyncMock()
     mock_db.users = MagicMock(); mock_db.users.create_index = AsyncMock()
     mock_db.units = MagicMock(); mock_db.units.create_index = AsyncMock()
+    mock_db.audit_log = MagicMock(); mock_db.audit_log.create_index = AsyncMock()
+    mock_db.auth_tokens = MagicMock(); mock_db.auth_tokens.create_index = AsyncMock()
+    mock_db.rate_limits = MagicMock(); mock_db.rate_limits.create_index = AsyncMock()
+    mock_db.subrogations = MagicMock(); mock_db.subrogations.create_index = AsyncMock()
 
     svc = DatabaseService()
     svc.db = mock_db
@@ -103,6 +111,10 @@ async def test_BE01_indexes_created_on_counterparts_rbd():
     mock_db.metrics.create_index = AsyncMock()
     mock_db.users = MagicMock(); mock_db.users.create_index = AsyncMock()
     mock_db.units = MagicMock(); mock_db.units.create_index = AsyncMock()
+    mock_db.audit_log = MagicMock(); mock_db.audit_log.create_index = AsyncMock()
+    mock_db.auth_tokens = MagicMock(); mock_db.auth_tokens.create_index = AsyncMock()
+    mock_db.rate_limits = MagicMock(); mock_db.rate_limits.create_index = AsyncMock()
+    mock_db.subrogations = MagicMock(); mock_db.subrogations.create_index = AsyncMock()
 
     svc = DatabaseService()
     svc.db = mock_db
@@ -131,6 +143,10 @@ async def test_BE01_indexes_created_on_metrics_year_for_analytics():
     mock_db.metrics.create_index = AsyncMock()
     mock_db.users = MagicMock(); mock_db.users.create_index = AsyncMock()
     mock_db.units = MagicMock(); mock_db.units.create_index = AsyncMock()
+    mock_db.audit_log = MagicMock(); mock_db.audit_log.create_index = AsyncMock()
+    mock_db.auth_tokens = MagicMock(); mock_db.auth_tokens.create_index = AsyncMock()
+    mock_db.rate_limits = MagicMock(); mock_db.rate_limits.create_index = AsyncMock()
+    mock_db.subrogations = MagicMock(); mock_db.subrogations.create_index = AsyncMock()
 
     svc = DatabaseService()
     svc.db = mock_db
@@ -162,6 +178,10 @@ async def test_BE01_ensure_indexes_is_idempotent():
     mock_db.metrics.create_index = AsyncMock()
     mock_db.users = MagicMock(); mock_db.users.create_index = AsyncMock()
     mock_db.units = MagicMock(); mock_db.units.create_index = AsyncMock()
+    mock_db.audit_log = MagicMock(); mock_db.audit_log.create_index = AsyncMock()
+    mock_db.auth_tokens = MagicMock(); mock_db.auth_tokens.create_index = AsyncMock()
+    mock_db.rate_limits = MagicMock(); mock_db.rate_limits.create_index = AsyncMock()
+    mock_db.subrogations = MagicMock(); mock_db.subrogations.create_index = AsyncMock()
 
     svc = DatabaseService()
     svc.db = mock_db

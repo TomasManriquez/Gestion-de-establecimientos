@@ -25,15 +25,12 @@ export default function App() {
   const [checkingAuth, setCheckingAuth]       = useState(true);
   const [currentUser, setCurrentUser]         = useState(null);
 
-  // Inicializar axios con el token guardado y registrar interceptor 401
+  // La sesión vive en una cookie HttpOnly (ADR-016): el navegador la envía solo y ningún script la lee.
+  // Al cargar se pregunta quién es el usuario; un 401 significa «sin sesión». Se registra el interceptor 401.
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      fetchCurrentUser();
-    } else {
-      setCheckingAuth(false);
-    }
+    // Purga el token que versiones anteriores dejaron en localStorage (ya no se usa, y no debe quedar ahí).
+    try { localStorage.removeItem('token'); } catch { /* sin almacenamiento: nada que purgar */ }
+    fetchCurrentUser();
 
     const interceptor = axios.interceptors.response.use(
       response => response,
@@ -60,9 +57,8 @@ export default function App() {
 
   const handleLoginSuccess = () => fetchCurrentUser();
 
+  // El cierre en el servidor (revocar y borrar la cookie) lo hace AppLayout con POST /api/auth/logout.
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
     setIsAuthenticated(false);
     setCurrentUser(null);
   };

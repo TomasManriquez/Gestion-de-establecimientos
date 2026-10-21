@@ -3,7 +3,7 @@ fake_mongo.py — MongoDB en memoria para los tests de reglas de negocio.
 
 Implementa el subconjunto de la API de Motor que usan los services de esta feature:
 insert_one/insert_many, find_one, find (sort/skip/limit/to_list), count_documents,
-update_one/update_many ($set, $unset, $push, $pull, $setOnInsert, upsert),
+update_one/update_many ($set, $unset, $inc, $push, $pull, $setOnInsert, upsert),
 find_one_and_update, delete_one/delete_many y create_index con `unique` y
 `partialFilterExpression`. Los índices únicos lanzan el `DuplicateKeyError` real de pymongo.
 
@@ -160,6 +160,10 @@ def _apply_update(doc, update, inserting=False):
         elif op == "$unset":
             for k in fields:
                 _unset_path(doc, k)
+        elif op == "$inc":
+            for k, v in fields.items():
+                cur = _get_path(doc, k)
+                _set_path(doc, k, (cur[0] if cur else 0) + v)
         elif op == "$setOnInsert":
             if inserting:
                 for k, v in fields.items():

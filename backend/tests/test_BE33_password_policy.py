@@ -57,6 +57,8 @@ def test_BE33_common_password_or_context_word_rejected(password):
 
 def test_BE33_contextual_password_rejected():
     assert "context_word" in codes("mi-clave-juan.torres-2026")              # contiene el local-part del correo
+    assert "context_word" in codes("mi-clave-juantorres-2026")               # ...y también sin el separador
+    assert "context_word" in codes("MI-CLAVE-JUAN_TORRES-2026")
     assert "context_word" in codes("bienvenido-a-llanquihue-1")
     assert "context_word" not in codes("zorro-azul-nube-de-tarde")
 
