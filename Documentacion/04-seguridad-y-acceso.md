@@ -392,6 +392,14 @@ editar) y `viewer` (solo ver); `iam` solo tiene `admin`. Reemplaza la matriz de 
 | `/api/users/*` (salvo `/me`), escritura en `/api/units/*` y `/api/platforms/*`, `/api/audit` | solo con `iam/admin` | solo con `iam/admin` | solo con `iam/admin` |
 | `GET` y `PATCH /api/users/me`, `GET /api/units*`, `POST /api/auth/password` | ✅ | ✅ | ✅ |
 
+**Fuente única de la matriz:** `auth_entity.ROLE_CAPABILITIES` asigna a cada rol sus capacidades
+(`read`, `write`, `delete`); `DATOS_READ`, `DATOS_WRITE` y `DATOS_DELETE` se derivan de ahí y `GET
+/api/auth/me` las entrega en `access[].capabilities`. El frontend oculta lo que el rol no puede hacer
+(«Editar Ficha», «Editar estadísticas») y protege `/establecimientos/:rbd/editar` con
+`RequireAccess capability="write"`; eso es solo experiencia de usuario: `require_access` sigue leyendo
+el rol del documento de usuario en cada request, así que un acceso revocado deja de valer en la
+siguiente petición (`test_BE31_capabilities_follow_the_role_matrix`, `test_FE19_*`).
+
 **`datos/admin` no es `iam/admin`**: separación de funciones (C12). **Sin acceso a `datos` ⇒ `403`**
 en todas las rutas de datos, aunque el usuario esté autenticado.
 

@@ -98,8 +98,13 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard"                          element={<Dashboard />} />
           <Route path="/establecimientos"                   element={<Directory />} />
-          <Route path="/establecimientos/:rbd"              element={<FichaEstablecimiento />} />
-          <Route path="/establecimientos/:rbd/editar"       element={<EditFicha />} />
+          <Route path="/establecimientos/:rbd"              element={<FichaEstablecimiento currentUser={currentUser} />} />
+
+          {/* Editar exige la capacidad `write` en `datos`; el backend la vuelve a exigir en cada PUT. */}
+          <Route element={<RequireAccess currentUser={currentUser} platform="datos" capability="write"
+            message="Tu cuenta puede ver la ficha, pero no editarla. Si lo necesitas, solicítalo a un administrador." />}>
+            <Route path="/establecimientos/:rbd/editar"     element={<EditFicha />} />
+          </Route>
 
           {/* Configuración: solo el admin global (iam/admin). El backend vuelve a verificarlo. */}
           <Route element={<RequireAccess currentUser={currentUser} platform="iam" roles={['admin']} />}>

@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { Save, X, Plus, Trash2, ShieldAlert, RefreshCw } from 'lucide-react';
+import { Save, X, Plus, Trash2, ShieldAlert, RefreshCw, AlertTriangle } from 'lucide-react';
+import EditFichaEstadisticas from './EditFichaEstadisticas';
+import { buildMetricPayloads } from '@/lib/metricFields';
 
 /**
  * EditFicha — FE-03
  * Lee el RBD desde useParams(). Acepta datos pre-cargados via location.state
  * (al navegar desde FichaEstablecimiento), o los carga autónomamente si el
  * acceso es directo (F5, bookmark). Elimina dependencia de props initialEst/onSaveSuccess.
+ * La pestaña «Estadísticas» edita `metrics` por año: al guardar se envía un PUT por año con
+ * solo los campos cambiados (`buildMetricPayloads`).
  */
 export default function EditFicha() {
   const { rbd } = useParams();
@@ -23,7 +27,12 @@ export default function EditFicha() {
   const [cps, setCps] = useState(hasStateData ? [...(stateData.initialCps ?? [])] : []);
   const [deletedCpIds, setDeletedCpIds] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState('general');
+  const [activeSubTab, setActiveSubTab] = useState(stateData.initialTab ?? 'general');
+  const [metrics, setMetrics] = useState(stateData.initialMetrics ?? []);
+  const [metricEdits, setMetricEdits] = useState({});
+  const [metricErrors, setMetricErrors] = useState({});
+  const [extraYears, setExtraYears] = useState([]);
+  const [selectedYear, setSelectedYear] = useState(null);
 
   // Carga autónoma solo cuando no hay datos en location.state
   useEffect(() => {
@@ -31,12 +40,14 @@ export default function EditFicha() {
     const loadData = async () => {
       setLoadingData(true);
       try {
-        const [estRes, cpRes] = await Promise.all([
+        const [estRes, cpRes, metRes] = await Promise.all([
           axios.get(`/api/establishments/${rbd}`),
           axios.get(`/api/counterparts/establishment/${rbd}`),
+          axios.get(`/api/metrics/establishment/${rbd}`),
         ]);
         setEst({ ...estRes.data });
         setCps([...cpRes.data]);
+        setMetrics(Array.isArray(metRes.data) ? metRes.data : []);
       } catch (err) {
         console.error('Error loading EditFicha data', err);
       } finally {
@@ -45,6 +56,17 @@ export default function EditFicha() {
     };
     loadData();
   }, [rbd, hasStateData]);
+
+  // Si se llegó con datos en location.state pero sin métricas, se piden solo las métricas
+  useEffect(() => {
+    if (!hasStateData || stateData.initialMetrics) return;
+    axios.get(`/api/metrics/establishment/${rbd}`)
+      .then((res) => setMetrics(Array.isArray(res.data) ? res.data : []))
+      .catch((err) => console.error('Error loading metrics', err));
+  }, [rbd, hasStateData]);
+
+  const years = [...new Set([...metrics.map((m) => m.year), ...extraYears])].sort((a, b) => b - a);
+  const activeYear = selectedYear ?? years[0] ?? null;
 
   if (loadingData || !est) {
     return (
@@ -155,7 +177,33 @@ export default function EditFicha() {
     }));
   };
 
+  // Statistics (metrics) operations
+  const handleMetricEdit = (year, key, value) => {
+    setMetricEdits(prev => ({ ...prev, [year]: { ...prev[year], [key]: value } }));
+    setMetricErrors(prev => {
+      if (!prev[year]?.[key]) return prev;
+      const rest = { ...prev[year] };
+      delete rest[key];
+      return { ...prev, [year]: rest };
+    });
+  };
+
+  const handleAddYear = (year) => {
+    setExtraYears(prev => (prev.includes(year) ? prev : [...prev, year]));
+    setSelectedYear(year);
+  };
+
   const handleSave = async () => {
+    // Validar estadísticas antes de escribir nada: si hay errores no se guarda ninguna pestaña.
+    const { payloads: metricPayloads, errors } = buildMetricPayloads(metrics, metricEdits);
+    const yearsWithErrors = Object.keys(errors).map(Number);
+    if (yearsWithErrors.length) {
+      setMetricErrors(errors);
+      setActiveSubTab('statistics');
+      setSelectedYear(yearsWithErrors[0]);
+      return;
+    }
+
     setSaving(true);
     try {
       // 1. Save base establishment (general_info, connectivity, printers)
@@ -205,6 +253,11 @@ export default function EditFicha() {
         }
       }
 
+      // 4. Estadísticas: un PUT por año, solo con los campos cambiados
+      for (const { year, body } of metricPayloads) {
+        await axios.put(`/api/metrics/establishment/${est.rbd}/${year}`, body);
+      }
+
       navigate(`/establecimientos/${est.rbd}`);
     } catch (err) {
       console.error('Error saving Ficha data', err);
@@ -247,6 +300,7 @@ export default function EditFicha() {
       <div className="flex gap-2 border-b border-slate-100 pb-2 overflow-x-auto text-xs font-semibold">
         {[
           { id: 'general', label: 'Datos Generales' },
+          { id: 'statistics', label: 'Estadísticas' },
           { id: 'counterparts', label: 'Contrapartes Técnicas' },
           { id: 'connectivity', label: 'Configuración Conectividad' },
           { id: 'printers', label: 'Inventario Impresoras' }
@@ -362,6 +416,28 @@ export default function EditFicha() {
               />
             </div>
           </div>
+        )}
+
+        {/* Editor Tab: Estadísticas por año */}
+        {activeSubTab === 'statistics' && (
+          <>
+            {Object.values(metricErrors).some((e) => Object.keys(e).length > 0) && (
+              <div role="alert" className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-sm font-semibold text-rose-700">
+                <AlertTriangle size={16} />
+                Hay valores fuera de rango. Corrígelos para poder guardar.
+              </div>
+            )}
+            <EditFichaEstadisticas
+              metrics={metrics}
+              years={years}
+              selectedYear={activeYear}
+              onSelectYear={setSelectedYear}
+              onAddYear={handleAddYear}
+              edits={metricEdits}
+              errors={metricErrors}
+              onEdit={handleMetricEdit}
+            />
+          </>
         )}
 
         {/* Editor Tab 2: Contrapartes Técnicas */}

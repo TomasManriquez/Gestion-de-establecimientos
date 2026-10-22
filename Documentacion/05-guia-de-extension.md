@@ -328,11 +328,13 @@ común y el más silencioso: el dato llega del backend y desaparece sin error.
 ### 2.3 Agregar una métrica anual
 
 1. `metrics_entity.py` → `MetricBase`: agregar `Optional[tipo] = <default>`.
-2. `metrics_entity.py` → `MetricUpdate`: **agregar el mismo campo como `Optional[tipo] = None`.**
-   Son dos listas mantenidas a mano. Olvidar la segunda deja el campo legible pero no editable,
-   sin ningún error.
+2. `metrics_entity.py` → `MetricUpdate`: **agregar el mismo campo como `Optional[tipo] = Field(None, <rango>)`**
+   (usa `_COUNT`, `_RATE`, `_FRACTION` o `_SCORE`). Son dos listas mantenidas a mano. Olvidar la
+   segunda deja el campo legible pero no editable, sin ningún error.
 3. `seed_service.py:60-105` → mapeo del seeding, si el dato viene en `establishments.json`.
-4. Frontend: pestaña de métricas de la ficha.
+4. Frontend: agregar el campo a `METRIC_SECTIONS` en `frontend/src/lib/metricFields.js` con el
+   mismo `kind` que su rango; la pestaña «Estadísticas» del editor y la validación previa lo toman
+   de ahí. Mostrarlo también en la pestaña de estadísticas de la ficha si corresponde.
 5. `02-modelo-datos.md` §5.
 
 Elige el tipo con cuidado: un porcentaje va como `float`, no como `str`. `attendance_avg` es
@@ -493,6 +495,8 @@ Son decisiones conscientes o condiciones del entorno, no errores pendientes de c
 | D33 | La interfaz de administración no conoce «sin asignar» (`is_slep_staff` nulo, F6) | `UsersTable.jsx:13`, `UserForm.jsx:24` | La tabla muestra a esas cuentas como de establecimiento y el formulario las abre en modo «establecimiento» (`!!null`): guardar sin completar rbd y cargos da `422`. Fuera de alcance de F6 (N17); el filtro de API `?assignment=unassigned` ya existe |
 | D34 | `verify_oauth2_token` descarga los certificados de Google en cada login | `auth/google_service.py` | Sin caché local. Aceptable a esta escala; si Google no responde, el login con Google falla con `401` y el de contraseña no se afecta |
 | D35 | **El límite por IP puede evadirse si el proxy del host *agrega* a `X-Forwarded-For` en vez de sobrescribirlo.** Gunicorn corre con `--forwarded-allow-ips "*"` y uvicorn toma entonces la dirección **más a la izquierda** del encabezado, que controla quien llama | `Dockerfile.prod`, `nginx.conf` (`$proxy_add_x_forwarded_for`), proxy del host (fuera del repo) | Verificado con `ProxyHeadersMiddleware(trusted_hosts="*")`: con `X-Forwarded-For: 9.9.9.9, <ip real>` el backend ve `9.9.9.9`. Cada petición con una IP inventada evade el login, el canje y `/api/auth/google`. Revisar el proxy (`07` §11); corrección propuesta en el repo en `07` §11.3 |
+| D36 | **Los cambios a la ficha, contrapartes y métricas no quedan auditados.** `audit_log` solo registra usuarios, unidades, plataformas y subrogancias | `audit_entity.AuditTarget`; `establishments_service`, `counterparts_service`, `metrics_service` | No se puede saber quién cambió una matrícula ni cuándo (lo que el panel «Origen del dato» necesita mostrar). Agregarlo exige declarar `metrics → audit` (y los otros) en ADR-013 / `test_BE45_*` |
+| D37 | `npm run lint` no corre: `eslint` no está en `package.json` y el frontend no tiene configuración de ESLint | `frontend/package.json` | El paso «lint» de la Definition of Done no se puede cumplir hasta agregar `eslint` y su configuración |
 
 ### 5.4 Qué escala mal a partir de aquí
 
