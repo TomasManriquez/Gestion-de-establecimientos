@@ -2,6 +2,7 @@ import re
 import math
 from typing import List, Optional
 from app.database.database_service import db_service
+from app.database.connectivity_migration import is_migrated, migrate_connectivity
 from app.establishments.establishments_entity import EstablishmentUpdate, RedactedPlaceholderError
 
 REDACTED = "[REDACTED]"
@@ -99,6 +100,10 @@ class EstablishmentsService:
         if doc:
             doc["_id"] = str(doc["_id"])
             doc.pop("licenses", None)        # campo retirado (N15): un documento antiguo no lo vuelve a servir
+            if not is_migrated(doc.get("connectivity")):
+                # Aún sin `scripts/migrate_connectivity.py`: se sirve ya en tres bloques (sin los datos
+                # de «otro tipo» que solo trae la planilla). Guardar la ficha deja el modelo nuevo.
+                doc["connectivity"] = migrate_connectivity(doc.get("connectivity"))[0]
             if not include_sensitive:
                 if doc.get("connectivity", {}).get("ssid_password"):
                     doc["connectivity"]["ssid_password"] = "[REDACTED]"

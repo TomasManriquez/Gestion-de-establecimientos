@@ -2,6 +2,8 @@ import os
 import json
 import logging
 
+from app.database.connectivity_migration import migrate_connectivity
+
 logger = logging.getLogger("database.seed")
 
 
@@ -182,7 +184,8 @@ async def _seed_establishments(db):
             "address": item.get("address", ""),
             "location": item.get("location"),
             "general_info": item.get("general_info", {}),
-            "connectivity": item.get("connectivity", {}),
+            # El JSON de la carga inicial trae el modelo antiguo; se siembra ya en tres bloques.
+            "connectivity": migrate_connectivity(item.get("connectivity"))[0],
             "printers": item.get("printers", {}),
         }
         establishments_to_insert.append(est_doc)

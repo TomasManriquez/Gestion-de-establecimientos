@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts';
 import EstablishmentMap from './EstablishmentMap';
+import ConectividadFicha from './ConectividadFicha';
 import { can } from '@/lib/access';
 
 /** Fila de «Detalles generales»: etiqueta pequeña y valor, sin tarjeta propia. */
@@ -456,99 +457,8 @@ export default function FichaEstablecimiento({ currentUser }) {
         {activeTab === 'connectivity' && (
           <div className="space-y-6">
             
-            {/* Telsur 2030 Status */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-5">
-              <h3 className="text-base font-bold text-slate-800 font-outfit flex items-center gap-2">
-                Conectividad 2030 (TELSUR)
-              </h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
-                  <div>
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Estado Conexión</span>
-                    <span className="font-bold text-slate-800 text-sm">
-                      {establishment.connectivity.internet_provider === 'TELSUR' ? 'TELSUR' : 'Otro Proveedor'}
-                    </span>
-                  </div>
-                  {establishment.connectivity.internet_provider === 'TELSUR' ? (
-                    <CheckCircle2 className="text-emerald-500" size={24} />
-                  ) : (
-                    <Info className="text-amber-500" size={24} />
-                  )}
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">SSID / Red Wifi</span>
-                  <span className="font-bold text-slate-800 text-sm">{establishment.connectivity.ssid || '-'}</span>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Clave Wifi</span>
-                  <span className="font-bold text-slate-800 text-sm">{establishment.connectivity.ssid_password || '-'}</span>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Velocidad de Bajada</span>
-                  <span className="font-bold text-slate-800 text-sm">
-                    {establishment.connectivity.download_speed_2030 ? `${establishment.connectivity.download_speed_2030} Mbps` : '-'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Starlink Status */}
-              <div className="p-4 bg-sky-50/50 rounded-xl border border-sky-100 flex items-center justify-between text-sm">
-                <div className="flex items-center gap-3">
-                  <Wifi size={20} className="text-sky-600" />
-                  <div>
-                    <span className="font-bold text-slate-800">Antena Starlink Instalada</span>
-                    <p className="text-xs text-slate-500">Conectividad satelital de respaldo en el establecimiento</p>
-                  </div>
-                </div>
-                {establishment.connectivity.starlink?.installed ? (
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">INSTALADO</span>
-                    <span className="text-xs text-slate-500">{establishment.connectivity.starlink.date || ''}</span>
-                  </div>
-                ) : (
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-500 text-xs font-bold rounded-full">NO</span>
-                )}
-              </div>
-            </div>
-
-            {/* BAM details */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden space-y-4 p-6">
-              <h3 className="text-base font-bold text-slate-800 font-outfit">Inventario de Banda Ancha Móvil (BAM)</h3>
-              
-              <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      <th className="px-4 py-3">N° BAM</th>
-                      <th className="px-4 py-3">IMEI</th>
-                      <th className="px-4 py-3">Equipo</th>
-                      <th className="px-4 py-3">OC Asignación</th>
-                      <th className="px-4 py-3">Término de Contrato</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-600 font-sans">
-                    {establishment.connectivity.bam?.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                          Sin bolsas o dispositivos BAM registrados en el establecimiento.
-                        </td>
-                      </tr>
-                    ) : (
-                      establishment.connectivity.bam.map((b, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-3 font-semibold text-slate-800">{b.number}</td>
-                          <td className="px-4 py-3 font-mono">{b.imei}</td>
-                          <td className="px-4 py-3">{b.device}</td>
-                          <td className="px-4 py-3 font-mono">{b.oc}</td>
-                          <td className="px-4 py-3">{b.end || 'Vigente'}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            {/* 2030, BAM y otro tipo: solo los bloques con datos */}
+            <ConectividadFicha connectivity={establishment.connectivity} />
 
             {/* Internal network points & phone extensions */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

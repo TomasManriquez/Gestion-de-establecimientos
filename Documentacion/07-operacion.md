@@ -504,7 +504,14 @@ lo evidencia.
    con respaldo previo (`scripts/backup-mongo.sh`), `--apply`. Si el conteo de documentos «con al menos una
    credencial» no es 0, **rotar esas credenciales** en cada plataforma externa: borrarlas de Mongo no las
    invalida y siguen en los respaldos anteriores. La aplicación ya no lee ni sirve el campo aunque exista.
-10. [ ] **Cookie de sesión (ADR-016):** `PUBLIC_BASE_URL` debe ser **exactamente** el origen público
+10. [ ] **Conectividad en tres bloques:** con respaldo previo (`scripts/backup-mongo.sh`), desde `backend/`:
+   `python scripts/migrate_connectivity.py --excel <DASHBOARD_final.xlsx> --report vista_previa.csv` muestra,
+   sin modificar nada, cómo queda cada establecimiento y las notas para revisar; con `--apply` escribe. Es
+   idempotente. Sin `--excel` el bloque «otro tipo» queda sin tipo, vencimiento ni OC. Hasta migrar, la
+   ficha y el gráfico convierten al vuelo; guardar una ficha la deja migrada (sin los datos de la planilla).
+   Para una instalación nueva: `--from-json establishments.json --excel … --write-json <salida>` deja el JSON
+   de siembra ya convertido (el seeding igual convierte el JSON antiguo, sin la planilla).
+11. [ ] **Cookie de sesión (ADR-016):** `PUBLIC_BASE_URL` debe ser **exactamente** el origen público
    (`https://datos.slepllanquihue.gob.cl`, sin barra final): con `https`, la cookie sale `Secure`; y toda
    escritura valida `Origin` contra ese valor. El proxy del host **no debe** quitar la cabecera `Origin` ni
    `Set-Cookie`. Tras el primer despliegue, todos los usuarios vuelven a iniciar sesión una vez.

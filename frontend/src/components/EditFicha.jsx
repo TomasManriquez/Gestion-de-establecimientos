@@ -3,6 +3,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { Save, X, Plus, Trash2, ShieldAlert, RefreshCw, AlertTriangle } from 'lucide-react';
 import EditFichaEstadisticas from './EditFichaEstadisticas';
+import EditConectividad from './EditConectividad';
+import { withDefaults } from '@/lib/connectivity';
 import { buildMetricPayloads } from '@/lib/metricFields';
 
 /**
@@ -23,7 +25,7 @@ export default function EditFicha() {
   const hasStateData = Boolean(stateData.initialEst);
 
   const [loadingData, setLoadingData] = useState(!hasStateData);
-  const [est, setEst] = useState(hasStateData ? { ...stateData.initialEst } : null);
+  const [est, setEst] = useState(hasStateData ? { ...stateData.initialEst, connectivity: withDefaults(stateData.initialEst.connectivity) } : null);
   const [cps, setCps] = useState(hasStateData ? [...(stateData.initialCps ?? [])] : []);
   const [deletedCpIds, setDeletedCpIds] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -45,7 +47,7 @@ export default function EditFicha() {
           axios.get(`/api/counterparts/establishment/${rbd}`),
           axios.get(`/api/metrics/establishment/${rbd}`),
         ]);
-        setEst({ ...estRes.data });
+        setEst({ ...estRes.data, connectivity: withDefaults(estRes.data?.connectivity) });
         setCps([...cpRes.data]);
         setMetrics(Array.isArray(metRes.data) ? metRes.data : []);
       } catch (err) {
@@ -85,29 +87,6 @@ export default function EditFicha() {
       general_info: {
         ...prev.general_info,
         [field]: value
-      }
-    }));
-  };
-
-  const handleConnectivityChange = (field, value) => {
-    setEst(prev => ({
-      ...prev,
-      connectivity: {
-        ...prev.connectivity,
-        [field]: value
-      }
-    }));
-  };
-
-  const handleStarlinkChange = (value) => {
-    setEst(prev => ({
-      ...prev,
-      connectivity: {
-        ...prev.connectivity,
-        starlink: {
-          ...prev.connectivity.starlink,
-          installed: value
-        }
       }
     }));
   };
@@ -302,7 +281,7 @@ export default function EditFicha() {
           { id: 'general', label: 'Datos Generales' },
           { id: 'statistics', label: 'Estadísticas' },
           { id: 'counterparts', label: 'Contrapartes Técnicas' },
-          { id: 'connectivity', label: 'Configuración Conectividad' },
+          { id: 'connectivity', label: 'Conectividad' },
           { id: 'printers', label: 'Inventario Impresoras' }
         ].map(sub => (
           <button
@@ -538,69 +517,9 @@ export default function EditFicha() {
           </div>
         )}
 
-        {/* Editor Tab 3: Conectividad */}
+        {/* Editor Tab 3: Conectividad (2030, BAM y otro tipo) */}
         {activeSubTab === 'connectivity' && (
-          <div className="space-y-6">
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
-              <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider">Fibra óptica Conectividad 2030 (TELSUR)</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500">SSID Red Wifi</label>
-                  <input
-                    type="text"
-                    value={est.connectivity.ssid}
-                    onChange={(e) => handleConnectivityChange('ssid', e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-sky-500 font-sans"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500">Clave SSID</label>
-                  <input
-                    type="text"
-                    value={est.connectivity.ssid_password}
-                    onChange={(e) => handleConnectivityChange('ssid_password', e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-sky-500 font-sans"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500">Velocidad (Mbps)</label>
-                  <input
-                    type="text"
-                    value={est.connectivity.download_speed_2030}
-                    onChange={(e) => handleConnectivityChange('download_speed_2030', e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-sky-500 font-sans"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 pt-2">
-                <label className="text-xs font-semibold text-slate-600">¿Cuenta con Antena Starlink?</label>
-                <div className="flex items-center gap-4">
-                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
-                    <input
-                      type="radio"
-                      name="starlink"
-                      checked={est.connectivity.starlink?.installed === true}
-                      onChange={() => handleStarlinkChange(true)}
-                      className="text-sky-600 focus:ring-sky-500"
-                    />
-                    Sí (Instalado)
-                  </label>
-                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
-                    <input
-                      type="radio"
-                      name="starlink"
-                      checked={est.connectivity.starlink?.installed === false}
-                      onChange={() => handleStarlinkChange(false)}
-                      className="text-sky-600 focus:ring-sky-500"
-                    />
-                    No
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
+          <EditConectividad conn={est.connectivity} onChange={(connectivity) => setEst({ ...est, connectivity })} />
         )}
 
         {/* Editor Tab 4: Impresoras */}

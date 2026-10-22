@@ -489,7 +489,10 @@ Bearer. `200` → cuatro series, cada una un array de `{label, value}`:
 `establishments` filtrando `year: 2026` (mismo hardcode). `establishments_by_category` limpia
 el prefijo numérico de la categoría (`"7. LICEO" → "LICEO"`, `:111-114`) — **esa limpieza vive
 solo aquí**, no en el modelo, así que el `category` del listado sí trae el prefijo y el del
-gráfico no. `establishments_by_connectivity` etiqueta los nulos como `"Sin Conexión"`.
+gráfico no. `establishments_by_connectivity` (desde 2026-10-22) cuenta por bloque, no por proveedor:
+etiquetas fijas `"Conectividad 2030"`, `"Banda ancha móvil"`, `"Otro tipo de conexión"` y `"Sin internet"`;
+un establecimiento cuenta en cada bloque que tenga (`analytics_service.connectivity_breakdown`). **Cambio
+de contrato** (D10): el `Dashboard.jsx` actual lo consume sin cambios porque solo lee `label`/`value`.
 
 > 🔸 **BRECHA:** los endpoints de analytics **no tienen `response_model`**
 > (`analytics_controller.py:7,11`). Devuelven un dict libre, así que no aparecen tipados en
