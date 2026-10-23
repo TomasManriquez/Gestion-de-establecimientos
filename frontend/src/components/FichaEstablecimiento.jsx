@@ -185,6 +185,11 @@ export default function FichaEstablecimiento({ currentUser }) {
               <span className="px-2.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-full uppercase">
                 {establishment.area_type}
               </span>
+              {establishment.status === 'closed' && (
+                <span className="px-2.5 py-0.5 bg-rose-100 text-rose-800 text-[10px] font-bold rounded-full uppercase">
+                  Cerrado{establishment.closed_year ? ` en ${establishment.closed_year}` : ''}
+                </span>
+              )}
             </div>
             <h1 className="text-2xl font-extrabold font-outfit text-slate-800 tracking-tight leading-none">
               {establishment.name}

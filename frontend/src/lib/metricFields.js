@@ -12,6 +12,7 @@
  *   fractionText igual que fraction, pero se guarda como texto (asistencia, por la planilla)
  *   score    puntaje 0–1.000
  *   category texto de una lista cerrada
+ *   asOf     corte de un dato parcial, AAAA-MM; vacío = año completo (se puede borrar)
  */
 export const PERFORMANCE_CATEGORIES = ['ALTO', 'MEDIO', 'MEDIO-BAJO', 'INSUFICIENTE'];
 
@@ -20,6 +21,7 @@ export const METRIC_SECTIONS = [
     title: 'Matrícula y personal',
     fields: [
       { key: 'enrollment', label: 'Matrícula', kind: 'int' },
+      { key: 'enrollment_as_of', label: 'Corte de la matrícula', kind: 'asOf' },
       { key: 'num_teachers', label: 'Docentes', kind: 'int' },
       { key: 'num_assistants', label: 'Asistentes de la educación', kind: 'int' },
     ],
@@ -28,6 +30,7 @@ export const METRIC_SECTIONS = [
     title: 'Asistencia y vulnerabilidad',
     fields: [
       { key: 'attendance_avg', label: 'Asistencia promedio (%)', kind: 'fractionText' },
+      { key: 'attendance_as_of', label: 'Corte de la asistencia', kind: 'asOf' },
       { key: 'ive_basica', label: 'IVE básica (%)', kind: 'fraction' },
       { key: 'ive_media', label: 'IVE media (%)', kind: 'fraction' },
     ],
@@ -73,7 +76,7 @@ const parseNumber = (text) => Number(String(text).trim().replace(',', '.'));
 /** Valor guardado → texto del input. En la carga original un 0 en tasas, IVE y puntajes es «sin dato». */
 export function toInput(field, raw) {
   if (raw === null || raw === undefined || raw === '') return '';
-  if (field.kind === 'category') return String(raw);
+  if (field.kind === 'category' || field.kind === 'asOf') return String(raw);
   const n = Number(raw);
   if (!Number.isFinite(n)) return '';
   if (field.kind === 'int') return String(n);
@@ -87,6 +90,9 @@ export function toInput(field, raw) {
  */
 export function fromInput(field, text) {
   const t = String(text ?? '').trim();
+  if (field.kind === 'asOf') {
+    return t === '' || /^\d{4}-(0[1-9]|1[0-2])$/.test(t) ? { value: t } : { error: 'Usa el formato AAAA-MM' };
+  }
   if (t === '') return {};
   if (field.kind === 'category') {
     return PERFORMANCE_CATEGORIES.includes(t) ? { value: t } : { error: 'Elige una categoría de la lista' };

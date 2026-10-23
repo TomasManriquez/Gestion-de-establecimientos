@@ -37,6 +37,7 @@ Base: `/api`. Sin versionado en la ruta. Servidor documentado en `main.py:27-31`
 | 15 | PUT | `/api/metrics/establishment/{rbd}/{year}` | `datos`: admin, editor | `Metric` |
 | 16 | GET | `/api/analytics/kpis` | `datos`: admin, editor, viewer | objeto de KPIs |
 | 17 | GET | `/api/analytics/charts` | `datos`: admin, editor, viewer | objeto de series |
+| 18 | GET | `/api/analytics/enrollment` | `datos`: admin, editor, viewer | `EnrollmentDataset` |
 
 Más los tres endpoints que FastAPI monta solo: `/docs`, `/redoc`, `/openapi.json`.
 
@@ -494,10 +495,29 @@ etiquetas fijas `"Conectividad 2030"`, `"Banda ancha móvil"`, `"Otro tipo de co
 un establecimiento cuenta en cada bloque que tenga (`analytics_service.connectivity_breakdown`). **Cambio
 de contrato** (D10): el `Dashboard.jsx` actual lo consume sin cambios porque solo lee `label`/`value`.
 
+### 5.18 `GET /api/analytics/enrollment`
+Bearer. `200` → `EnrollmentDataset` (ADR-018):
+
+```json
+{"establishments": [{"rbd": "7722", "name": "…", "comuna": "PUERTO VARAS", "area_type": "URBANO",
+                     "category": "7. LICEO POLITÉCNICO", "status": "active", "closed_year": null}],
+ "points": [{"rbd": "7722", "year": 2026, "enrollment": 519, "enrollment_as_of": "2026-03",
+             "attendance": null, "attendance_as_of": "", "teachers": 50, "assistants": 33}],
+ "years": [2022, 2023, 2024, 2025, 2026],
+ "indicators": {"enrollment": {"label": "Matrícula", "years": [2022, 2023, 2024, 2025, 2026]},
+                "attendance": {"label": "Asistencia", "years": [2025]}, "…": {}}}
+```
+
+`null` = sin dato (distinto de 0). `attendance` es una proporción 0–1. Los puntos de un `rbd` que no
+existe en `establishments` se omiten. `PUT /api/establishments/{rbd}` acepta además `status`
+(`active`|`closed`) y `closed_year` (2000–2100): cerrar sin año, mandar año sin estado o un activo con año
+→ `422`; reabrir borra el año. `PUT /api/metrics/...` acepta `enrollment_as_of` y `attendance_as_of`
+(AAAA-MM o `""`).
+
 > 🔸 **BRECHA:** los endpoints de analytics **no tienen `response_model`**
 > (`analytics_controller.py:7,11`). Devuelven un dict libre, así que no aparecen tipados en
 > OpenAPI y nada impide que un cambio en el service altere la forma sin aviso. Son los dos
-> únicos endpoints sin contrato declarado.
+> únicos endpoints sin contrato declarado. `/enrollment` (§5.18) sí lo declara.
 >
 > 🔸 **BRECHA:** el año de referencia hardcodeado (2026, en
 > `analytics_service.py:10,48,74`) es el acoplamiento temporal más concreto del backend.

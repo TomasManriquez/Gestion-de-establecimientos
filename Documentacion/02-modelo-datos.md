@@ -240,6 +240,10 @@ deliberado: el dato viene de planillas donde una celda puede contener `"30"`, `"
 `"s/i"`, y tipar fuerte habría hecho fallar el seeding masivamente. El costo es que no se puede
 ordenar ni filtrar por rango sobre esos campos sin normalizar primero. Ver ADR-005.
 
+**Estado del establecimiento (2026-10-23).** `status` ∈ `active`, `closed` (por defecto `active`) y
+`closed_year`. Uno cerrado no se borra: conserva ficha e historia. `EstablishmentUpdate` exige el año al
+cerrar y lo borra al reabrir; el listado y el tablero los incluyen.
+
 **Conectividad en tres bloques (2026-10-22).** `connectivity` tiene tres bloques independientes;
 un establecimiento puede tener los tres y la ficha muestra solo los que tienen datos:
 
@@ -418,6 +422,14 @@ establecimiento y año. 26 campos, agrupables en:
 | Categoría de desempeño | `desempeno_basica`, `desempeno_media` | `str` |
 | Prueba de admisión | `ptje_nem`, `ptje_ranking`, `score_lectura`, `score_matematica1`, `score_matematica2`, `score_historia`, `score_ciencia`, `total_rendidores` | `float`/`int` |
 | Tasas derivadas | `tasa_promocion`, `tasa_reprobacion`, `tasa_desercion`, `tasa_retencion` | `float` |
+| Corte de datos parciales | `enrollment_as_of`, `attendance_as_of` | `str` AAAA-MM; `""` = año completo |
+
+**Origen del histórico.** La carga inicial sale de la hoja `FICHA_ESTABLECIMIENTO` del Directorio 2026, que
+trae una columna por año (`MATRICULA_2022` … `MATRICULA_2025`, `MATRÍCULA MARZO 2026`): el seeding convierte
+cada columna en un documento `(rbd, year)`. 62 establecimientos tienen 2022–2024; los jardines solo desde
+2025. La 2026 es un corte de marzo (`enrollment_as_of: "2026-03"`). La asistencia de la planilla es la de
+2025: hasta 2026-10-23 el seeding la copiaba también en 2026; `scripts/fix_metrics_cutoffs.py` lo corrige
+en una base ya cargada (`07` §10).
 
 Salvo `rbd`, `year` y `enrollment`, todos son `Optional` con default numérico `0` o `0.0`.
 Eso significa que **un cero no distingue "valor real cero" de "sin dato"**: un establecimiento

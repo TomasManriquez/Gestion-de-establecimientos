@@ -141,4 +141,58 @@ class AnalyticsService:
             "establishments_by_connectivity": connectivity_data
         }
 
+    async def get_enrollment_dataset(self) -> dict:
+        """Datos del tablero de matrícula por establecimiento y año (ADR-018). Sin año fijo: los años
+        salen de los registros de `metrics`. En la carga inicial un 0 en docentes, asistentes o
+        asistencia significa «sin dato»; en matrícula el 0 es real (establecimiento sin alumnos)."""
+        projection = {"rbd": 1, "name": 1, "comuna": 1, "area_type": 1, "general_info.category": 1,
+                      "status": 1, "closed_year": 1}
+        establishments = []
+        async for d in db_service.db.establishments.find({}, projection):
+            establishments.append({
+                "rbd": d["rbd"], "name": d.get("name", ""), "comuna": d.get("comuna", ""),
+                "area_type": d.get("area_type", ""), "category": (d.get("general_info") or {}).get("category", "") or "",
+                "status": d.get("status") or "active", "closed_year": d.get("closed_year"),
+            })
+        known = {e["rbd"] for e in establishments}
+
+        def positive(v, cast):
+            try:
+                n = cast(v)
+            except (TypeError, ValueError):
+                return None
+            return n if n > 0 else None
+
+        points = []
+        async for m in db_service.db.metrics.find({}):
+            if m.get("rbd") not in known:
+                continue
+            enrollment = m.get("enrollment")
+            points.append({
+                "rbd": m["rbd"], "year": int(m["year"]),
+                "enrollment": int(enrollment) if isinstance(enrollment, (int, float)) else None,
+                "enrollment_as_of": m.get("enrollment_as_of") or "",
+                "attendance": positive(m.get("attendance_avg"), float),
+                "attendance_as_of": m.get("attendance_as_of") or "",
+                "teachers": positive(m.get("num_teachers"), int),
+                "assistants": positive(m.get("num_assistants"), int),
+            })
+        points.sort(key=lambda p: (p["year"], p["rbd"]))
+
+        def years_with(key, test=lambda v: v is not None):
+            return sorted({p["year"] for p in points if test(p[key])})
+
+        return {
+            "establishments": establishments,
+            "points": points,
+            "years": sorted({p["year"] for p in points}),
+            "indicators": {
+                "enrollment": {"label": "Matrícula", "years": years_with("enrollment", lambda v: bool(v))},
+                "attendance": {"label": "Asistencia", "years": years_with("attendance")},
+                "teachers": {"label": "Docentes", "years": years_with("teachers")},
+                "assistants": {"label": "Asistentes de la educación", "years": years_with("assistants")},
+            },
+        }
+
+
 analytics_service = AnalyticsService()

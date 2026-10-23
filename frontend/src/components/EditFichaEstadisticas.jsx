@@ -43,7 +43,7 @@ export default function EditFichaEstadisticas({ metrics, years, selectedYear, on
       </div>
 
       <p className="text-xs text-slate-500">
-        Los porcentajes se escriben de 0 a 100. Solo se guardan los campos que cambies; dejar un campo vacío no borra el dato.
+        Los porcentajes se escriben de 0 a 100. Si un dato es parcial (por ejemplo, asistencia a junio), indica su corte; sin corte se entiende año completo. Solo se guardan los campos que cambies.
       </p>
 
       {selectedYear == null && (
@@ -72,8 +72,8 @@ export default function EditFichaEstadisticas({ metrics, years, selectedYear, on
                   ) : (
                     <input
                       id={id}
-                      type="text"
-                      inputMode={field.kind === 'int' ? 'numeric' : 'decimal'}
+                      type={field.kind === 'asOf' ? 'month' : 'text'}
+                      inputMode={field.kind === 'int' ? 'numeric' : field.kind === 'asOf' ? undefined : 'decimal'}
                       value={valueOf(field)}
                       onChange={(e) => onEdit(selectedYear, field.key, e.target.value)}
                       aria-invalid={Boolean(error)}

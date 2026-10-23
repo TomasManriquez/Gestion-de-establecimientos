@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Literal, Optional, Any
 
 # Printers sub-models
@@ -113,6 +113,11 @@ class Location(BaseModel):
     lat: float
     lng: float
 
+# Estado del establecimiento. Uno cerrado no se borra: conserva su ficha y su historia, y deja
+# de recibir métricas de años posteriores. `closed_year` es el año en que cerró.
+EstablishmentStatus = Literal["active", "closed"]
+
+
 # Main Models
 class Establishment(BaseModel):
     rbd: str
@@ -123,6 +128,8 @@ class Establishment(BaseModel):
     area_type: str  # URBANO / RURAL
     address: str
     location: Optional[Location] = None
+    status: EstablishmentStatus = "active"
+    closed_year: Optional[int] = None
     general_info: GeneralInfo = GeneralInfo()
     connectivity: Connectivity = Connectivity()
     printers: Printers = Printers()
@@ -133,9 +140,21 @@ class EstablishmentUpdate(BaseModel):
     area_type: Optional[str] = None
     address: Optional[str] = None
     location: Optional[Location] = None
+    status: Optional[EstablishmentStatus] = None
+    closed_year: Optional[int] = Field(None, ge=2000, le=2100)
     general_info: Optional[GeneralInfo] = None
     connectivity: Optional[Connectivity] = None
     printers: Optional[Printers] = None
+
+    @model_validator(mode="after")
+    def _closing_needs_a_year(self):
+        if self.closed_year is not None and self.status is None:
+            raise ValueError("closed_year se envía junto con status")
+        if self.status == "closed" and self.closed_year is None:
+            raise ValueError("un establecimiento cerrado necesita closed_year")
+        if self.status == "active" and self.closed_year is not None:
+            raise ValueError("un establecimiento activo no lleva closed_year")
+        return self
 
 class EstablishmentSummary(BaseModel):
     rbd: str
@@ -147,6 +166,8 @@ class EstablishmentSummary(BaseModel):
     category: Optional[str] = ""
     adp: Optional[str] = ""
     covertura: Optional[str] = ""
+    status: EstablishmentStatus = "active"
+    closed_year: Optional[int] = None
 
 class EstablishmentListResponse(BaseModel):
     items: List[EstablishmentSummary]

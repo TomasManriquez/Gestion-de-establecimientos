@@ -720,3 +720,32 @@ despliegue y el volumen no lo justifica por ahora. Retirar el modo `gmail`: se p
 contraseñas de aplicación dejan de estar permitidas. `aiosmtplib`: una dependencia más para una llamada que
 `asyncio.to_thread` resuelve. Un proveedor externo (SendGrid y similares): otro contrato y otro secreto.
 
+## ADR-018 · El tablero de matrícula recibe datos por establecimiento y año, no gráficos calculados
+
+**Estado:** aceptada (2026-10-23). Cierra D6 (año fijo) y D11 (sin `response_model`) para el tablero nuevo.
+
+**Contexto.** El tablero rediseñado necesita filtros cruzados (comuna, tipo, área, jardines), un selector de
+año con comparación y animaciones al filtrar. `GET /api/analytics/charts` entrega series ya agregadas para
+2026: cada filtro o año nuevo exigiría otro endpoint o parámetro, y el año está fijo en el código. Además,
+cada indicador tiene datos para años distintos (matrícula 2022–2026, asistencia solo 2025, docentes solo
+2026) y el conjunto de establecimientos cambia entre años (jardines desde 2025, cierres futuros).
+
+**Decisión.** `GET /api/analytics/enrollment` (`response_model=EnrollmentDataset`) entrega los
+establecimientos (con `status` y `closed_year`), **un punto por establecimiento y año** y, por indicador,
+los años que tienen dato. El navegador calcula totales, filtros y comparaciones.
+- Los años salen de `metrics`; nada está fijo.
+- `None` es «sin dato» y se distingue del 0. En la carga inicial un 0 en docentes, asistentes o asistencia
+  era «sin dato»; en matrícula el 0 es real.
+- Un dato parcial lleva su corte (`enrollment_as_of`, `attendance_as_of`, AAAA-MM). El tablero muestra el
+  corte y no mezcla años: si un indicador no tiene dato en el año elegido lo dice y ofrece el último disponible.
+- Un establecimiento cerrado no se borra (`status: "closed"`, `closed_year`); deja de tener registros en años
+  posteriores. «Establecimientos del año» = con registro de métricas ese año.
+
+**Consecuencias.** A esta escala (78 establecimientos × 5 años) la respuesta pesa unos 15 KB; con diez veces
+más sigue siendo razonable. Si la red creciera dos órdenes de magnitud, el cálculo vuelve al servidor con
+los mismos filtros como parámetros. El endpoint expone nombres y métricas, nunca campos sensibles: lo puede
+leer `viewer`. `/kpis` y `/charts` quedan para el `Dashboard.jsx` actual hasta que el tablero nuevo lo reemplace.
+
+**Alternativas descartadas.** Parametrizar `/charts` con año y filtros: un endpoint por combinación y
+latencia en cada clic. Un motor de BI embebido (Metabase, Superset): evaluado en la iteración de diseño;
+queda para el futuro constructor de tableros, no para este.

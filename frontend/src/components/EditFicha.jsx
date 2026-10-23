@@ -35,6 +35,7 @@ export default function EditFicha() {
   const [metricErrors, setMetricErrors] = useState({});
   const [extraYears, setExtraYears] = useState([]);
   const [selectedYear, setSelectedYear] = useState(null);
+  const [statusError, setStatusError] = useState(null);
 
   // Carga autónoma solo cuando no hay datos en location.state
   useEffect(() => {
@@ -183,6 +184,12 @@ export default function EditFicha() {
       return;
     }
 
+    if (est.status === 'closed' && !est.closed_year) {
+      setStatusError('Indica el año de cierre.');
+      setActiveSubTab('general');
+      return;
+    }
+
     setSaving(true);
     try {
       // 1. Save base establishment (general_info, connectivity, printers)
@@ -193,6 +200,8 @@ export default function EditFicha() {
         comuna: est.comuna,
         area_type: est.area_type,
         address: est.address,
+        status: est.status ?? 'active',
+        closed_year: est.status === 'closed' ? est.closed_year : undefined,
         location: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined,
         general_info: est.general_info,
         connectivity: est.connectivity,
@@ -385,6 +394,42 @@ export default function EditFicha() {
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 font-sans"
               />
             </div>
+            <div className="space-y-1.5">
+              <label htmlFor="est-status" className="text-xs font-bold text-slate-500">Estado</label>
+              <select
+                id="est-status"
+                value={est.status ?? 'active'}
+                onChange={(e) => {
+                  setStatusError(null);
+                  setEst({ ...est, status: e.target.value, closed_year: e.target.value === 'closed' ? est.closed_year ?? null : null });
+                }}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 font-sans"
+              >
+                <option value="active">Activo</option>
+                <option value="closed">Cerrado</option>
+              </select>
+            </div>
+            {est.status === 'closed' && (
+              <div className="space-y-1.5">
+                <label htmlFor="est-closed-year" className="text-xs font-bold text-slate-500">Año de cierre</label>
+                <input
+                  id="est-closed-year"
+                  type="number"
+                  min="2000"
+                  max="2100"
+                  value={est.closed_year ?? ''}
+                  onChange={(e) => {
+                    setStatusError(null);
+                    setEst({ ...est, closed_year: e.target.value === '' ? null : Number(e.target.value) });
+                  }}
+                  aria-invalid={Boolean(statusError)}
+                  aria-describedby={statusError ? 'est-closed-year-msg' : undefined}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500 font-sans"
+                />
+                {statusError && <p id="est-closed-year-msg" className="text-xs font-semibold text-rose-600">{statusError}</p>}
+                <p className="text-xs text-slate-500">El establecimiento no se borra: conserva su ficha y su historia.</p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500">Cobertura Curricular</label>
               <input

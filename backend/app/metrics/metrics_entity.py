@@ -29,6 +29,8 @@ class MetricBase(BaseModel):
     tasa_reprobacion: Optional[float] = 0.0
     tasa_desercion: Optional[float] = 0.0
     tasa_retencion: Optional[float] = 0.0
+    enrollment_as_of: Optional[str] = ""     # corte de la matrícula, AAAA-MM (vacío = año completo)
+    attendance_as_of: Optional[str] = ""     # corte de la asistencia, AAAA-MM (vacío = año completo)
 
 class MetricCreate(MetricBase):
     pass
@@ -40,6 +42,7 @@ _COUNT = dict(ge=0, le=100_000)
 _RATE = dict(ge=0, le=100)          # porcentajes 0–100 (tasas)
 _FRACTION = dict(ge=0, le=1)        # proporciones 0–1 (IVE)
 _SCORE = dict(ge=0, le=1_000)       # puntajes PAES / NEM / ranking
+_AS_OF = r"^(\d{4}-(0[1-9]|1[0-2]))?$"   # AAAA-MM o vacío
 
 
 class MetricUpdate(BaseModel):
@@ -70,6 +73,9 @@ class MetricUpdate(BaseModel):
     tasa_reprobacion: Optional[float] = Field(None, **_RATE)
     tasa_desercion: Optional[float] = Field(None, **_RATE)
     tasa_retencion: Optional[float] = Field(None, **_RATE)
+    # Corte de un dato parcial (p. ej. matrícula a marzo, asistencia a junio). "" = año completo.
+    enrollment_as_of: Optional[str] = Field(None, pattern=_AS_OF)
+    attendance_as_of: Optional[str] = Field(None, pattern=_AS_OF)
 
     @field_validator("attendance_avg")
     @classmethod

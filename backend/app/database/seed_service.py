@@ -48,7 +48,7 @@ async def _seed_establishments(db):
             "rbd": rbd,
             "year": 2026,
             "enrollment": metrics_raw.get("matricula_2026", 0),
-            "attendance_avg": metrics_raw.get("asistencia_2025", ""),  # fallback or latest
+            "attendance_avg": "",            # la planilla no trae asistencia 2026: va solo en el registro 2025
             "ive_basica": metrics_raw.get("ive_basica", 0.0),
             "ive_media": metrics_raw.get("ive_media", 0.0),
             "num_teachers": metrics_raw.get("num_docentes", 0),
@@ -71,7 +71,9 @@ async def _seed_establishments(db):
             "tasa_promocion": metrics_raw.get("tasa_promocion", 0.0),
             "tasa_reprobacion": metrics_raw.get("tasa_reprobacion", 0.0),
             "tasa_desercion": metrics_raw.get("tasa_desercion", 0.0),
-            "tasa_retencion": metrics_raw.get("tasa_retencion", 0.0)
+            "tasa_retencion": metrics_raw.get("tasa_retencion", 0.0),
+            "enrollment_as_of": "2026-03",   # la columna de la planilla es «MATRÍCULA MARZO 2026»
+            "attendance_as_of": "",
         })
         # For historical enrollment years
         for year, key in [(2025, "matricula_2025"), (2024, "matricula_2024"), (2023, "matricula_2023"), (2022, "matricula_2022")]:
@@ -182,6 +184,8 @@ async def _seed_establishments(db):
             "comuna": item.get("comuna", ""),
             "area_type": item.get("area_type", ""),
             "address": item.get("address", ""),
+            "status": item.get("status", "active"),
+            "closed_year": item.get("closed_year"),
             "location": item.get("location"),
             "general_info": item.get("general_info", {}),
             # El JSON de la carga inicial trae el modelo antiguo; se siembra ya en tres bloques.

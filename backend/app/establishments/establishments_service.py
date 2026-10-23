@@ -15,6 +15,8 @@ LISTING_PROJECTION = {
     "comuna": 1,
     "area_type": 1,
     "address": 1,
+    "status": 1,
+    "closed_year": 1,
     "general_info.category": 1,
     "general_info.adp": 1,
     "general_info.covertura": 1,
@@ -139,6 +141,10 @@ class EstablishmentsService:
         for field in ["name", "comuna", "area_type", "address", "location", "general_info", "connectivity", "printers"]:
             if field in update_dict:
                 set_data[field] = update_dict[field]
+        if "status" in update_dict:
+            # El año de cierre viaja siempre con el estado: reabrir lo borra (EstablishmentUpdate lo valida).
+            set_data["status"] = update_dict["status"]
+            set_data["closed_year"] = update_dict.get("closed_year")
 
         if not set_data:
             return await self.find_by_rbd(rbd, include_sensitive=include_sensitive)

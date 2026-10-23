@@ -547,7 +547,10 @@ Solo si las contraseñas de aplicación dejan de estar permitidas. Ya no es el c
    ficha y el gráfico convierten al vuelo; guardar una ficha la deja migrada (sin los datos de la planilla).
    Para una instalación nueva: `--from-json establishments.json --excel … --write-json <salida>` deja el JSON
    de siembra ya convertido (el seeding igual convierte el JSON antiguo, sin la planilla).
-11. [ ] **Cookie de sesión (ADR-016):** `PUBLIC_BASE_URL` debe ser **exactamente** el origen público
+11. [ ] **Datos por año (ADR-018):** con respaldo previo, desde `backend/`, `python scripts/fix_metrics_cutoffs.py`
+   (vista previa) y luego `--apply`: vacía la asistencia 2025 copiada en los registros 2026, marca el corte
+   `2026-03` de la matrícula 2026 y deja `status: active` en los establecimientos sin estado. Idempotente.
+12. [ ] **Cookie de sesión (ADR-016):** `PUBLIC_BASE_URL` debe ser **exactamente** el origen público
    (`https://datos.slepllanquihue.gob.cl`, sin barra final): con `https`, la cookie sale `Secure`; y toda
    escritura valida `Origin` contra ese valor. El proxy del host **no debe** quitar la cabecera `Origin` ni
    `Set-Cookie`. Tras el primer despliegue, todos los usuarios vuelven a iniciar sesión una vez.
