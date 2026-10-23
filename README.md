@@ -55,7 +55,7 @@ activarla. Se considera **beta**, y la versión pasa a `0.3.0`, cuando se cumpla
    Falta: que el usuario active `GOOGLE_AUTO_PROVISION` en producción (sus requisitos SEC-1…6 y el retiro de
    `licenses` ya están cumplidos), la consola de Google (`07` §10) y la interfaz para asignar cuentas «sin
    asignar» (D33). La invitación por correo (F4) queda como vía para cuentas fuera de Google y necesita la
-   casilla remitente (`07` §9) y la pantalla `/definir-contrasena`, que ya no bloquean la beta.*
+   casilla remitente (`07` §9); la pantalla `/definir-contrasena` ya está construida (F4b, 2026-10-23).*
 2. **Protección del acceso:** rate limiting en el login, el restablecimiento y el canje de enlaces, y auditoría
    de los cambios de usuarios y accesos. *✅ F4; falta comprobar en producción que el proxy del host reenvía
    `X-Forwarded-For` (`07` §7).*
@@ -83,6 +83,7 @@ La numeración 0.x es una etiqueta de este documento: el repositorio aún no tie
 
 | Fecha | Tipo | Cambio | Despliegue | Brechas | Commit |
 |---|---|---|---|---|---|
+| 2026-10-23 | feat | **Pantalla pública `/definir-contrasena`** (F4b): el enlace del correo de invitación caía en un 404 y nadie podía activar su cuenta; ahora se define la contraseña con la política pública y el token sale de la URL. **C26:** la cuenta que crea el admin (alta, CSV y `bulk-create`) nace como `viewer` de `datos`, igual que la creada con Google | Sin variables ni dependencias nuevas; rebuild del backend y del frontend. **Las cuentas ya creadas no cambian:** las que quedaron sin acceso se corrigen con el diálogo de accesos. Rollback: tag `pre-ficha-smtp` | — | `d8c15c6` `250fba0` |
 | 2026-10-23 | feat | **Correo por SMTP con contraseña de aplicación** (ADR-017, C25): `MAIL_MODE` admite `smtp`, `gmail` y `console`; TLS verificado en los puertos 587 y 465, sin dependencias nuevas. El modo `gmail` y `gmail_consent.py` se conservan como alternativa | Variables nuevas **`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER_ADDRESS`** (obligatorias con `MAIL_MODE=smtp`; `deploy.sh` las exige). Antes del primer envío: tareas manuales de `07` §9 (verificación en dos pasos, contraseña de aplicación, IMAP deshabilitado, salida por el puerto 587). Rebuild del backend por el cambio de código. Rollback: tag `pre-ficha-smtp` | — | `5ac31aa` |
 | 2026-10-22 | feat | **Ficha: edición de estadísticas por año y capacidades por rol; conectividad en tres bloques** (2030, BAM y otro tipo) con migración idempotente | `scripts/migrate_connectivity.py` (vista previa sin `--apply`; **respaldo antes de aplicar**). Hasta migrar, la ficha convierte al vuelo. Rollback: tag `pre-ficha-smtp` y restaurar el respaldo si se aplicó la migración | — | `2950d47` `b235e79` |
 | 2026-10-20 | feat | **F6 S3 — Sesión en cookie `HttpOnly`** (`SameSite=Strict`, `Path=/api`) en lugar de `localStorage` (ADR-016) y diseño zero trust para recibir cuentas autoaprovisionadas; guía de revisión del proxy | `PUBLIC_BASE_URL` debe ser el **origen exacto del navegador** o toda escritura da `403 untrusted_origin` (en desarrollo, entrar por `localhost`, no `127.0.0.1`). Rollback: tag `pre-usuarios-f6-s3` | D35 🔸 | `864abd7` `40c89db` |
@@ -102,9 +103,8 @@ La numeración 0.x es una etiqueta de este documento: el repositorio aún no tie
 | 2026-09-15 | test | Primera suite de tests: backend (BE01–BE08, INT02) y frontend (FE00–FE06, INT01) | Ninguno | — | `f167cff` `5b0984e` |
 
 Pendiente de esta iteración: la interfaz de administración sobre lo que F4 y F6 dejaron en el backend (asignar
-las cuentas «sin asignar», reenviar y restablecer, importación CSV, acciones masivas contra `POST /api/users/bulk`
-y, solo si se usa la vía por correo, `/definir-contrasena`), la página de unidades, «Mi perfil» y la casilla
-remitente de Gmail; y las decisiones del usuario sobre la recepción de cuentas autoaprovisionadas (Z1…Z3,
+las cuentas «sin asignar», reenviar y restablecer, importación CSV, acciones masivas contra `POST /api/users/bulk`), la página de unidades y «Mi perfil»; y la casilla
+remitente de correo (SMTP); y las decisiones del usuario sobre la recepción de cuentas autoaprovisionadas (Z1…Z3,
 `04` §9.6.1). F7 (interconexión entre plataformas) sigue siendo solo diseño.
 
 ### Iteración 1 — 0.1.x (2026-07-02 a 2026-09-08)
