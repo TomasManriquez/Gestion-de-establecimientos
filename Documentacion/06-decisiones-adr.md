@@ -436,7 +436,10 @@ sistema no envía correo hoy. El cliente OAuth de Google (`GOOGLE_CLIENT_ID`,
    puede reenviar. En altas masivas las invitaciones salen después de responder
    (`BackgroundTasks`, que corre en el proceso y no es una cola): 200 envíos seguidos no caben en
    el `proxy_read_timeout 120s` de nginx.
-4. **Los correos salen con Gmail API**, reutilizando el cliente OAuth existente. Una casilla
+4. > ✅ **Enmendado por ADR-017 (2026-10-23):** en producción los correos salen por **SMTP**; el modo
+   > `gmail` descrito aquí sigue implementado como alternativa.
+
+   **Los correos salen con Gmail API**, reutilizando el cliente OAuth existente. Una casilla
    remitente dedicada da su consentimiento **una sola vez** con el scope
    `https://www.googleapis.com/auth/gmail.send`, mediante un script de `backend/scripts/`; el
    refresh token se guarda como secreto (`GMAIL_REFRESH_TOKEN`) y nunca en un archivo del repo.
@@ -485,7 +488,8 @@ sistema no envía correo hoy. El cliente OAuth de Google (`GOOGLE_CLIENT_ID`,
 
 **Alternativas descartadas.** Enviar la contraseña (o una temporal) por correo: contradice el
 requisito. SMTP con contraseña de aplicación: otra credencial de larga vida, sin el alcance acotado
-que da el scope `gmail.send`. Cuenta de servicio con delegación a nivel de dominio: no
+que da el scope `gmail.send` (**descartada aquí, adoptada después en ADR-017** al fallar el consentimiento
+OAuth; esa decisión asume el riesgo y lo mitiga). Cuenta de servicio con delegación a nivel de dominio: no
 tiene refresh token que caduque, pero exige un permiso de administrador de Workspace sobre
 todo el dominio, más amplio que el de una casilla; es la alternativa a evaluar si la gestión
 del refresh token resultara costosa. Un proveedor externo (SendGrid y similares): otro
@@ -659,4 +663,60 @@ lo exfiltra (`04` §1, brecha registrada). SEC-6 (CSP) y SEC-3 (revocación) aco
 **Alternativas descartadas.** Seguir con `localStorage` + CSP (no cierra la clase). Tokens CSRF con estado o
 doble envío de cookie (más piezas; `SameSite=Strict` + `Origin` cubren el caso a esta escala). Cookie de
 dominio padre (F7 lo diseña aparte, `04` §10). Refresh tokens (fuera de alcance, §6 del prompt de F6).
+
+---
+
+## ADR-017 · Envío de correo por SMTP con contraseña de aplicación (enmienda ADR-012)
+
+> **Estado: ✅ implementado (2026-10-23).** `MAIL_MODE` admite `smtp`, `gmail` y `console`. Código en
+> `mail_service.py` (`_send_smtp`, `_smtp_deliver`) y `config.py` (`_validate_smtp`); tests en BE42, BE43 y BE59.
+> Falta la parte manual de la casilla (`07` §9) y probar la salida por el puerto 587 desde el servidor.
+
+**Contexto.** El ADR-012 eligió Gmail API (scope `gmail.send`) porque su credencial solo puede enviar. Al
+configurar la casilla `correos.automaticos@slepllanquihue.cl` el consentimiento OAuth de escritorio falló con
+`redirect_uri_mismatch`, y una prueba directa con `smtp.gmail.com:587` y una contraseña de aplicación envió
+el correo sin más pasos. El volumen es bajo (altas de usuarios y restablecimientos) y la casilla es dedicada y
+casi vacía.
+
+**Decisión.**
+1. **En producción los correos salen por SMTP** con una contraseña de aplicación de la casilla remitente.
+   `MAIL_MODE` pasa a tener tres valores: `smtp`, `gmail` y `console`. **No se retira el modo `gmail` ni
+   `backend/scripts/gmail_consent.py`**: quedan implementados y probados como salida si el administrador de
+   Workspace desactiva las contraseñas de aplicación.
+2. **Variables con `MAIL_MODE=smtp`**, todas obligatorias y sin default (D2): `SMTP_HOST`, `SMTP_PORT`,
+   `SMTP_USERNAME`, `SMTP_PASSWORD` (**secreto**) y `SMTP_SENDER_ADDRESS`. Con `smtp` no se exigen las
+   variables `GMAIL_*` ni `GOOGLE_CLIENT_SECRET`. Se declaran en los cuatro archivos (`config.py`,
+   `docker-compose.yml`, `docker-compose.prod.yml`, `.env.production.template`; un test lo verifica) y se
+   evalúan para `deploy.sh`.
+3. **TLS siempre.** Puerto `587` con `STARTTLS` o `465` con TLS implícito; otro puerto impide el arranque. Se usa
+   `ssl.create_default_context()`, que verifica el certificado.
+4. **Sin dependencias nuevas.** `smtplib` de la biblioteca estándar dentro de `asyncio.to_thread` (la llamada
+   es bloqueante) y con `timeout` explícito. No se agrega `aiosmtplib`.
+5. **Mismo contrato que `gmail`.** Se conserva la validación de saltos de línea en `to` y `subject`, el armado con
+   `EmailMessage` (texto y HTML) y los códigos de `MailError`: `SMTPAuthenticationError` → `mail_auth_failed`,
+   tiempo agotado → `mail_timeout`, cualquier otro fallo → `mail_send_failed`. Ni el log ni
+   `users.invitation.last_error` llevan la respuesta del servidor ni credenciales. Los dominios de
+   `users`/`auth` no cambian: no saben qué transporte se usa.
+
+**Consecuencias — riesgos operativos que quedan escritos.**
+- **La contraseña de aplicación no distingue enviar de leer.** Da acceso SMTP **e IMAP**. La carpeta Enviados
+  guarda las invitaciones, cada una con su enlace de un solo uso (72 h de vigencia): quien obtenga la contraseña
+  podría canjear uno vigente. Con Gmail API esa carpeta quedaba fuera de alcance. **Mitigación obligatoria:**
+  deshabilitar IMAP en la casilla y no usarla para nada más.
+- Exige **verificación en dos pasos** en la cuenta. Si un administrador de Workspace desactiva las contraseñas
+  de aplicación, o si cambia la clave de la cuenta, el envío falla con `mail_auth_failed`: se genera una
+  contraseña nueva y se actualiza `SMTP_PASSWORD`, o se pasa a `MAIL_MODE=gmail`. Los usuarios quedan
+  `invited` y el admin reenvía, igual que en ADR-012.
+- El servidor de producción debe poder **salir por el puerto 587**. La prueba con `smtp.gmail.com:587` se hizo
+  desde un equipo de desarrollo, no desde el servidor.
+- `SMTP_PASSWORD` se trata como `JWT_SECRET`: solo en el `.env` del servidor, nunca en el repo, en un log ni en
+  un chat. Los scripts de prueba que la contengan no se versionan.
+- La cuota diaria de la cuenta de Workspace sigue acotando el envío; el tope de 200 por lote y el envío en serie
+  se mantienen.
+- Se evita el consentimiento OAuth, la pantalla de tipo *Internal* y la caducidad a 7 días del refresh token.
+
+**Alternativas descartadas.** Mantener solo Gmail API: credencial acotada, pero el consentimiento bloqueó el
+despliegue y el volumen no lo justifica por ahora. Retirar el modo `gmail`: se pierde la salida si las
+contraseñas de aplicación dejan de estar permitidas. `aiosmtplib`: una dependencia más para una llamada que
+`asyncio.to_thread` resuelve. Un proveedor externo (SendGrid y similares): otro contrato y otro secreto.
 

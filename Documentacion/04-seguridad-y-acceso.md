@@ -594,8 +594,8 @@ Los IDs siguen la numeración real (último existente: BE08, INT02, FE05).
 ### 9.8 Configuración
 
 Variables nuevas, sin default en las de identidad y secreto (la norma de D2): `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_SENDER_ADDRESS`,
-`GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (las cuatro últimas solo son obligatorias con `MAIL_MODE=gmail`); y, por decisión de la fase F3,
-`JWT_SECRET` y `ADMIN_PASSWORD` también pierden su default. `MAIL_MODE` (`gmail` o `console`) decide si hacen falta las credenciales de Gmail; ver ADR-012 y `07` §2.1. Con defaults razonables y validación
+`GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (las cuatro últimas solo son obligatorias con `MAIL_MODE=gmail`); con `MAIL_MODE=smtp` (ADR-017) lo son `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` y `SMTP_SENDER_ADDRESS`; y, por decisión de la fase F3,
+`JWT_SECRET` y `ADMIN_PASSWORD` también pierden su default. `MAIL_MODE` (`smtp`, `gmail` y `console`) decide qué credenciales de correo hacen falta; ver ADR-012, ADR-017 y `07` §2.1. **`SMTP_PASSWORD` da acceso SMTP e IMAP a la casilla remitente:** se guarda como `JWT_SECRET` y IMAP se deshabilita en la casilla (`07` §9). Con defaults razonables y validación
 de rango: la política de contraseñas. Detalle y archivos a actualizar: `07` §2.
 
 ### 9.9 Brechas que este diseño cierra y las que deja abiertas

@@ -12,7 +12,9 @@ class ConfigError(RuntimeError):
 _DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 _EMAIL_RE = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
 _LOCAL_HOSTS = ("localhost", "127.0.0.1")
-MAIL_MODES = ("gmail", "console")
+MAIL_MODES = ("smtp", "gmail", "console")
+_SMTP_PORTS = (587, 465)           # 587: STARTTLS; 465: TLS implícito. Nunca texto plano (ADR-017).
+_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
 
 # SEC-1: un secreto de firma corto o conocido equivale a no tener secreto. Los valores rechazados
 # estuvieron versionados en git (compose de desarrollo). Se guardan como sha256 (en minúsculas) para
@@ -41,6 +43,7 @@ class Settings:
         "PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES",
         "MAIL_MODE", "PUBLIC_BASE_URL", "GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN",
         "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_AUTO_PROVISION",
+        "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_SENDER_ADDRESS",
     )
 
     PROJECT_NAME: str = "SLEP Llanquihue - Gestión de Establecimientos"
@@ -79,9 +82,9 @@ class Settings:
         if self.PASSWORD_MIN_LENGTH > self.PASSWORD_MAX_LENGTH:
             raise ConfigError("PASSWORD_MIN_LENGTH no puede ser mayor que PASSWORD_MAX_LENGTH")
 
-        # Correo (ADR-012). MAIL_MODE y PUBLIC_BASE_URL son obligatorias y sin default: el enlace
-        # de invitación se arma con PUBLIC_BASE_URL. Las credenciales de Gmail solo se exigen en
-        # modo `gmail`; en `console` (solo desarrollo) el mensaje se escribe en el log.
+        # Correo (ADR-012, ADR-017). MAIL_MODE y PUBLIC_BASE_URL son obligatorias y sin default: el enlace
+        # de invitación se arma con PUBLIC_BASE_URL. Cada modo exige solo sus credenciales: `smtp`
+        # las SMTP_*, `gmail` las de Gmail API; en `console` (solo desarrollo) el mensaje se escribe en el log.
         self.MAIL_MODE: str = self._required("MAIL_MODE").strip().lower()
         if self.MAIL_MODE not in MAIL_MODES:
             raise ConfigError(f"MAIL_MODE debe ser uno de {', '.join(MAIL_MODES)} (recibido: {self.MAIL_MODE!r})")
@@ -95,6 +98,11 @@ class Settings:
         self.GMAIL_REFRESH_TOKEN: str = self._get("GMAIL_REFRESH_TOKEN", "").strip()
         self.GOOGLE_CLIENT_ID: str = self._get("GOOGLE_CLIENT_ID", "").strip()
         self.GOOGLE_CLIENT_SECRET: str = self._get("GOOGLE_CLIENT_SECRET", "").strip()
+        self.SMTP_HOST: str = self._get("SMTP_HOST", "").strip()
+        self.SMTP_PORT: int = 0                      # se lee y valida solo con MAIL_MODE=smtp
+        self.SMTP_USERNAME: str = self._get("SMTP_USERNAME", "").strip()
+        self.SMTP_PASSWORD: str = self._get("SMTP_PASSWORD", "").strip()
+        self.SMTP_SENDER_ADDRESS: str = self._get("SMTP_SENDER_ADDRESS", "").strip().lower()
         # Alta automática con Google (C24, G1). Obligatoria y sin default: activarla es una decisión
         # de despliegue explícita, nunca un olvido. `true` o `false`, nada más.
         raw_provision = self._required("GOOGLE_AUTO_PROVISION").strip().lower()
@@ -106,19 +114,37 @@ class Settings:
             if not local:
                 raise ConfigError(
                     "MAIL_MODE=console solo se permite con PUBLIC_BASE_URL en localhost o 127.0.0.1 "
-                    f"(recibido: {host!r}); usa MAIL_MODE=gmail"
+                    f"(recibido: {host!r}); usa MAIL_MODE=smtp o MAIL_MODE=gmail"
                 )
         else:
-            for name in ("GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
-                if not getattr(self, name):
-                    raise ConfigError(f"Con MAIL_MODE=gmail es obligatoria la variable: {name}")
-            if not _EMAIL_RE.match(self.GMAIL_SENDER_ADDRESS):
-                raise ConfigError("GMAIL_SENDER_ADDRESS debe ser una dirección de correo válida")
+            if self.MAIL_MODE == "smtp":
+                self._validate_smtp()
+            else:
+                for name in ("GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
+                    if not getattr(self, name):
+                        raise ConfigError(f"Con MAIL_MODE=gmail es obligatoria la variable: {name}")
+                if not _EMAIL_RE.match(self.GMAIL_SENDER_ADDRESS):
+                    raise ConfigError("GMAIL_SENDER_ADDRESS debe ser una dirección de correo válida")
             if urlsplit(self.PUBLIC_BASE_URL).scheme != "https" and not local:
-                raise ConfigError("Con MAIL_MODE=gmail, PUBLIC_BASE_URL debe usar https (el enlace lleva un token)")
+                raise ConfigError(
+                    f"Con MAIL_MODE={self.MAIL_MODE}, PUBLIC_BASE_URL debe usar https (el enlace lleva un token)")
 
     def __repr__(self) -> str:  # nunca volcar secretos en logs ni en tracebacks
         return "<Settings (valores ocultos)>"
+
+    def _validate_smtp(self) -> None:
+        """MAIL_MODE=smtp (ADR-017): todas las variables obligatorias, TLS siempre, sin ejemplos en el secreto."""
+        for name in ("SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_SENDER_ADDRESS"):
+            if not self._get(name, "").strip():
+                raise ConfigError(f"Con MAIL_MODE=smtp es obligatoria la variable: {name}")
+        if not _HOST_RE.match(self.SMTP_HOST):
+            raise ConfigError(f"SMTP_HOST debe ser un nombre de host sin esquema ni ruta (recibido: {self.SMTP_HOST!r})")
+        self.SMTP_PORT = self._int("SMTP_PORT", 0)
+        if self.SMTP_PORT not in _SMTP_PORTS:
+            raise ConfigError(f"SMTP_PORT debe ser 587 (STARTTLS) o 465 (TLS implícito); recibido: {self.SMTP_PORT}")
+        if not _EMAIL_RE.match(self.SMTP_SENDER_ADDRESS):
+            raise ConfigError("SMTP_SENDER_ADDRESS debe ser una dirección de correo válida")
+        self._reject_known_secret("SMTP_PASSWORD", self.SMTP_PASSWORD)
 
     # ── lectura ──
     def _get(self, name: str, default: str) -> str:

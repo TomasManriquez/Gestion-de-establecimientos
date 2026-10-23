@@ -83,7 +83,11 @@ def test_BE59_secure_flag_follows_public_base_url():
     gmail = {**VALID_ENV, "MAIL_MODE": "gmail", "PUBLIC_BASE_URL": "https://gestion.slepllanquihue.cl",
              "GMAIL_SENDER_ADDRESS": "no-responder@slepllanquihue.cl", "GMAIL_REFRESH_TOKEN": "x",
              "GOOGLE_CLIENT_ID": "id", "GOOGLE_CLIENT_SECRET": "s"}
+    smtp = {**VALID_ENV, "MAIL_MODE": "smtp", "PUBLIC_BASE_URL": "https://gestion.slepllanquihue.cl",
+            "SMTP_HOST": "smtp.gmail.com", "SMTP_PORT": "587", "SMTP_USERNAME": "correos.automaticos@slepllanquihue.cl",
+            "SMTP_PASSWORD": "abcd efgh ijkl mnop", "SMTP_SENDER_ADDRESS": "correos.automaticos@slepllanquihue.cl"}
     assert Settings(gmail).SESSION_COOKIE_SECURE is True
+    assert Settings(smtp).SESSION_COOKIE_SECURE is True            # modo de producción (ADR-017)
     assert Settings(VALID_ENV).SESSION_COOKIE_SECURE is False
 
 
