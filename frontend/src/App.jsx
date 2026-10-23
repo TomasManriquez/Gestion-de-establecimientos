@@ -99,8 +99,13 @@ export default function App() {
             />
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard"                          element={<Dashboard />} />
+          <Route index element={<Navigate to="/tableros/matricula" replace />} />
+
+          {/* Tableros: el acceso directo es Matrícula; /tableros/:tablero queda para el portal. */}
+          <Route path="/tableros"                           element={<Navigate to="/tableros/matricula" replace />} />
+          <Route path="/tableros/matricula"                 element={<Dashboard />} />
+          {/* Ruta anterior del panel: se conserva para los enlaces y marcadores existentes. */}
+          <Route path="/dashboard"                          element={<Navigate to="/tableros/matricula" replace />} />
           <Route path="/establecimientos"                   element={<Directory />} />
           <Route path="/establecimientos/:rbd"              element={<FichaEstablecimiento currentUser={currentUser} />} />
 
