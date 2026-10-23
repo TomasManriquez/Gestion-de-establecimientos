@@ -28,6 +28,8 @@ logger = logging.getLogger("users")
 ACTIVITY_THROTTLE = timedelta(minutes=5)
 # Unidad a la que se asigna el admin sembrado (Q4). Si no existe, se usa la raíz.
 BOOTSTRAP_ADMIN_UNIT_CODE = "AF-TI"
+DEFAULT_PLATFORM_ID = "datos"        # acceso inicial de toda cuenta creada por el admin (C26)
+DEFAULT_ROLE = "viewer"
 
 # Proyección de inclusión del listado: personal_phone y auth_providers quedan fuera por
 # omisión (lista blanca, igual que LISTING_PROJECTION de establecimientos).
@@ -282,6 +284,10 @@ class UsersService:
         # 4. Inserción (el índice único es la garantía final: una carrera da DuplicateKeyError)
         now = _utcnow()
         actor = _oid(actor_id)
+        if access is None:
+            # C26: quien nadie fija acceso (alta individual, CSV y bulk-create del admin) entra como lector de
+            # `datos`, igual que el alta con Google (C24). Los roles superiores los otorga solo el admin global.
+            access = [{"platform_id": DEFAULT_PLATFORM_ID, "role": DEFAULT_ROLE, "granted_at": now, "granted_by": actor}]
         for i, u in parsed.items():
             if dry_run:
                 results[i]["status"] = "ok"

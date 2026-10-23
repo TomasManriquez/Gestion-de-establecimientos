@@ -240,11 +240,12 @@ def test_BE48_bulk_create_limits_and_strict_input(ctx):
     assert not [d for d in db.users.docs if d.get("access") and d["email"].startswith("nuevo") and d["access"]]
 
 
-def test_BE48_bulk_created_users_never_get_access_or_a_credential(ctx):
+def test_BE48_bulk_created_users_start_as_datos_viewer_and_without_a_credential(ctx):
     c, h, db, ids, box = ctx
     c.post("/api/users/bulk-create", json={"items": [item(1, ids)]}, headers=h)
     doc = next(d for d in db.users.docs if d["email"] == "nuevo1@slepllanquihue.cl")
-    assert doc["access"] == [] and doc["auth_providers"] == []
+    assert [(a["platform_id"], a["role"]) for a in doc["access"]] == [("datos", "viewer")]   # C26
+    assert doc["auth_providers"] == []
 
 
 # ══ bulk: operaciones ═════════════════════════════════════════════════════════════════════

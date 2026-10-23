@@ -810,6 +810,7 @@ Módulo dueño: `users` (ADR-013). `auth` ya no lee esta colección directamente
 | `rbd` existe en `establishments` | `users_service`, vía `establishments_service` (L5) |
 | `unit_id` existe y la unidad está activa | `users_service`, vía `units_service` |
 | `access[].role` pertenece a `platforms.roles` de esa plataforma; una entrada por plataforma | `users_service`, vía `platforms_service` |
+| Toda cuenta creada por el admin (alta, CSV, `bulk-create`) nace con `access: [datos/viewer]` (C26, 2026-10-23); el alta con Google también (C24); el admin sembrado lleva `iam/admin` y `datos/admin` | `users_service.create_many` (`DEFAULT_PLATFORM_ID`, `DEFAULT_ROLE`) |
 | Siempre queda al menos un usuario activo con `iam/admin`; no se desactiva ni degrada al último, tampoco en masa | `users_service` |
 | Un admin global no puede desactivarse a sí mismo | `users_service` |
 | `hashed_password` y `token_hash` no aparecen en ninguna respuesta | un test recorre el JSON completo, como INT02 |

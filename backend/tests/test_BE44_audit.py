@@ -107,6 +107,9 @@ def test_BE44_user_create_update_disable_enable_and_access_are_audited(ctx):
     assert upd["changes"]["last_name"] == ["Rojas", "Rojas Soto"]
     assert upd["changes"]["personal_phone"] == ["[REDACTED]", "[REDACTED]"]
 
+    # C26: la cuenta nace como lector de `datos`; se revoca para volver a probar el alta del acceso desde cero
+    assert c.delete(f"/api/users/{uid}/access/datos", headers=h).status_code == 200
+    assert (last(db)["action"], last(db)["changes"]["role"]) == ("access.revoke", ["viewer", None])
     assert c.put(f"/api/users/{uid}/access/datos", json={"role": "viewer"}, headers=h).status_code == 200
     assert (last(db)["action"], last(db)["changes"]) == ("access.grant", {"platform_id": "datos", "role": [None, "viewer"]})
     assert c.put(f"/api/users/{uid}/access/datos", json={"role": "editor"}, headers=h).status_code == 200

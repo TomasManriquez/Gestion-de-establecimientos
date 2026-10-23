@@ -649,7 +649,7 @@ una plantilla HTML y de texto (ADR-012).
 | `PUT /api/establishments/{rbd}` | Un `connectivity.ssid_password` igual a `"[REDACTED]"` conserva el valor almacenado; si no hay valor equivalente → `422`. | No |
 | `POST/PUT /api/counterparts` | Campo opcional `user_id` (validado contra `users`; `422 user_not_found`; en `PUT`, `""` desvincula). La respuesta lo incluye (`null` si no hay vínculo). | No |
 | `GET /api/users` | Filtro `acting=true`: solo quienes subrogan una unidad hoy. | No |
-| `POST /api/users` | Además de crear, **envía la invitación** y responde con el usuario ya con `invitation`. Un fallo de correo no cambia el `201`. | No |
+| `POST /api/users` | Además de crear, **envía la invitación** y responde con el usuario ya con `invitation`. Un fallo de correo no cambia el `201`. **Desde 2026-10-23 (C26) la cuenta nace con `access: [{platform_id: "datos", role: "viewer"}]`** (antes `[]`); lo mismo en `bulk-create` e `import`. El body sigue sin admitir `access`: cualquier rol superior lo otorga después `PUT /api/users/{id}/access/{platform}`. | Aditivo: quien suponía `access == []` en una cuenta recién creada |
 | `POST /api/auth/login`, `/login-form` | `429` con `Retry-After` tras 5 fallos por (cuenta + IP) o 30 por IP en 15 min; aun con la contraseña correcta. | **Sí, de comportamiento** (intencional, ADR-014) |
 
 El token ya no se considera válido si `iat < password_changed_at` del usuario (`04` §9.4). Los

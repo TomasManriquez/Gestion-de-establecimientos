@@ -40,7 +40,10 @@ def test_BE25_create_slep_user_returns_document(ctx):
     assert u["personal_phone"] == "+56912345678" and u["created_by"] == ADMIN_USER["_id"]
     # F4: el alta envía la invitación; en los tests el buzón falso la recibe
     assert u["invitation"]["sent"] is True and u["invitation"]["last_error"] is None and u["invitation"]["sent_at"]
-    assert "hashed_password" not in r.text and u["access"] == []
+    assert "hashed_password" not in r.text
+    # C26: la cuenta nace como lector de `datos`; ningun rol superior sale del alta
+    assert [(a["platform_id"], a["role"]) for a in u["access"]] == [("datos", "viewer")]
+    assert u["access"][0]["granted_by"] == ADMIN_USER["_id"] and u["access"][0]["granted_at"]
     stored = [d for d in db.users.docs if d["email"] == u["email"]][0]
     assert stored["auth_providers"] == [] and stored["created_at"] is not None                   # sin credencial hasta canjear el enlace
 
