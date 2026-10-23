@@ -13,10 +13,32 @@ ROLE_ADMIN = "admin"
 ROLE_EDITOR = "editor"
 ROLE_VIEWER = "viewer"
 
+# Capacidades nativas de cada rol (04 §9.3). Es la única fuente de la matriz: los controllers
+# exigen roles derivados de aquí y `/me` la entrega al frontend, que solo la usa para mostrar u
+# ocultar acciones. Un rol que no está en el mapa no tiene ninguna capacidad.
+CAP_READ = "read"
+CAP_WRITE = "write"
+CAP_DELETE = "delete"
+
+ROLE_CAPABILITIES = {
+    ROLE_ADMIN: (CAP_READ, CAP_WRITE, CAP_DELETE),
+    ROLE_EDITOR: (CAP_READ, CAP_WRITE),
+    ROLE_VIEWER: (CAP_READ,),
+}
+
+
+def capabilities_of(role: Optional[str]) -> List[str]:
+    return list(ROLE_CAPABILITIES.get(role, ()))
+
+
+def roles_with(capability: str) -> tuple:
+    return tuple(r for r, caps in ROLE_CAPABILITIES.items() if capability in caps)
+
+
 # Combinaciones que declaran los controllers de `datos` (matriz de 04 §9.3)
-DATOS_READ = (ROLE_ADMIN, ROLE_EDITOR, ROLE_VIEWER)
-DATOS_WRITE = (ROLE_ADMIN, ROLE_EDITOR)
-DATOS_DELETE = (ROLE_ADMIN,)
+DATOS_READ = roles_with(CAP_READ)
+DATOS_WRITE = roles_with(CAP_WRITE)
+DATOS_DELETE = roles_with(CAP_DELETE)
 IAM_ADMIN = (ROLE_ADMIN,)
 # Roles que ven las credenciales en claro (C20): solo `viewer` las recibe redactadas.
 SENSITIVE_ROLES = frozenset({ROLE_ADMIN, ROLE_EDITOR})
@@ -53,6 +75,7 @@ class TokenData(BaseModel):
 class AccessSummary(BaseModel):
     platform_id: str
     role: str
+    capabilities: List[str] = []   # derivadas de `role` (ROLE_CAPABILITIES); aditivo, 03 §8.2
 
 
 class UserResponse(BaseModel):

@@ -1,4 +1,19 @@
 from app.database.database_service import db_service
+from app.database.connectivity_migration import has_other, is_migrated, migrate_connectivity, without_internet
+
+def connectivity_breakdown(conns) -> list:
+    """Cuenta establecimientos por bloque de conectividad. Uno puede contar en varios bloques."""
+    counts = {"Conectividad 2030": 0, "Banda ancha móvil": 0, "Otro tipo de conexión": 0, "Sin internet": 0}
+    for conn in conns:
+        conn = conn or {}
+        if not is_migrated(conn):
+            conn = migrate_connectivity(conn)[0]
+        counts["Conectividad 2030"] += bool((conn.get("program_2030") or {}).get("enabled"))
+        counts["Banda ancha móvil"] += bool(conn.get("bam"))
+        counts["Otro tipo de conexión"] += has_other(conn.get("other"))
+        counts["Sin internet"] += without_internet(conn)
+    return [{"label": k, "value": v} for k, v in counts.items()]
+
 
 class AnalyticsService:
     async def get_kpis(self) -> dict:
@@ -114,23 +129,10 @@ class AnalyticsService:
                 label = label.split(".", 1)[1].strip()
             category_data.append({"label": label, "value": doc["value"]})
 
-        # 4. Connectivity providers count
-        conn_pipeline = [
-            {
-                "$group": {
-                    "_id": "$connectivity.internet_provider",
-                    "value": {"$sum": 1}
-                }
-            },
-            {"$project": {"label": "$_id", "value": 1, "_id": 0}}
-        ]
-        conn_cursor = db_service.db.establishments.aggregate(conn_pipeline)
-        connectivity_data = []
-        async for doc in conn_cursor:
-            label = doc.get("label")
-            if not label:
-                label = "Sin Conexión"
-            connectivity_data.append({"label": label, "value": doc["value"]})
+        # 4. Conectividad por bloque. Un establecimiento cuenta en cada bloque que tenga (2030, BAM,
+        #    otro tipo); «Sin internet» se calcula. Un documento aún sin migrar se convierte al vuelo.
+        conns = [doc.get("connectivity") async for doc in db_service.db.establishments.find({}, {"connectivity": 1})]
+        connectivity_data = connectivity_breakdown(conns)
 
         return {
             "enrollment_by_area": area_data,

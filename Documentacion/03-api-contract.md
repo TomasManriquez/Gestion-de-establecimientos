@@ -259,16 +259,14 @@ Matiz importante del `$set` parcial: el filtrado de `None` es de **primer nivel*
 resto de sus campos se pierden. Para editar un subcampo hay que enviar el bloque completo. El
 frontend lo hace así (`EditFicha.jsx:175` envía el objeto completo).
 
-**`PUT /api/metrics/establishment/{rbd}/{year}` es un upsert** (`metrics_service.py:36`): si no
+**`PUT /api/metrics/establishment/{rbd}/{year}` es un upsert** (`metrics_service.upsert`): si no
 existe el registro de ese año, lo crea. MongoDB añade `rbd` y `year` al documento nuevo desde
-el filtro de igualdad. Es el único endpoint que crea por PUT.
+el filtro de igualdad. Es el único endpoint que crea por PUT. La pestaña «Estadísticas» del editor
+de ficha lo usa con un PUT por año y solo los campos cambiados (`frontend/src/lib/metricFields.js`).
 
-> 🔸 **BRECHA:** el upsert de métricas con un body **vacío** produce un `$set` vacío, que pymongo
-> rechaza lanzando excepción → 500. No hay guarda (compárese con `establishments_service.py:109`
-> y `counterparts_service.py:23`, que sí la tienen).
->
-> 🔸 **BRECHA:** `PUT /api/metrics/.../{year}` no valida el rango de `year`. Un año 1800 o 9999
-> crea un documento válido.
+> ✅ **Resuelto (2026-10-22):** el body vacío ya no produce un `$set` vacío (devuelve el registro
+> tal como está); `year` se valida en 2000–2100 (`422`); el upsert no crea métricas para un `rbd`
+> inexistente (`404`). Ver §5.15 y `test_BE60_*`.
 >
 > 🔸 **BRECHA:** `DELETE /api/counterparts/{id}` devuelve `{"message": "Counterpart deleted successfully"}`.
 > El docstring de `test_BE07` declara `{message, deleted_id}`. La aserción del test no lo cubre,
@@ -392,6 +390,11 @@ Autenticado (cualquier rol, incluso sin acceso a `datos`). `200` → `UserRespon
 (F3). `401` token inválido/expirado, usuario no activo o sesión anterior a un cambio de contraseña.
 El frontend lo usa al montar para rehidratar la sesión (`App.jsx:48`).
 
+**`access[].capabilities`** (aditivo, 2026-10-22): `["read"]`, `["read", "write"]` o
+`["read", "write", "delete"]`, derivadas del rol con `auth_entity.ROLE_CAPABILITIES`. El frontend
+las usa para mostrar u ocultar acciones (`lib/access.js:can`) sin repetir la matriz de roles; el
+backend las vuelve a exigir en cada ruta. Un rol desconocido trae `[]`.
+
 ### 5.6 `GET /api/establishments`
 Bearer. Query: `search`, `comuna`, `area_type`, `category`, `coverage`, `adp` (§3.4) + `page`, `page_size` (§3.2).
 `200` → `EstablishmentListResponse`. Cada ítem es un `EstablishmentSummary`:
@@ -452,8 +455,15 @@ Bearer. `year` es `int` en el path (no numérico → `422`). `200` → `Metric`.
 ese par.
 
 ### 5.15 `PUT /api/metrics/establishment/{rbd}/{year}`
-Bearer. Body `MetricUpdate`, todos opcionales. **Upsert.** `200` → `Metric` resultante.
-No emite 404: si no existía, lo crea.
+Bearer. Body `MetricUpdate`, todos opcionales. **Upsert.** `200` → `Metric` resultante (un año
+nuevo sin `enrollment` se lee con `enrollment: 0`).
+
+- `404` si el establecimiento `rbd` no existe: no se crean métricas huérfanas.
+- `422` si `year` está fuera de 2000–2100, si llega un campo desconocido (`extra="forbid"`) o un
+  valor fuera de rango (`metrics_entity.MetricUpdate`): conteos 0–100.000; tasas 0–100; IVE 0–1;
+  `attendance_avg` texto con una proporción 0–1; `grade_avg` 0–7; puntajes 0–1.000.
+- Los valores ya cargados fuera de rango (p. ej. una retención de 100,3 de la carga original) se
+  leen igual; reenviarlos da `422`. La ficha los marca y solo envía lo que la persona cambió.
 
 ### 5.16 `GET /api/analytics/kpis`
 Bearer. `200` →
@@ -479,7 +489,10 @@ Bearer. `200` → cuatro series, cada una un array de `{label, value}`:
 `establishments` filtrando `year: 2026` (mismo hardcode). `establishments_by_category` limpia
 el prefijo numérico de la categoría (`"7. LICEO" → "LICEO"`, `:111-114`) — **esa limpieza vive
 solo aquí**, no en el modelo, así que el `category` del listado sí trae el prefijo y el del
-gráfico no. `establishments_by_connectivity` etiqueta los nulos como `"Sin Conexión"`.
+gráfico no. `establishments_by_connectivity` (desde 2026-10-22) cuenta por bloque, no por proveedor:
+etiquetas fijas `"Conectividad 2030"`, `"Banda ancha móvil"`, `"Otro tipo de conexión"` y `"Sin internet"`;
+un establecimiento cuenta en cada bloque que tenga (`analytics_service.connectivity_breakdown`). **Cambio
+de contrato** (D10): el `Dashboard.jsx` actual lo consume sin cambios porque solo lee `label`/`value`.
 
 > 🔸 **BRECHA:** los endpoints de analytics **no tienen `response_model`**
 > (`analytics_controller.py:7,11`). Devuelven un dict libre, así que no aparecen tipados en
@@ -610,7 +623,7 @@ una plantilla HTML y de texto (ADR-012).
 
 | Endpoint | Cambio | ¿Breaking? |
 |---|---|---|
-| `GET /api/auth/me` | **Aditivo:** conserva `username`, `full_name`, `role` y agrega `id`, `email` y `access: [{platform_id, role}]`. `role` es el rol en `datos`, o `"none"` si no tiene acceso. | No |
+| `GET /api/auth/me` | **Aditivo:** conserva `username`, `full_name`, `role` y agrega `id`, `email` y `access: [{platform_id, role, capabilities}]` (`capabilities` desde 2026-10-22). `role` es el rol en `datos`, o `"none"` si no tiene acceso. | No |
 | `POST /api/auth/login` | El campo `username` acepta el correo (normalizado) o el username legado. Un usuario `invited` o `disabled` recibe el mismo `401` que una credencial errónea. El token lleva `sub = str(_id)` e `iat`. | No para clientes que tratan el token como opaco |
 | Los 12 endpoints de datos | `Depends(get_current_user)` pasa a `require_access("datos", …)`. **`viewer` recibe `403` en toda escritura; `editor` no puede `DELETE`; quien no tiene acceso a `datos` recibe `403`.** | **Sí, de comportamiento** (intencional: cierra D3 y D4) |
 | `PUT /api/establishments/{rbd}` | Un `connectivity.ssid_password` igual a `"[REDACTED]"` conserva el valor almacenado; si no hay valor equivalente → `422`. | No |

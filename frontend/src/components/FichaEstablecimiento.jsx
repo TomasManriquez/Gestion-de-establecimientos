@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { 
-  ArrowLeft, Edit3, School, MapPin, Users, Wifi, Printer, 
+  ArrowLeft, Edit3, School, Users, Wifi, Printer, 
   UserCheck, History, Calendar, CheckCircle2, XCircle, Info, PhoneCall,
   Mail, Phone, X, TrendingUp
 } from 'lucide-react';
@@ -10,6 +10,65 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts';
 import EstablishmentMap from './EstablishmentMap';
+import ConectividadFicha from './ConectividadFicha';
+import { can } from '@/lib/access';
+
+/** Fila de «Detalles generales»: etiqueta pequeña y valor, sin tarjeta propia. */
+function DetailRow({ label, value }) {
+  return (
+    <div className="px-5 py-2.5">
+      <dt className="text-xs text-slate-400">{label}</dt>
+      <dd className="font-semibold text-slate-800">{value}</dd>
+    </div>
+  );
+}
+
+const roleLabel = (role) => {
+  const text = (role || '').replace(/_/g, ' ').toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+/**
+ * Contrapartes en una sola tarjeta: una fila por persona con cargo y nombre; correo y teléfono
+ * como íconos (el dato completo va en `title` y en el nombre accesible).
+ */
+function CounterpartList({ title, dotClass, items, empty }) {
+  return (
+    <section className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+      <h3 className="flex items-center gap-2 px-5 pt-4 pb-2 text-sm font-bold text-slate-800 font-outfit">
+        <span className={`w-2 h-2 rounded-full ${dotClass}`} aria-hidden="true"></span>
+        {title}
+        <span className="ml-auto text-xs font-semibold text-slate-400">{items.length}</span>
+      </h3>
+      {items.length === 0 ? (
+        <p className="px-5 pb-5 pt-2 text-xs text-slate-400">{empty}</p>
+      ) : (
+        <ul className="divide-y divide-slate-100 text-sm">
+          {items.map((cp, idx) => (
+            <li key={cp._id || idx} className="flex items-center gap-2 px-5 py-2 hover:bg-slate-50/70 transition-colors">
+              <div className="min-w-0 flex-1">
+                <span className="block text-[11px] font-semibold text-slate-400">{roleLabel(cp.role)}</span>
+                <span className="block font-semibold text-slate-800 truncate" title={cp.name}>{cp.name}</span>
+              </div>
+              {cp.email && (
+                <a href={`mailto:${cp.email}`} title={cp.email} aria-label={`Escribir a ${cp.name}: ${cp.email}`}
+                  className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors">
+                  <Mail size={15} />
+                </a>
+              )}
+              {cp.phone && (
+                <a href={`tel:${cp.phone}`} title={cp.phone} aria-label={`Llamar a ${cp.name}: ${cp.phone}`}
+                  className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors">
+                  <Phone size={15} />
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 /**
  * FichaEstablecimiento — FE-02
@@ -20,7 +79,7 @@ import EstablishmentMap from './EstablishmentMap';
  * "Editar" navega a /establecimientos/:rbd/editar con datos en location.state
  * para evitar re-fetch innecesario si EditFicha ya los tiene disponibles.
  */
-export default function FichaEstablecimiento() {
+export default function FichaEstablecimiento({ currentUser }) {
   const { rbd } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -31,6 +90,7 @@ export default function FichaEstablecimiento() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('general');
   const [showDirectorContact, setShowDirectorContact] = useState(false);
+  const canEdit = can(currentUser, 'datos', 'write');
 
   const fetchFichaData = async () => {
     setLoading(true);
@@ -93,7 +153,8 @@ export default function FichaEstablecimiento() {
     matricula: m.enrollment
   })).sort((a, b) => a.year.localeCompare(b.year));
 
-  const latestMetric = metrics.find(m => m.year === 2026) || {};
+  // El año más reciente cargado, no uno fijo: al registrar 2027 la ficha lo muestra sin tocar código.
+  const latestMetric = metrics.reduce((best, m) => (!best.year || m.year > best.year ? m : best), {});
 
   return (
     <div className="space-y-6 animate-fade-in font-sans">
@@ -131,21 +192,23 @@ export default function FichaEstablecimiento() {
           </div>
         </div>
 
-        <button 
-          onClick={() =>
-            navigate(`/establecimientos/${rbd}/editar`, {
-              state: {
-                initialEst: establishment,
-                initialCps: counterparts,
-                initialMetrics: metrics,
-              }
-            })
-          }
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-xl text-sm shadow-md shadow-sky-600/10 hover:shadow-sky-500/20 transition-all font-outfit"
-        >
-          <Edit3 size={16} />
-          Editar Ficha
-        </button>
+        {canEdit && (
+          <button 
+            onClick={() =>
+              navigate(`/establecimientos/${rbd}/editar`, {
+                state: {
+                  initialEst: establishment,
+                  initialCps: counterparts,
+                  initialMetrics: metrics,
+                }
+              })
+            }
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-xl text-sm shadow-md shadow-sky-600/10 hover:shadow-sky-500/20 transition-all font-outfit"
+          >
+            <Edit3 size={16} />
+            Editar Ficha
+          </button>
+        )}
       </div>
 
       {/* Tabs list */}
@@ -192,208 +255,92 @@ export default function FichaEstablecimiento() {
             </div>
 
             {/* Left side: General details */}
-            <div className="lg:col-span-1 space-y-6">
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Detalles Generales</h3>
-                
-                <div className="space-y-3 text-sm">
-                  {/* Director/Encargado block with interactive contact popup */}
-                  <div className="relative">
-                    <div 
+            <section className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+              <h3 className="px-5 pt-4 pb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Detalles generales</h3>
+              <dl className="divide-y divide-slate-100 text-sm">
+                <div className="relative flex items-center justify-between gap-3 px-5 py-2.5">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-slate-400">Director / Encargado</dt>
+                    <dd className="font-semibold text-slate-800 truncate">{establishment.general_info.director || 'Sin especificar'}</dd>
+                  </div>
+                  {establishment.general_info.director && (
+                    <button
                       id="director-name-btn"
+                      type="button"
                       onClick={() => setShowDirectorContact(!showDirectorContact)}
-                      className={`p-3 rounded-xl border transition-all cursor-pointer select-none group ${
-                        showDirectorContact 
-                          ? 'bg-sky-50 border-sky-300 shadow-sm' 
-                          : 'bg-slate-50 border-slate-100 hover:bg-sky-50/50 hover:border-sky-200'
-                      }`}
+                      aria-expanded={showDirectorContact}
+                      className="shrink-0 text-xs font-semibold text-sky-700 hover:bg-sky-50 px-2 py-1 rounded-md transition-colors"
                     >
-                      <span className="block text-[10px] font-bold text-slate-450 uppercase group-hover:text-sky-600 transition-colors">
-                        Director / Encargado
-                      </span>
-                      {/*informacion general del director */}
-                      <div className="flex items-center justify-between gap-2 mt-0.5">
-                        <span className="font-bold text-slate-800 group-hover:text-sky-700 transition-colors">
-                          {establishment.general_info.director || 'Sin especificar'}
-                        </span>
-                        {establishment.general_info.director && (
-                          <span className="text-[10px] font-bold text-sky-600 bg-sky-100/80 px-2 py-0.5 rounded-md hover:bg-sky-100 transition-colors">
-                            Contacto
-                          </span>
-                        )}
+                      Contacto
+                    </button>
+                  )}
+
+                  {/* Popover contact card */}
+                  {showDirectorContact && establishment.general_info.director && (
+                    <div
+                      id="director-contact-popup"
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl p-4 animate-fade-in space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="font-bold text-slate-800 text-sm leading-tight">{establishment.general_info.director}</h4>
+                          <span className="text-[11px] text-slate-400 font-semibold">Director / Encargado</span>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowDirectorContact(false); }}
+                          aria-label="Cerrar contacto"
+                          className="p-1 hover:bg-slate-100 text-slate-400 rounded-lg transition-colors"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                      <div className="border-t border-slate-100 pt-3 space-y-2 text-xs">
+                        <div className="flex items-center gap-2.5 text-slate-600">
+                          <Mail size={14} className="text-slate-400 flex-shrink-0" />
+                          {establishment.general_info.director_email ? (
+                            <a href={`mailto:${establishment.general_info.director_email}`} className="font-semibold text-sky-600 hover:underline break-all">
+                              {establishment.general_info.director_email}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 italic">Sin correo registrado</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2.5 text-slate-600">
+                          <Phone size={14} className="text-slate-400 flex-shrink-0" />
+                          {establishment.general_info.director_phone ? (
+                            <a href={`tel:${establishment.general_info.director_phone}`} className="font-semibold text-slate-700 hover:text-sky-600 hover:underline">
+                              {establishment.general_info.director_phone}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 italic">Sin teléfono registrado</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-
-                    {/* Popover contact card */}
-                    {showDirectorContact && establishment.general_info.director && (
-                      <div 
-                        id="director-contact-popup"
-                        onClick={(e) => e.stopPropagation()}
-                        className="absolute left-full top-0 ml-3 z-50 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl p-4 animate-fade-in space-y-3.5"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-700 font-extrabold text-sm uppercase font-outfit shadow-sm">
-                              {establishment.general_info.director.split(' ').filter(Boolean).map(n => n[0]).slice(0, 2).join('') || 'DR'}
-                            </div>
-                            <div>
-                              <h4 className="font-bold text-slate-800 text-sm leading-tight">{establishment.general_info.director}</h4>
-                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Director / Encargado</span>
-                            </div>
-                          </div>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowDirectorContact(false);
-                            }}
-                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-650 rounded-lg transition-colors"
-                          >
-                            <X size={15} />
-                          </button>
-                        </div>
-
-                        <div className="border-t border-slate-100 pt-3 space-y-2.5 text-xs">
-                          <div className="flex items-center gap-2.5 text-slate-600">
-                            <Mail size={14} className="text-slate-400 flex-shrink-0" />
-                            {establishment.general_info.director_email ? (
-                              <a 
-                                href={`mailto:${establishment.general_info.director_email}`}
-                                className="font-semibold text-sky-600 hover:underline break-all"
-                              >
-                                {establishment.general_info.director_email}
-                              </a>
-                            ) : (
-                              <span className="text-slate-400 italic">Sin correo registrado</span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2.5 text-slate-600">
-                            <Phone size={14} className="text-slate-400 flex-shrink-0" />
-                            {establishment.general_info.director_phone ? (
-                              <a 
-                                href={`tel:${establishment.general_info.director_phone}`}
-                                className="font-bold text-slate-700 hover:text-sky-600 hover:underline"
-                              >
-                                {establishment.general_info.director_phone}
-                              </a>
-                            ) : (
-                              <span className="text-slate-400 italic">Sin teléfono registrado</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Dirección</span>
-                    <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
-                      <MapPin size={14} className="text-sky-500 flex-shrink-0" />
-                      {establishment.address || 'Sin especificar'}
-                    </span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Categoría de establecimiento</span>
-                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.category || '-'}</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Cobertura Curricular</span>
-                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.covertura || '-'}</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Licitación ADP</span>
-                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.adp || 'No'}</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Profesional PAME</span>
-                    <span className="font-bold text-slate-800 mt-0.5">{establishment.general_info.pame || '-'}</span>
-                  </div>
+                  )}
                 </div>
-              </div>
-            </div>
+                <DetailRow label="Dirección" value={establishment.address || 'Sin especificar'} />
+                <DetailRow label="Categoría" value={establishment.general_info.category || '-'} />
+                <DetailRow label="Cobertura curricular" value={establishment.general_info.covertura || '-'} />
+                <DetailRow label="Licitación ADP" value={establishment.general_info.adp || 'No'} />
+                <DetailRow label="Profesional PAME" value={establishment.general_info.pame || '-'} />
+              </dl>
+            </section>
 
-            {/* Right side: Counterparts */}
-            <div className="lg:col-span-2 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* Contrapartes del Establecimiento */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-800 font-outfit flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 bg-blue-500 rounded-full"></span>
-                      Equipo del Establecimiento
-                    </h3>
-                  </div>
-                  <div className="space-y-3">
-                    {schoolCounterparts.length === 0 ? (
-                      <p className="text-xs text-slate-400 text-center py-6">No hay contrapartes registradas para el recinto.</p>
-                    ) : (
-                      schoolCounterparts.map((cp, idx) => (
-                        <div key={idx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5 hover:border-slate-200 transition-all">
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[9px] font-bold rounded-md uppercase tracking-wider">
-                            {cp.role.replace('_', ' ')}
-                          </span>
-                          <h4 className="font-bold text-slate-800 mt-1">{cp.name}</h4>
-                          <div className="space-y-1 text-xs text-slate-500">
-                            {cp.email && (
-                              <p className="flex items-center gap-1.5 break-all">
-                                <Mail size={12} className="text-slate-400 flex-shrink-0" />
-                                <a href={`mailto:${cp.email}`} className="hover:text-sky-600 hover:underline">{cp.email}</a>
-                              </p>
-                            )}
-                            {cp.phone && (
-                              <p className="flex items-center gap-1.5">
-                                <Phone size={12} className="text-slate-400 flex-shrink-0" />
-                                <a href={`tel:${cp.phone}`} className="hover:text-sky-600 hover:underline">{cp.phone}</a>
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Contrapartes del SLEP */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-800 font-outfit flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 bg-sky-500 rounded-full"></span>
-                      Contrapartes Técnicas del SLEP Llanquihue
-                    </h3>
-                  </div>
-                  <div className="space-y-3">
-                    {slepCounterparts.length === 0 ? (
-                      <p className="text-xs text-slate-400 text-center py-6">No hay contrapartes técnicas asignadas del servicio local.</p>
-                    ) : (
-                      slepCounterparts.map((cp, idx) => (
-                        <div key={idx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5 hover:border-slate-200 transition-all">
-                          <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[9px] font-bold rounded-md uppercase tracking-wider">
-                            {cp.role.replace('_', ' ')}
-                          </span>
-                          <h4 className="font-bold text-slate-800 mt-1">{cp.name}</h4>
-                          <div className="space-y-1 text-xs text-slate-500">
-                            {cp.email && (
-                              <p className="flex items-center gap-1.5 break-all">
-                                <Mail size={12} className="text-slate-400 flex-shrink-0" />
-                                <a href={`mailto:${cp.email}`} className="hover:text-sky-600 hover:underline">{cp.email}</a>
-                              </p>
-                            )}
-                            {cp.phone && (
-                              <p className="flex items-center gap-1.5">
-                                <Phone size={12} className="text-slate-400 flex-shrink-0" />
-                                <a href={`tel:${cp.phone}`} className="hover:text-sky-600 hover:underline">{cp.phone}</a>
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-              </div>
-            </div>
+            {/* Contrapartes: una fila por persona */}
+            <CounterpartList
+              title="Equipo del establecimiento"
+              dotClass="bg-blue-500"
+              items={schoolCounterparts}
+              empty="No hay contrapartes registradas para el recinto."
+            />
+            <CounterpartList
+              title="Contrapartes técnicas del SLEP"
+              dotClass="bg-sky-500"
+              items={slepCounterparts}
+              empty="No hay contrapartes técnicas asignadas del servicio local."
+            />
 
           </div>
         )}
@@ -404,7 +351,22 @@ export default function FichaEstablecimiento() {
             
             {/* Indicators Grid */}
             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-450 uppercase tracking-wider mb-4">Indicadores de Matrícula y Rendimiento (2026)</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-sm font-bold text-slate-450 uppercase tracking-wider">
+                  Indicadores de Matrícula y Rendimiento{latestMetric.year ? ` (${latestMetric.year})` : ''}
+                </h3>
+                {canEdit && (
+                  <button
+                    onClick={() => navigate(`/establecimientos/${rbd}/editar`, {
+                      state: { initialEst: establishment, initialCps: counterparts, initialMetrics: metrics, initialTab: 'statistics' }
+                    })}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold rounded-lg text-xs transition-all"
+                  >
+                    <Edit3 size={14} />
+                    Editar estadísticas
+                  </button>
+                )}
+              </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="p-4 bg-sky-50/50 rounded-xl border border-sky-100 text-center hover:shadow-sm transition-all duration-200">
@@ -495,99 +457,8 @@ export default function FichaEstablecimiento() {
         {activeTab === 'connectivity' && (
           <div className="space-y-6">
             
-            {/* Telsur 2030 Status */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-5">
-              <h3 className="text-base font-bold text-slate-800 font-outfit flex items-center gap-2">
-                Conectividad 2030 (TELSUR)
-              </h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
-                  <div>
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Estado Conexión</span>
-                    <span className="font-bold text-slate-800 text-sm">
-                      {establishment.connectivity.internet_provider === 'TELSUR' ? 'TELSUR' : 'Otro Proveedor'}
-                    </span>
-                  </div>
-                  {establishment.connectivity.internet_provider === 'TELSUR' ? (
-                    <CheckCircle2 className="text-emerald-500" size={24} />
-                  ) : (
-                    <Info className="text-amber-500" size={24} />
-                  )}
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">SSID / Red Wifi</span>
-                  <span className="font-bold text-slate-800 text-sm">{establishment.connectivity.ssid || '-'}</span>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Clave Wifi</span>
-                  <span className="font-bold text-slate-800 text-sm">{establishment.connectivity.ssid_password || '-'}</span>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Velocidad de Bajada</span>
-                  <span className="font-bold text-slate-800 text-sm">
-                    {establishment.connectivity.download_speed_2030 ? `${establishment.connectivity.download_speed_2030} Mbps` : '-'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Starlink Status */}
-              <div className="p-4 bg-sky-50/50 rounded-xl border border-sky-100 flex items-center justify-between text-sm">
-                <div className="flex items-center gap-3">
-                  <Wifi size={20} className="text-sky-600" />
-                  <div>
-                    <span className="font-bold text-slate-800">Antena Starlink Instalada</span>
-                    <p className="text-xs text-slate-500">Conectividad satelital de respaldo en el establecimiento</p>
-                  </div>
-                </div>
-                {establishment.connectivity.starlink?.installed ? (
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">INSTALADO</span>
-                    <span className="text-xs text-slate-500">{establishment.connectivity.starlink.date || ''}</span>
-                  </div>
-                ) : (
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-500 text-xs font-bold rounded-full">NO</span>
-                )}
-              </div>
-            </div>
-
-            {/* BAM details */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden space-y-4 p-6">
-              <h3 className="text-base font-bold text-slate-800 font-outfit">Inventario de Banda Ancha Móvil (BAM)</h3>
-              
-              <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      <th className="px-4 py-3">N° BAM</th>
-                      <th className="px-4 py-3">IMEI</th>
-                      <th className="px-4 py-3">Equipo</th>
-                      <th className="px-4 py-3">OC Asignación</th>
-                      <th className="px-4 py-3">Término de Contrato</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-600 font-sans">
-                    {establishment.connectivity.bam?.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                          Sin bolsas o dispositivos BAM registrados en el establecimiento.
-                        </td>
-                      </tr>
-                    ) : (
-                      establishment.connectivity.bam.map((b, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-3 font-semibold text-slate-800">{b.number}</td>
-                          <td className="px-4 py-3 font-mono">{b.imei}</td>
-                          <td className="px-4 py-3">{b.device}</td>
-                          <td className="px-4 py-3 font-mono">{b.oc}</td>
-                          <td className="px-4 py-3">{b.end || 'Vigente'}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            {/* 2030, BAM y otro tipo: solo los bloques con datos */}
+            <ConectividadFicha connectivity={establishment.connectivity} />
 
             {/* Internal network points & phone extensions */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

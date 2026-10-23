@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
+from typing import List, Literal, Optional, Any
 
 # Printers sub-models
 class OwnedPrinter(BaseModel):
@@ -38,19 +38,42 @@ class Printers(BaseModel):
     leased: List[LeasedPrinter] = []
 
 # Connectivity sub-models
+# Tres bloques independientes (un establecimiento puede tener los tres): programa 2030, BAM y
+# otro tipo de conexión. «Sin internet» no se guarda: se calcula (`connectivity_migration.without_internet`).
+Status2030 = Literal["fibra_optica", "microondas", "starlink", "satelital", "pendiente_instalacion", "sin_internet"]
+OtherType = Literal["fibra_optica", "starlink", "microondas", "satelital", "movil", "otro"]
+
+
 class BamEntry(BaseModel):
-    number: str
-    oc: str
-    imei: str
-    device: str
-    holder: str
+    number: str = ""
+    oc: str = ""
+    imei: str = ""
+    device: str = ""
+    holder: str = ""
+    carrier: Optional[str] = ""          # operador (Movistar, Entel…) cuando viene del contrato
+    qty: Optional[int] = Field(None, ge=0, le=1000)
     start: Optional[str] = ""
     term: Optional[str] = ""
     end: Optional[str] = ""
 
-class Starlink(BaseModel):
-    installed: bool = False
-    date: Optional[str] = ""
+
+class Program2030(BaseModel):
+    """Conectividad 2030 (Telsur). Starlink financiado por el programa es un `status`, no un bloque aparte."""
+    enabled: bool = False
+    status: Optional[Status2030] = None
+    download_speed: Optional[str] = Field("", max_length=20)
+    test_date: Optional[str] = ""
+
+
+class OtherConnection(BaseModel):
+    """Conexión contratada fuera del 2030 (incluido Starlink independiente). Vacía = no tiene."""
+    provider: Optional[str] = Field("", max_length=80)
+    type: Optional[OtherType] = None
+    download_speed: Optional[str] = Field("", max_length=20)
+    oc: Optional[str] = Field("", max_length=80)
+    expiry_date: Optional[str] = Field("", max_length=10)          # AAAA-MM-DD
+    support_whatsapp: Optional[str] = Field("", max_length=30)
+
 
 class InternalNetwork(BaseModel):
     installed_year: Optional[str] = ""
@@ -58,15 +81,13 @@ class InternalNetwork(BaseModel):
     status: Optional[str] = ""
     obs: Optional[str] = ""
 
+
 class Connectivity(BaseModel):
-    internet_provider: Optional[str] = ""
-    internet_status: Optional[str] = ""
-    ssid: Optional[str] = ""
-    ssid_password: Optional[str] = ""
-    test_date: Optional[str] = ""
-    download_speed_2030: Optional[str] = ""
+    program_2030: Program2030 = Program2030()
+    ssid: Optional[str] = ""             # red wifi del 2030
+    ssid_password: Optional[str] = ""    # secreta: redactada para `viewer` (04 §3)
     bam: List[BamEntry] = []
-    starlink: Starlink = Starlink()
+    other: OtherConnection = OtherConnection()
     internal_network: InternalNetwork = InternalNetwork()
     phone_extensions: List[str] = []
 

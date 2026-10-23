@@ -113,12 +113,10 @@ async def test_internet_settings_lifecycle_update():
     rbd = "7722"
     
     new_connectivity = Connectivity(
-        internet_provider="STARLINK",
-        internet_status="ACTIVO",
+        program_2030={"enabled": True, "status": "starlink", "download_speed": "200", "test_date": "2026-09-04"},
         ssid="Starlink_Wifi",
         ssid_password="new-password",
-        test_date="2026-09-04",
-        download_speed_2030="200"
+        other={"provider": "Enseña Chile", "type": "starlink", "expiry_date": "2026-12-01"},
     )
     
     updated_doc = {**SAMPLE_ESTABLISHMENT, "connectivity": new_connectivity.model_dump()}
@@ -136,6 +134,7 @@ async def test_internet_settings_lifecycle_update():
 
     # Assert
     assert result is not None
-    assert result["connectivity"]["internet_provider"] == "STARLINK"
-    assert result["connectivity"]["download_speed_2030"] == "200"
+    assert result["connectivity"]["program_2030"]["status"] == "starlink"
+    assert result["connectivity"]["program_2030"]["download_speed"] == "200"
+    assert result["connectivity"]["other"]["provider"] == "Enseña Chile"
     assert result["connectivity"]["ssid"] == "Starlink_Wifi"

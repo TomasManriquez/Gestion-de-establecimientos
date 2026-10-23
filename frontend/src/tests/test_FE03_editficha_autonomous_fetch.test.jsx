@@ -66,10 +66,10 @@ describe('FE-03: EditFicha — Carga autónoma y navegación post-guardado', () 
     );
 
     await waitFor(() => {
-      // EditFicha solo edita establishment + counterparts; las métricas son
-      // históricas de solo lectura y no forman parte de este formulario.
+      // EditFicha edita establishment, counterparts y las estadísticas (metrics) por año.
       expect(axios.get).toHaveBeenCalledWith('/api/establishments/7722');
       expect(axios.get).toHaveBeenCalledWith('/api/counterparts/establishment/7722');
+      expect(axios.get).toHaveBeenCalledWith('/api/metrics/establishment/7722');
     }, { timeout: 3000 });
   });
 

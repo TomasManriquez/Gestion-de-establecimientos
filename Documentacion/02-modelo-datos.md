@@ -156,13 +156,26 @@ classDiagram
         +distancia_cafra: str
     }
     class Connectivity {
-        +internet_provider: str
-        +internet_status: str
+        +program_2030: Program2030
         +ssid: str
         +ssid_password: str
-        +test_date: str
-        +download_speed_2030: str
+        +bam: BamEntry[]
+        +other: OtherConnection
         +phone_extensions: str[]
+    }
+    class Program2030 {
+        +enabled: bool
+        +status: Status2030?
+        +download_speed: str
+        +test_date: str
+    }
+    class OtherConnection {
+        +provider: str
+        +type: OtherType?
+        +download_speed: str
+        +oc: str
+        +expiry_date: str
+        +support_whatsapp: str
     }
     class BamEntry {
         +number: str
@@ -170,13 +183,11 @@ classDiagram
         +imei: str
         +device: str
         +holder: str
+        +carrier: str
+        +qty: int?
         +start: str
         +term: str
         +end: str
-    }
-    class Starlink {
-        +installed: bool
-        +date: str
     }
     class InternalNetwork {
         +installed_year: str
@@ -229,8 +240,27 @@ deliberado: el dato viene de planillas donde una celda puede contener `"30"`, `"
 `"s/i"`, y tipar fuerte habría hecho fallar el seeding masivamente. El costo es que no se puede
 ordenar ni filtrar por rango sobre esos campos sin normalizar primero. Ver ADR-005.
 
-**Los defaults mutables son instancias compartidas.** `Connectivity.starlink: Starlink = Starlink()`
-(`establishments_entity.py:69`) evalúa el default una sola vez al importar el módulo. Pydantic v2
+**Conectividad en tres bloques (2026-10-22).** `connectivity` tiene tres bloques independientes;
+un establecimiento puede tener los tres y la ficha muestra solo los que tienen datos:
+
+- `program_2030`: Conectividad 2030 (Telsur). `status` ∈ `fibra_optica`, `microondas`, `starlink`,
+  `satelital`, `pendiente_instalacion`, `sin_internet`. Un Starlink financiado por el 2030 es este estado.
+  `ssid` y `ssid_password` (secreta) son la red wifi del 2030 y siguen en el nivel de `connectivity`.
+- `bam`: lista de BAM. Cada entrada es un equipo (`number`, `imei`, …) o un contrato de la planilla
+  (`carrier`, `qty`, `oc`, `end`).
+- `other`: «otro tipo de conexión» fuera del 2030 (incluido Starlink independiente): `provider`, `type` ∈
+  `fibra_optica`, `starlink`, `microondas`, `satelital`, `movil`, `otro`, `download_speed`, `oc`,
+  `expiry_date` (AAAA-MM-DD) y `support_whatsapp`. Vacío = no tiene.
+
+**«Sin internet» no se guarda**: se calcula (`database/connectivity_migration.without_internet`) cuando
+está en 2030 con estado `sin_internet` o cuando no tiene ningún bloque. Se retiraron `internet_provider`
+(mezclaba Telsur con el proveedor de «otro tipo»), `internet_status`, `download_speed_2030` y `starlink`
+(una marca que no distinguía 2030 de independiente). La conversión vive en
+`database/connectivity_migration.py` y la usan el seeding y `scripts/migrate_connectivity.py`
+(`07` §11); mientras un documento no esté migrado, `find_by_rbd` y el gráfico lo convierten al vuelo.
+
+**Los defaults mutables son instancias compartidas.** `Connectivity.other: OtherConnection = OtherConnection()`
+(`establishments_entity.py`) evalúa el default una sola vez al importar el módulo. Pydantic v2
 hace copia profunda de los defaults al instanciar, así que en la práctica no hay fuga entre
 instancias — pero es un patrón que en Pydantic v1 o en dataclasses puras sería un bug clásico.
 Quien copie este estilo a otro módulo debe saber por qué funciona.

@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
 from app.auth.auth_service import SESSION_COOKIE, _credentials_exception, auth_service, client_ip, rate_limited_http, require_access
 from app.auth.google_service import GoogleLoginError, google_login_service
-from app.auth.auth_entity import (AccessContext, AccessSummary, AuthConfig, ChangePasswordRequest, GOOGLE_IP_LIMIT,
+from app.auth.auth_entity import (AccessContext, AccessSummary, AuthConfig, capabilities_of, ChangePasswordRequest, GOOGLE_IP_LIMIT,
                                   GOOGLE_WINDOW_SECONDS, GoogleLoginRequest, InvalidLink, LoginRequest,
                                   LOGIN_ACCOUNT_LIMIT, LOGIN_IP_LIMIT, LOGIN_WINDOW_SECONDS, PLATFORM_DATOS, PasswordPolicy,
                                   PasswordPolicyError, REDEEM_IP_LIMIT, REDEEM_WINDOW_SECONDS, RateLimited,
@@ -133,6 +133,8 @@ async def logout(request: Request):
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(ctx: AccessContext = Depends(require_access(None))):
     """Contrato original `{username, full_name, role}` más `id`, `email` y `access` (aditivo).
+    Cada entrada de `access` trae sus `capabilities` para que el frontend oculte lo que el rol no
+    puede hacer; el backend las vuelve a exigir en cada ruta (`require_access`).
     `role` es el rol en `datos`, o "none" si el usuario no tiene acceso a esa plataforma."""
     user = ctx.user
     full_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get("full_name", "")
@@ -142,7 +144,8 @@ async def read_users_me(ctx: AccessContext = Depends(require_access(None))):
         "role": datos_role(user) or "none",
         "id": str(user["_id"]),
         "email": user.get("email"),
-        "access": [AccessSummary(platform_id=a["platform_id"], role=a["role"]) for a in user.get("access", [])],
+        "access": [AccessSummary(platform_id=a["platform_id"], role=a["role"], capabilities=capabilities_of(a["role"]))
+                   for a in user.get("access", [])],
     }
 
 

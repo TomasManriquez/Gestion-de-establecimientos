@@ -78,5 +78,19 @@ def test_BE31_auth_me_additive_contract(ctx):
     c, db = ctx
     body = c.get("/api/auth/me", headers=bearer_for(VIEWER_USER)).json()
     assert body["role"] == "viewer" and body["full_name"] == "Vera Lectura" and body["email"] == VIEWER_USER["email"]
-    assert body["access"] == [{"platform_id": "datos", "role": "viewer"}]
+    assert body["access"] == [{"platform_id": "datos", "role": "viewer", "capabilities": ["read"]}]
     assert c.get("/api/auth/me", headers=bearer_for(NO_DATOS_USER)).json()["role"] == "none"       # Q9
+
+
+def test_BE31_capabilities_follow_the_role_matrix(ctx):
+    """Las capacidades de `/me` salen de ROLE_CAPABILITIES y coinciden con lo que exige `require_access`."""
+    from app.auth.auth_entity import DATOS_DELETE, DATOS_READ, DATOS_WRITE, capabilities_of
+    c, db = ctx
+    caps = {}
+    for u in (ADMIN_USER, EDITOR_USER, VIEWER_USER):
+        for a in c.get("/api/auth/me", headers=bearer_for(u)).json()["access"]:
+            caps[(a["platform_id"], a["role"])] = a["capabilities"]
+    assert caps[("datos", "admin")] == ["read", "write", "delete"]
+    assert caps[("datos", "editor")] == ["read", "write"] and caps[("datos", "viewer")] == ["read"]
+    assert DATOS_READ == ("admin", "editor", "viewer") and DATOS_WRITE == ("admin", "editor") and DATOS_DELETE == ("admin",)
+    assert capabilities_of("intruso") == [] and capabilities_of(None) == []                   # rol desconocido: nada

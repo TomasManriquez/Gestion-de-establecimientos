@@ -28,9 +28,15 @@ class MetricsService:
         return metrics
 
     async def upsert(self, rbd: str, year: int, data: MetricUpdate) -> Optional[dict]:
+        """None si el establecimiento no existe: no se crean métricas huérfanas. Un cuerpo sin
+        campos devuelve el registro tal como está (Mongo rechaza un `$set` vacío)."""
+        if await db_service.db.establishments.find_one({"rbd": rbd}) is None:
+            return None
         update_dict = {k: v for k, v in data.model_dump().items() if v is not None}
-        
-        result = await db_service.db.metrics.update_one(
+        if not update_dict:
+            return await self.find_by_rbd_and_year(rbd, year)
+
+        await db_service.db.metrics.update_one(
             {"rbd": rbd, "year": year},
             {"$set": update_dict},
             upsert=True
