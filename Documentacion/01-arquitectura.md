@@ -233,10 +233,14 @@ Tema: `--primary`/`--ring` pasan a `200 98% 36%` y se agregan los tokens semánt
 `--warning` (con su variante oscura) en `index.css` y `tailwind.config.js`. Los colores crudos del
 resto de la app no se tocan (D21).
 
-🧭 Aún no construido en el frontend: página de unidades, «Mi perfil», **la pantalla `/definir-contrasena`**
-(el enlace de los correos ya apunta a ella), importación CSV y los botones «Reenviar invitación» y
-«Restablecer contraseña» (deshabilitados en el menú de fila). **Su backend ya existe desde F4**
-(`03` §8.1): falta solo la interfaz.
+✅ **`/definir-contrasena`** (F4b, 2026-10-23): pantalla pública `components/SetPassword.jsx`, registrada en `App.jsx`
+**fuera de `ProtectedRoute`**. Lee el token del fragmento de la URL y lo quita de la barra de direcciones y del
+historial; muestra la política con `GET /api/auth/password-policy`; canjea con `POST /api/auth/set-password` y
+lleva al login (el canje no abre sesión). Cada respuesta (`400`, `422`, `429`, red) tiene su mensaje.
+
+🧭 Aún no construido en el frontend: página de unidades, «Mi perfil», importación CSV y los botones
+«Reenviar invitación» y «Restablecer contraseña» (deshabilitados en el menú de fila). **Su backend ya existe
+desde F4** (`03` §8.1): falta solo la interfaz.
 
 ---
 

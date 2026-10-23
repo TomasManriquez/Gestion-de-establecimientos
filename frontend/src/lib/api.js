@@ -21,6 +21,13 @@ export const usersApi = {
   revokeAccess: (id, platformId) => axios.delete(`/api/users/${id}/access/${platformId}`).then(data),
 };
 
+/** Rutas públicas de autenticación (sin sesión): política de contraseñas y canje del enlace del correo. */
+export const authApi = {
+  passwordPolicy: () => axios.get('/api/auth/password-policy').then(data),
+  /** 204 sin cuerpo. 400 `invalid_or_expired_link`, 422 con las infracciones, 429 por exceso de intentos. */
+  setPassword: (token, password) => axios.post('/api/auth/set-password', { token, password }).then(() => undefined),
+};
+
 export const unitsApi = {
   list: (params) => axios.get('/api/units', { params }).then(data),
   tree: () => axios.get('/api/units/tree').then(data),

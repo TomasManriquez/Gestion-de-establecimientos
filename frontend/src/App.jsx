@@ -11,6 +11,7 @@ import AppLayout from './components/AppLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import NotFound from './components/NotFound';
 import RequireAccess from './components/RequireAccess';
+import SetPassword from './components/SetPassword';
 import UsersPage from './components/users/UsersPage';
 import { Toaster } from '@/components/ui/sonner';
 
@@ -76,6 +77,9 @@ export default function App() {
             : <Login onLoginSuccess={handleLoginSuccess} />
         }
       />
+
+      {/* Pública: a ella llega el enlace del correo de invitación o de restablecimiento (el token va en el fragmento) */}
+      <Route path="/definir-contrasena" element={<SetPassword />} />
 
       {/* Rutas protegidas — ProtectedRoute actúa como layout guard */}
       <Route

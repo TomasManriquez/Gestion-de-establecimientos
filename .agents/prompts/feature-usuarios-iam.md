@@ -760,7 +760,7 @@ muestra la salida real de los tests.
 | F3 · Backend núcleo | E0, E1, E2, E2b, E4 | ✅ Implementada. Punto de restauración: tag `pre-usuarios-f3`. |
 | F4 · Primer acceso y masivo | E3, E5, E1b | ✅ Implementada. Punto de restauración: tag `pre-usuarios-f4`. |
 | F5 · Frontend | E6, la vista de E2b y la parte visual de E7 | ✅ Implementada y mergeada (PR #1). Conforme a §4.3. |
-| F4b · Interfaz de F4 | Pantalla `/definir-contrasena`, reenviar y restablecer, importación CSV y acciones masivas contra `/bulk` | ⏸ **En espera: va después de F6** (decisión del usuario, 2026-10-19). Al retomarla, reformular el criterio 1 de beta del README: con C24, el alta de punta a punta es entrar con Google. |
+| F4b · Interfaz de F4 | Pantalla `/definir-contrasena`, reenviar y restablecer, importación CSV y acciones masivas contra `/bulk` | **Parcial.** ✅ `/definir-contrasena` implementada el 2026-10-23 (`SetPassword.jsx`, tests FE23): la prueba local mostró que el enlace del correo caía en un 404. ⏸ Faltan reenviar y restablecer, la importación CSV y las acciones masivas. Al retomarlas, reformular el criterio 1 de beta del README: con C24, el alta de punta a punta es entrar con Google. |
 | F6 · Google y seguridad base | E8, C24, T11 y la línea base de seguridad | **Vigente.** Prompt propio: `fase-seguridad-google.md`. Regla 4: `auth` es punto único de falla. |
 | F7 · IAM | ADR de §8 | Solo diseño. |
 
