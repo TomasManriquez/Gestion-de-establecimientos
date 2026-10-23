@@ -1,11 +1,27 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { School, PieChart, Building2, LogOut, User, Users, ChevronLeft } from 'lucide-react';
+import { BarChart3, Building2, LogOut, User, Users, ChevronLeft } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { isIamAdmin } from '@/lib/access';
 
 const STORAGE_KEY = 'sidebar-collapsed';
+
+/** Marca del SLEP: el mosaico de la «L» (mismos colores que el logo). */
+function BrandMark({ size = 30 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 30 30" aria-hidden="true">
+      <polygon points="0,0 10,0 10,10 0,10" fill="#76c93b" />
+      <polygon points="0,10 10,10 10,22 0,22" fill="#f24f63" />
+      <polygon points="10,12 22,22 10,22" fill="#f8c928" />
+      <polygon points="0,22 10,22 10,30 0,30" fill="#ff7f96" />
+      <polygon points="10,22 22,22 30,30 10,30" fill="#36bce7" />
+      <polygon points="22,22 30,22 30,30" fill="#168fd5" />
+    </svg>
+  );
+}
+
+const STRIPE = ['bg-slep-green', 'bg-slep-sky', 'bg-slep-red', 'bg-slep-yellow', 'bg-slep-cyan', 'bg-slep-pink'];
 
 function readCollapsed() {
   try { return localStorage.getItem(STORAGE_KEY) === '1'; } catch { return false; }
@@ -39,6 +55,7 @@ function RailTip({ collapsed, label, children }) {
  */
 export default function AppLayout({ currentUser, onLogout }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
   const toggle = () => setCollapsed((c) => {
@@ -64,44 +81,42 @@ export default function AppLayout({ currentUser, onLogout }) {
   const navClass = (forceActive = false) => ({ isActive }) => {
     const active = isActive || forceActive;
     return `flex h-12 w-full items-center overflow-hidden rounded-xl text-sm font-bold font-outfit transition-colors duration-150 ${
-      active ? 'bg-sky-600 text-white shadow-md shadow-sky-600/10' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
+      active ? 'bg-slep-active text-white shadow-md shadow-black/10' : 'text-slate-200 hover:bg-white/10 hover:text-white'
     }`;
   };
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="min-h-screen bg-slate-50 flex text-slate-800 font-sans antialiased">
+      <div className="min-h-screen bg-slep-paper flex text-slep-ink font-sans antialiased">
 
         {/* SIDEBAR */}
         <aside
           data-collapsed={collapsed ? 'true' : 'false'}
           className={`group/sidebar relative ${collapsed ? 'w-[72px]' : 'w-72'} shrink-0 h-screen sticky top-0 z-20 transition-[width] duration-300 ease-in-out motion-reduce:transition-none`}
         >
-          <div className="flex h-full flex-col overflow-hidden bg-slate-900 text-slate-300 shadow-xl border-r border-slate-800">
+          <div className="flex h-full flex-col overflow-hidden bg-slep-navy text-slate-200 shadow-xl border-r border-white/10">
 
             {/* Brand block */}
-            <div className="flex h-[72px] shrink-0 items-center border-b border-slate-800 px-3">
+            <div className="flex h-[72px] shrink-0 items-center border-b border-white/10 px-3">
               <span className={SLOT}>
-                <span className="grid size-11 place-items-center rounded-xl bg-sky-600 text-white shadow-md shadow-sky-600/10">
-                  <School size={22} />
-                </span>
+                <BrandMark size={32} />
               </span>
               <div className={`min-w-0 flex-1 whitespace-nowrap ${fade}`} aria-hidden={collapsed}>
                 <h1 className="text-lg font-extrabold font-outfit text-white leading-tight">SLEP</h1>
-                <p className="text-[10px] font-bold text-sky-400 uppercase tracking-widest leading-none">Llanquihue</p>
+                <p className="text-[10px] font-bold text-slep-cyan uppercase tracking-widest leading-none">Llanquihue</p>
               </div>
             </div>
 
             {/* User profile */}
-            <div className="flex h-[72px] shrink-0 items-center border-b border-slate-800 bg-slate-950/40 px-3"
+            <div className="flex h-[72px] shrink-0 items-center border-b border-white/10 bg-black/20 px-3"
               title={collapsed ? (currentUser?.full_name || 'Usuario SLEP') : undefined}>
               <span className={SLOT}>
-                <span className="grid size-10 place-items-center rounded-full bg-slate-800 text-sky-400 border border-slate-700 shadow-inner">
+                <span className="grid size-10 place-items-center rounded-full bg-slep-active text-white border border-white/20 shadow-inner">
                   <User size={20} />
                 </span>
               </span>
               <div className={`min-w-0 flex-1 whitespace-nowrap pl-1 ${fade}`} aria-hidden={collapsed}>
-                <span className="block text-xs text-slate-500 font-semibold uppercase tracking-wider">
+                <span className="block text-xs text-slate-300 font-semibold uppercase tracking-wider">
                   {currentUser?.role === 'admin' ? 'Administrador' : 'Usuario'}
                 </span>
                 <h4 className="text-sm font-bold text-white truncate font-outfit">
@@ -112,10 +127,11 @@ export default function AppLayout({ currentUser, onLogout }) {
 
             {/* Navigation — NavLink semántico con clase activa automática */}
             <nav aria-label="Principal" className="flex flex-1 flex-col gap-1 px-3 py-4">
-              <RailTip collapsed={collapsed} label="Panel General">
-                <NavLink to="/dashboard" className={navClass()} aria-label="Panel General">
-                  <span className={SLOT}><PieChart size={18} /></span>
-                  <span className={`whitespace-nowrap ${fade}`} aria-hidden={collapsed}>Panel General</span>
+              {/* Acceso directo a Matrícula; activo en cualquier /tableros/* (portal futuro) */}
+              <RailTip collapsed={collapsed} label="Tableros">
+                <NavLink to="/tableros/matricula" className={navClass(pathname.startsWith('/tableros'))} aria-label="Tableros">
+                  <span className={SLOT}><BarChart3 size={18} /></span>
+                  <span className={`whitespace-nowrap ${fade}`} aria-hidden={collapsed}>Tableros</span>
                 </NavLink>
               </RailTip>
 
@@ -123,7 +139,7 @@ export default function AppLayout({ currentUser, onLogout }) {
               <RailTip collapsed={collapsed} label="Directorio de Recintos">
                 <NavLink
                   to="/establecimientos"
-                  className={navClass(window.location.pathname.startsWith('/establecimientos/'))}
+                  className={navClass(pathname.startsWith('/establecimientos/'))}
                   aria-label="Directorio de Recintos"
                 >
                   <span className={SLOT}><Building2 size={18} /></span>
@@ -136,11 +152,11 @@ export default function AppLayout({ currentUser, onLogout }) {
                   {/* Encabezado de sección: el texto se desvanece y aparece una línea en su lugar */}
                   <div className="relative mt-3 h-8 shrink-0">
                     <p aria-hidden={collapsed}
-                      className={`absolute inset-x-0 top-1/2 -translate-y-1/2 whitespace-nowrap px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400 ${fade}`}>
+                      className={`absolute inset-x-0 top-1/2 -translate-y-1/2 whitespace-nowrap px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-300 ${fade}`}>
                       Configuración
                     </p>
                     <div aria-hidden="true"
-                      className={`absolute left-1/2 top-1/2 h-px w-8 -translate-x-1/2 bg-slate-700 transition-opacity duration-200 motion-reduce:transition-none ${collapsed ? 'opacity-100 delay-100' : 'opacity-0'}`} />
+                      className={`absolute left-1/2 top-1/2 h-px w-8 -translate-x-1/2 bg-white/30 transition-opacity duration-200 motion-reduce:transition-none ${collapsed ? 'opacity-100 delay-100' : 'opacity-0'}`} />
                   </div>
                   <RailTip collapsed={collapsed} label="Usuarios">
                     <NavLink to="/configuracion/usuarios" className={navClass()} aria-label="Usuarios">
@@ -153,13 +169,13 @@ export default function AppLayout({ currentUser, onLogout }) {
             </nav>
 
             {/* Logout */}
-            <div className="shrink-0 border-t border-slate-800 bg-slate-950/20 px-3 py-4">
+            <div className="shrink-0 border-t border-white/10 bg-black/10 px-3 py-4">
               <RailTip collapsed={collapsed} label={logoutLabel}>
                 <button
                   type="button"
                   onClick={handleLogout}
                   aria-label={logoutLabel}
-                  className="flex h-12 w-full items-center overflow-hidden rounded-xl bg-slate-800 text-slate-400 ring-1 ring-inset ring-slate-700/50 transition-colors duration-150 hover:bg-rose-950/30 hover:text-rose-400 font-outfit"
+                  className="flex h-12 w-full items-center overflow-hidden rounded-xl bg-white/10 text-slate-200 ring-1 ring-inset ring-white/10 transition-colors duration-150 hover:bg-rose-500/20 hover:text-rose-200 font-outfit"
                 >
                   <span className={SLOT}><LogOut size={16} /></span>
                   <span className={`whitespace-nowrap text-xs font-bold uppercase tracking-wider ${fade}`} aria-hidden={collapsed}>{logoutLabel}</span>
@@ -175,18 +191,32 @@ export default function AppLayout({ currentUser, onLogout }) {
             aria-label={toggleLabel}
             aria-expanded={!collapsed}
             title={toggleLabel}
-            className="absolute -right-3 top-[72px] grid size-6 -translate-y-1/2 place-items-center rounded-full border border-slate-700 bg-slate-900 text-slate-400 opacity-0 shadow-sm transition-all duration-200 hover:bg-slate-800 hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 group-hover/sidebar:opacity-100 motion-reduce:transition-none"
+            className="absolute -right-3 top-[72px] grid size-6 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-slep-navy text-slate-300 opacity-0 shadow-sm transition-all duration-200 hover:bg-slep-active hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 group-hover/sidebar:opacity-100 motion-reduce:transition-none"
           >
             <ChevronLeft size={14} className={`transition-transform duration-300 motion-reduce:transition-none ${collapsed ? 'rotate-180' : ''}`} />
           </button>
         </aside>
 
-        {/* MAIN — Outlet renderiza la ruta hija activa */}
-        <main className="flex-1 min-w-0 p-8 lg:p-10 overflow-y-auto">
-          <div className="max-w-7xl mx-auto">
-            <Outlet />
-          </div>
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Barra institucional: logo del SLEP y franja de colores del mosaico */}
+          <header className="bg-white">
+            <div className="flex items-center gap-4 px-8 py-3 lg:px-10">
+              <img src="/slep-llanquihue.png" alt="Servicio Local de Educación Pública Llanquihue" className="h-9 w-auto" />
+              <span className="hidden h-8 w-px bg-slep-line sm:block" aria-hidden="true" />
+              <p className="hidden text-lg font-bold leading-tight text-slep-ink sm:block">Gestión de Establecimientos</p>
+            </div>
+            <div className="flex h-1" aria-hidden="true">
+              {STRIPE.map((c) => <span key={c} className={`flex-1 ${c}`} />)}
+            </div>
+          </header>
+
+          {/* MAIN — Outlet renderiza la ruta hija activa */}
+          <main className="flex-1 min-w-0 p-8 lg:p-10 overflow-y-auto">
+            <div className="max-w-7xl mx-auto">
+              <Outlet />
+            </div>
+          </main>
+        </div>
 
       </div>
     </TooltipProvider>

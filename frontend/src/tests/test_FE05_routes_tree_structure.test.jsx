@@ -10,7 +10,7 @@
  *   - App.jsx no contiene setTimeout (hack eliminado)
  *   - main.jsx usa BrowserRouter
  *   - Rutas declaradas correctamente: /login, /dashboard, /establecimientos, /:rbd, /:rbd/editar, *
- *   - FE-06: NavLink "Panel General" tiene clase activa en /dashboard
+ *   - FE-06: NavLink "Tableros" tiene clase activa en /tableros/matricula
  *   - FE-06: NavLink "Directorio" tiene clase activa en /establecimientos y /:rbd
  *   - FE-06: Los items del sidebar son <a> semánticos (no <button>)
  */
@@ -116,12 +116,11 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
     expect(source).toContain('NavLink');
   });
 
-  it('FE-06-B: NavLink de Panel General apunta a /dashboard', () => {
+  it('FE-06-B: NavLink de Tableros apunta a /tableros/matricula', () => {
     const source = (readSourceFile('App.jsx') || '') + (readSourceFile('components/AppLayout.jsx') || '');
     if (!source) return;
 
-    // Buscar NavLink con to="/dashboard"
-    expect(source).toMatch(/NavLink[^>]*to=["']\/?dashboard/);
+    expect(source).toMatch(/NavLink[^>]*to=["']\/?tableros\/matricula/);
   });
 
   it('FE-06-C: NavLink de Directorio apunta a /establecimientos', () => {
@@ -131,7 +130,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
     expect(source).toMatch(/NavLink[^>]*to=["']\/?establecimientos/);
   });
 
-  it('FE-06-D: NavLink en /dashboard tiene clase activa bg-sky-600', async () => {
+  it('FE-06-D: NavLink en /tableros/matricula tiene clase activa bg-slep-active', async () => {
     const { default: AppLayout } = await import('../../components/AppLayout.jsx').catch(() => ({
       default: null
     }));
@@ -142,7 +141,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
     }
 
     render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+      <MemoryRouter initialEntries={['/tableros/matricula']}>
         <Routes>
           <Route
             element={
@@ -152,7 +151,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
               />
             }
           >
-            <Route path="/dashboard" element={<div>Dashboard</div>} />
+            <Route path="/tableros/matricula" element={<div>Dashboard</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -160,10 +159,10 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
 
     await waitFor(() => {
       // El NavLink activo debe tener la clase de Tailwind para el estado activo
-      const activeLinks = document.querySelectorAll('.bg-sky-600');
+      const activeLinks = document.querySelectorAll('.bg-slep-active');
       const dashboardActive = Array.from(activeLinks).some(el =>
-        el.textContent?.includes('Panel General') ||
-        el.getAttribute('href') === '/dashboard'
+        el.textContent?.includes('Tableros') ||
+        el.getAttribute('href') === '/tableros/matricula'
       );
       expect(dashboardActive).toBe(true);
     });
@@ -197,7 +196,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
     );
 
     await waitFor(() => {
-      const activeLinks = document.querySelectorAll('.bg-sky-600');
+      const activeLinks = document.querySelectorAll('.bg-slep-active');
       const dirActive = Array.from(activeLinks).some(el =>
         el.textContent?.includes('Directorio') ||
         el.getAttribute('href')?.includes('/establecimientos')
@@ -217,7 +216,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
     }
 
     render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+      <MemoryRouter initialEntries={['/tableros/matricula']}>
         <Routes>
           <Route
             element={
@@ -227,7 +226,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
               />
             }
           >
-            <Route path="/dashboard" element={<div>Dashboard</div>} />
+            <Route path="/tableros/matricula" element={<div>Dashboard</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -236,7 +235,7 @@ describe('FE-06: Sidebar — NavLink con clase activa automática', () => {
     await waitFor(() => {
       const navLinks = screen.getAllByRole('link');
       const dashboardLink = navLinks.find(a =>
-        a.getAttribute('href') === '/dashboard'
+        a.getAttribute('href') === '/tableros/matricula'
       );
       expect(dashboardLink?.tagName).toBe('A');
     });

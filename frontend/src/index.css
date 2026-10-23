@@ -82,7 +82,7 @@
   }
 
   body {
-    @apply bg-slate-50 text-slate-800 antialiased font-sans selection:bg-sky-200;
+    @apply bg-slep-paper text-slep-ink antialiased font-sans selection:bg-sky-200;
   }
 }
 

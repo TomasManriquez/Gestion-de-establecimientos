@@ -212,7 +212,7 @@ por eso `run_bootstrap` vive en `main.py` (un test lo verifica).
 frontend/src/
 ├── lib/api.js, access.js, format.js, units.js   # cliente API único, permisos, fechas UTC, árbol de unidades
 ├── components/RequireAccess.jsx                 # guard de rol (compone con ProtectedRoute, que no se toca)
-├── components/AppLayout.jsx                     # sidebar colapsable (localStorage `sidebar-collapsed`)
+├── components/AppLayout.jsx                     # sidebar colapsable (localStorage `sidebar-collapsed`), barra con el logo del SLEP y franja de colores
 ├── components/users/                            # UsersPage, UsersFilters, UsersTable, PermissionsCell,
 │                                                #   UserRowActions, UserForm, AccessDialog, BulkBar, …
 └── components/ui/                               # primitivas shadcn agregadas con el CLI
@@ -347,3 +347,10 @@ frío incluye el tiempo de seeding completo antes de que Nginx levante.
 > que el default de `config.py:9`. Ese secreto está en el repositorio. Cualquier despliegue
 > que no defina `JWT_SECRET` por entorno emite tokens falsificables por cualquiera que lea
 > el código. Ver `04-seguridad-y-acceso.md` §6.
+
+### Rutas de tableros (2026-10-23)
+
+`/tableros/matricula` es el acceso directo de «Tableros» en la barra lateral; `/tableros` y `/dashboard` (la ruta
+anterior) redirigen ahí. `/tableros/:tablero` queda reservada para el portal de tableros. Hasta que el tablero
+rediseñado lo reemplace (ADR-018), esa ruta monta el `Dashboard.jsx` actual. Identidad: logo en
+`frontend/public/slep-llanquihue.png`, tokens `slep-*` y tipografía Carlito (equivalente métrico de Calibri).

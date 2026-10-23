@@ -16,9 +16,11 @@ export default {
       },
     },
     extend: {
+      // Identidad del SLEP: Calibri donde exista (Carlito es su equivalente métrico de Google Fonts).
+      // `font-outfit` se conserva como nombre para no tocar cada componente: hoy es la misma pila.
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        outfit: ['Outfit', 'sans-serif'],
+        sans: ['Calibri', 'Carlito', 'Aptos', '"Segoe UI"', 'Arial', 'sans-serif'],
+        outfit: ['Calibri', 'Carlito', 'Aptos', '"Segoe UI"', 'Arial', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -62,17 +64,22 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Paleta institucional (logo del SLEP y tableros). Los verdes, rojos y amarillos son del
+        // mosaico de la «L»: se usan en la franja y en acentos, no como colores de texto.
         slep: {
-          50: '#f0f7ff',
-          100: '#e0effe',
-          200: '#bae2fd',
-          300: '#7ccbfa',
-          400: '#38b0f6',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          800: '#075985',
-          900: '#0c4a6e',
+          navy: '#0b3a66',
+          active: '#1b5a96',
+          blue: '#0872b8',
+          ink: '#17324d',
+          muted: '#5b6f82',
+          paper: '#f3f9fd',
+          line: '#d7e8f1',
+          green: '#76c93b',
+          sky: '#168fd5',
+          red: '#f24f63',
+          yellow: '#f8c928',
+          cyan: '#36bce7',
+          pink: '#ff7f96',
         }
       },
       borderRadius: {

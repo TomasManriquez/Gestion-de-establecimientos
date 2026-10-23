@@ -33,10 +33,10 @@ function renderGuard(currentUser) {
 
 function renderLayout(currentUser) {
   return render(
-    <MemoryRouter initialEntries={['/dashboard']}>
+    <MemoryRouter initialEntries={['/tableros/matricula']}>
       <Routes>
         <Route element={<AppLayout currentUser={currentUser} onLogout={() => {}} />}>
-          <Route path="/dashboard" element={<p>Panel</p>} />
+          <Route path="/tableros/matricula" element={<p>Panel</p>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -100,11 +100,11 @@ describe('FE07: AppLayout — menú lateral', () => {
 
   it('FE07-G: colapsado, los enlaces conservan nombre accesible, los textos quedan ocultos y la geometría no cambia', async () => {
     const expanded = renderLayout(ADMIN);
-    const classesOpen = ['Panel General', 'Directorio de Recintos', 'Usuarios'].map((n) => screen.getByRole('link', { name: n }).className);
+    const classesOpen = ['Tableros', 'Directorio de Recintos', 'Usuarios'].map((n) => screen.getByRole('link', { name: n }).className);
     expanded.unmount();
     localStorage.setItem('sidebar-collapsed', '1');
     renderLayout(ADMIN);
-    ['Panel General', 'Directorio de Recintos', 'Usuarios'].forEach((name, i) => {
+    ['Tableros', 'Directorio de Recintos', 'Usuarios'].forEach((name, i) => {
       const link = screen.getByRole('link', { name });
       expect(link.tagName).toBe('A');
       // Misma altura y mismo slot de ícono en ambos estados (nada salta al colapsar)
@@ -124,17 +124,17 @@ describe('FE07: AppLayout — menú lateral', () => {
     for (const collapsed of [false, true]) {
       localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0');
       const { unmount } = renderLayout(ADMIN);
-      const active = screen.getByRole('link', { name: 'Panel General' });
+      const active = screen.getByRole('link', { name: 'Tableros' });
       expect(active).toHaveAttribute('aria-current', 'page');
-      expect(active.className).toContain('bg-sky-600');
-      expect(screen.getByRole('link', { name: 'Usuarios' }).className).not.toContain('bg-sky-600');
+      expect(active.className).toContain('bg-slep-active');
+      expect(screen.getByRole('link', { name: 'Usuarios' }).className).not.toContain('bg-slep-active');
       unmount();
     }
   });
 
   it('FE07-H: expandido los textos son visibles para los lectores de pantalla', () => {
     renderLayout(ADMIN);
-    const label = screen.getByText('Panel General');
+    const label = screen.getByText('Tableros');
     expect(label).toHaveAttribute('aria-hidden', 'false');
     expect(label.className).toContain('opacity-100');
     expect(screen.getByText('Llanquihue')).toBeInTheDocument();
@@ -159,8 +159,8 @@ describe('FE07: AppLayout — menú lateral', () => {
   it('FE07-K: alternar no vuelve a montar los enlaces (mismos nodos antes y después)', async () => {
     const user = userEvent.setup();
     renderLayout(ADMIN);
-    const before = screen.getByRole('link', { name: 'Panel General' });
+    const before = screen.getByRole('link', { name: 'Tableros' });
     await user.click(screen.getByRole('button', { name: 'Contraer barra lateral' }));
-    expect(screen.getByRole('link', { name: 'Panel General' })).toBe(before);
+    expect(screen.getByRole('link', { name: 'Tableros' })).toBe(before);
   });
 });
