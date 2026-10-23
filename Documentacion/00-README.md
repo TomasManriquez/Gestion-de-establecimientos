@@ -75,7 +75,7 @@ son correctas *a esta escala* y dejan de serlo un orden de magnitud más arriba.
 | Saber qué está mal hoy y qué falta | `05` §5 y las marcas `🔸 BRECHA` de cada documento |
 | Entender la feature de usuarios e IAM (F3, F4 y F6 implementadas; F7 diseñada) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
 | Entender cómo se conectarán otras plataformas (`selloverde`) | `04` §10 |
-| Configurar el correo de invitaciones (Gmail) | `07` §9 |
+| Configurar el correo de invitaciones (SMTP; alternativa Gmail API) | `07` §9, ADR-017 |
 
 ---
 

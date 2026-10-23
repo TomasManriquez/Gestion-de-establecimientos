@@ -1,10 +1,11 @@
 # Prompt · Feature: gestión de usuarios, unidades organizacionales y acceso centralizado (IAM)
 
 > **Uso:** mensaje inicial de una sesión nueva de agente, abierta en la raíz del repositorio.
-> **Versión 3.2 (2026-10-19).** La v2 incorporó las respuestas P1 a P12. La v3 incorporó las
+> **Versión 3.3 (2026-10-23).** La v2 incorporó las respuestas P1 a P12. La v3 incorporó las
 > respuestas N1 a N10, el requisito estricto de shadcn para el frontend, el hilo de Stack Overflow
 > sobre CSV y el marco de interconexión de la sección 8. La v3.1 cierra N2, N11 y N12. La v3.2
-> incorpora el **alta automática como lector con Google (C24)**, que reordena las fases (§7).
+> incorpora el **alta automática como lector con Google (C24)**, que reordena las fases (§7). La v3.3
+> incorpora el **envío de correo por SMTP con contraseña de aplicación (C25)** y cierra N13.
 > Verificado contra el repo en el commit
 > `5b0984e` más los cambios locales sin commitear (`backend/app/database/seed_service.py`,
 > `.gitignore`, `CLAUDE.md`, `Documentacion/`).
@@ -72,10 +73,11 @@ tu cuenta.
 | C18 | **La subrogancia es solo visibilidad**: no transfiere permisos. Prioridad Could. | Respuesta N4: "añadido estético por si en algún momento se requiere". |
 | C19 | **Perfil propio: el usuario edita su teléfono personal, su anexo y su contraseña.** El resto de los datos solo los cambia el admin global. | Respuesta N8. |
 | C20 | **El rol `editor` ve credenciales en claro** (licencias, SSID), igual que `admin`. Solo `viewer` las recibe redactadas. | Respuesta N10 ("sin restricción"), leída como que el editor no tiene restricción para ver credenciales. Confírmalo en el resumen de la Fase 1, porque amplía quién ve secretos. |
-| C21 | **Los correos se envían con Gmail API**, reutilizando el cliente OAuth que ya existe (`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`). Una casilla remitente dedicada da su consentimiento **una sola vez** con el scope `gmail.send`, y el backend guarda el refresh token como secreto. | Respuesta N2. Detalle en §4.1 y §7. |
+| C21 | **El modo `gmail` envía con Gmail API**, reutilizando el cliente OAuth que ya existe (`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`). Una casilla remitente dedicada da su consentimiento **una sola vez** con el scope `gmail.send`, y el backend guarda el refresh token como secreto. **Enmendada por C25:** este modo está implementado (F4) pero ya no es el de producción; queda como alternativa. | Respuesta N2. Detalle en §4.1 y §7. |
 | C22 | **`positions` es una lista con al menos un valor** para los usuarios de establecimiento. Lo habitual es un solo valor; tener varios es excepcional. | Respuesta N11. |
 | C23 | **El enum de cargos incluye `DOCENTE` y `ASISTENTE_EDUCACION` y no incluye `ENCARGADO_CONVIVENCIA`.** | Respuesta N12. |
 | C24 | **Alta automática con Google como lector.** Cuando una persona con cuenta del dominio permitido entra con Google y todavía no existe, el backend le crea la cuenta con `status: "active"`, `access: [{platform_id: "datos", role: "viewer"}]` y pertenencia **sin asignar** (R12). El rol sale **siempre** del servidor y nunca de datos del token de Google ni del cliente. Se controla con `GOOGLE_AUTO_PROVISION` (variable obligatoria, sin default). **Es la única excepción a C12**: el admin global sigue siendo quien crea cuentas a mano, quien otorga cualquier rol superior a `viewer` y quien asigna unidad o establecimiento. | Respuesta del 2026-10-19: el contenido de `datos` es de acceso público dentro de la organización, y el universo de establecimientos y funcionarios es demasiado grande y cambia demasiado para precargarlo a mano. Reemplaza la invitación obligatoria que C7 fijaba antes. **Condición para activarla en producción:** las brechas bloqueantes de §10 cerradas y con test. |
+| C25 | **En producción los correos salen por SMTP con una contraseña de aplicación** de la casilla remitente `correos.automaticos@slepllanquihue.cl`, no por Gmail API. `MAIL_MODE` pasa a tener tres valores: `smtp`, `gmail` y `console`. El modo `gmail` y `gmail_consent.py` **se conservan sin uso** como salida si el administrador de Workspace desactiva las contraseñas de aplicación. El SMTP va por `smtplib` de la biblioteca estándar en `asyncio.to_thread`: **sin dependencias nuevas**. | Decisión del 2026-10-23, tras probar `smtp.gmail.com:587` con la contraseña de aplicación y comprobar que envía. El consentimiento OAuth de escritorio fallaba con `redirect_uri_mismatch` y el volumen es bajo. **Precio aceptado:** la contraseña de aplicación no distingue enviar de leer, y la carpeta Enviados guarda enlaces de invitación vigentes; se mitiga deshabilitando IMAP en la casilla (ADR-017). |
 
 ---
 
@@ -384,9 +386,36 @@ google); `unit_id`; `rbd`; `positions` (multikey); `access.platform_id`; `status
 | **Índice TTL** | `auth_tokens.expires_at` | Los tokens vencidos desaparecen sin cron. |
 | **Soft delete por estado** | `users.status` | C9. |
 | **Modelo de actualización por audiencia** | `UserAdminUpdate` vs `UserSelfUpdate` (solo `personal_phone`, `work_extension`), ambos con `extra="forbid"` | **R10, C19.** Enviar `access`, `status` o `unit_id` a `/me` devuelve `422`. La protección está en el tipo y no depende de un `if`. |
-| **Envío de correo como módulo de infraestructura** | `backend/app/mail/mail_service.py`, al mismo nivel que `database/`, con un único método `send(to, subject, html, text)` | **C16, C21.** Los módulos de dominio no saben que existe Gmail. En los tests se mockea `mail_service`, igual que hoy se mockea `db_service`. Como es infraestructura y no dominio, no sigue la regla de los tres archivos. Se registra en ADR-012. |
+| **Envío de correo como módulo de infraestructura** | `backend/app/mail/mail_service.py`, al mismo nivel que `database/`, con un único método `send(to, subject, html, text)` | **C16, C21, C25.** Los módulos de dominio no saben qué transporte se usa (SMTP, Gmail API o consola). En los tests se mockea `mail_service`, igual que hoy se mockea `db_service`. Como es infraestructura y no dominio, no sigue la regla de los tres archivos. Se registra en ADR-012. |
 
-**Detalle del envío con Gmail API (C21):**
+**Detalle del envío por SMTP (C25, ✅ implementado el 2026-10-23; es el modo de producción):**
+- **Variables con `MAIL_MODE=smtp`**, todas obligatorias y sin default: `SMTP_HOST`, `SMTP_PORT`,
+  `SMTP_USERNAME`, `SMTP_PASSWORD` (**secreto**, tratado como `JWT_SECRET`) y `SMTP_SENDER_ADDRESS`
+  (valida con el mismo patrón de correo que `GMAIL_SENDER_ADDRESS`). Con `smtp` no se exigen las variables
+  `GMAIL_*`. Van a los cuatro archivos de configuración (`config.py`, los dos compose y la plantilla) y se
+  evalúan para `deploy.sh`.
+- **TLS siempre.** Puerto `587` con `STARTTLS` o `465` con TLS implícito; cualquier otro puerto impide el
+  arranque. Contexto con `ssl.create_default_context()`, que verifica el certificado. Nunca texto plano.
+- **Sin dependencias nuevas.** Usa `smtplib` de la biblioteca estándar dentro de `asyncio.to_thread` (la
+  llamada es bloqueante), con `timeout` explícito. No agregues `aiosmtplib`. La imagen del backend se
+  reconstruye por el cambio de código, no por una dependencia.
+- **Mismos contratos que `gmail`.** Mantén la validación de saltos de línea en `to` y `subject`, el
+  armado con `EmailMessage` (texto y HTML) y los códigos estables de `MailError`: `SMTPAuthenticationError`
+  → `mail_auth_failed`, tiempo agotado → `mail_timeout`, cualquier otro fallo → `mail_send_failed`. El log y
+  `last_error` **nunca** llevan la respuesta del servidor ni credenciales.
+- **Test.** Uno nuevo del modo `smtp` que mockea `smtplib.SMTP`/`SMTP_SSL`: verifica `starttls`, `login` y
+  `send_message`, el mapeo de errores y que ninguna credencial aparece en el log.
+- **Riesgos operativos que el ADR-017 deja escritos:**
+  - La contraseña de aplicación da acceso SMTP **e IMAP**: quien la obtenga puede leer la carpeta
+    Enviados, que contiene enlaces de invitación aún vigentes (un uso, 72 h). Se mitiga **deshabilitando
+    IMAP en la casilla** y usándola solo para esto.
+  - Exige verificación en dos pasos en la cuenta. Si un administrador de Workspace desactiva las
+    contraseñas de aplicación, o si cambia la clave de la cuenta, el envío falla con `mail_auth_failed`:
+    se genera una nueva y se actualiza `SMTP_PASSWORD`, o se pasa a `MAIL_MODE=gmail`.
+  - El puerto saliente `587` debe estar abierto en el servidor de producción; se comprueba antes del
+    primer despliegue.
+
+**Detalle del envío con Gmail API (C21, ✅ F4, modo `gmail`, alternativa):**
 - **Dependencias:** usa `google-auth` (que ya se necesita para C7) para refrescar el access token
   a partir del refresh token, y llama directamente al endpoint REST
   `users.messages.send` de Gmail. El mensaje se arma con `email.message.EmailMessage` de la
@@ -561,12 +590,15 @@ registro en `audit_log`, si se aprueba §3.7.
 **T8 · Paginación.** Paginación en el servidor con `page_size ≤ 200` y el patrón de BE04.
 
 **T9 · Configuración sin defaults peligrosos.** Ninguna variable secreta o de identidad tiene
-default (D2): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_SENDER_ADDRESS`,
-`GMAIL_REFRESH_TOKEN`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `PUBLIC_BASE_URL` y `GOOGLE_AUTO_PROVISION` (que obliga a decidir de forma
-explícita, en cada entorno, si el alta automática está activa). Si falta alguna, la app no
+default (D2): `GOOGLE_CLIENT_ID`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+`SMTP_SENDER_ADDRESS`, `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `PUBLIC_BASE_URL` y
+`GOOGLE_AUTO_PROVISION` (que obliga a decidir de forma explícita, en cada entorno, si el alta
+automática está activa). Las de SMTP solo se exigen con `MAIL_MODE=smtp`; con `MAIL_MODE=gmail` se
+exigen en su lugar `GOOGLE_CLIENT_SECRET`, `GMAIL_SENDER_ADDRESS` y `GMAIL_REFRESH_TOKEN`. Si falta
+alguna de las que corresponden al modo, la app no
 arranca. **Cada variable pasa a ser obligatoria en la fase que introduce el código que la usa:**
-las de Gmail solo desde E3, de modo que el login con Google (F3) no depende del consentimiento
-de Gmail. La política de
+las de correo solo desde E3, de modo que el login con Google (F3) no depende de ninguna credencial
+de correo. La política de
 contraseñas sí tiene defaults, porque no es un secreto, pero se valida al arrancar: un valor
 fuera de rango impide el arranque con un mensaje claro.
 
@@ -656,7 +688,7 @@ justifica cada cambio.
 | E1b · Subrogancia (Could) | Registrar, cancelar y mostrar subrogancias (C18). |
 | E2 · Usuarios | Alta SLEP y alta de establecimiento (con `positions`), edición, desactivar y reactivar, unicidad, dominio de correo, última actividad. |
 | E2b · Perfil propio | `GET` y `PATCH /api/users/me` con `UserSelfUpdate`, cambio de contraseña propia, vista `/perfil`. |
-| E3 · Contraseñas y primer acceso | Política por variables de entorno, invitación con enlace de un solo uso, reenvío, restablecimiento por el admin, `mail_service` con Gmail API (C21) y el script de consentimiento inicial. |
+| E3 · Contraseñas y primer acceso | Política por variables de entorno, invitación con enlace de un solo uso, reenvío, restablecimiento por el admin, `mail_service` con los modos `console`, `gmail` (C21, ✅ F4) y `smtp` (C25, ✅). |
 | E4 · Acceso por plataforma | Seed de `platforms` (`iam`, `datos`, `selloverde`), otorgar y revocar rol por plataforma. |
 | E5 · Operaciones masivas | `POST /api/users/bulk`, CSV → JSON con vista previa, `bulk-create` parcial, plantilla. |
 | E6 · Frontend de administración | Vista `/usuarios`, filtros en la URL, modal, selección múltiple, vista previa del CSV y guard de rol, todo conforme a §4.3. |
@@ -706,7 +738,7 @@ justifica cada cambio.
 
 ### 1c · Preguntas abiertas y supuestos
 
-Presenta N13 y N18 de §9.2, confirma la lectura de C20 y agrega las que encuentres. Cada ítem dice qué
+Presenta N19 de §9.2, confirma la lectura de C20 y agrega las que encuentres. Cada ítem dice qué
 cambia según la respuesta e incluye tu recomendación.
 
 ### Gate
@@ -737,22 +769,25 @@ muestra la salida real de los tests.
   `docker-compose.yml` fija el `environment` del backend a mano y `docker-compose.prod.yml` solo
   interpola las variables que nombra. Hay que agregarlas explícitamente a los dos compose y a
   `.env.production.template`. Para verificar el `id_token` (C7) solo se necesita
-  `GOOGLE_CLIENT_ID`. Con C21, `GOOGLE_CLIENT_SECRET` **también se usa**: lo necesita el refresco
-  del token de Gmail.
-- **Backend:** `email-validator` (requerido por `EmailStr`), `google-auth` y un cliente HTTP
-  asíncrono para Gmail API (por ejemplo `httpx`). Nada de `google-api-python-client`. Todos
-  obligan a reconstruir la imagen. Para firmar tokens asimétricos en F7, PyJWT (ya instalado)
+  `GOOGLE_CLIENT_ID`. `GOOGLE_CLIENT_SECRET` solo lo usa el modo `gmail` (C21), que ya no es el de
+  producción (C25).
+- **Backend:** `email-validator` (requerido por `EmailStr`), `google-auth` (F6) y `httpx` (modo
+  `gmail`). El modo `smtp` (C25) **no agrega dependencias**: usa `smtplib`. Nada de
+  `google-api-python-client` ni `aiosmtplib`. Los cambios de código obligan a reconstruir la imagen. Para firmar tokens asimétricos en F7, PyJWT (ya instalado)
   necesita `cryptography`.
-- **Fuera del repo:** confirmar que la pantalla de consentimiento del cliente OAuth es de tipo
-  Internal, agregarle el scope `gmail.send`, crear o elegir la casilla remitente y ejecutar una
-  vez el script de consentimiento. Son tareas de la consola de Google Cloud y de Workspace que el
-  agente no puede hacer: debe dejarlas como checklist para el usuario en `07-operacion.md`.
+- **Fuera del repo (modo `smtp`):** en la cuenta `correos.automaticos@slepllanquihue.cl`, activar la
+  verificación en dos pasos, generar una contraseña de aplicación, deshabilitar IMAP y confirmar con
+  TI que las contraseñas de aplicación están permitidas y que el servidor de producción puede salir por
+  el puerto 587. Son tareas de la cuenta y de Workspace que el agente no puede hacer: debe dejarlas
+  como checklist para el usuario en `07-operacion.md` §9. El consentimiento OAuth de Gmail (§9.1 de ese
+  documento) solo hace falta si se usa el modo `gmail`.
 - **Frontend:** cada componente de shadcn agregado puede traer dependencias `@radix-ui/*`. Revisa
   con `--dry-run` qué agrega cada `add`. Todo eso obliga a reconstruir la imagen.
 - **Variables nuevas:** `GOOGLE_AUTO_PROVISION`, `ALLOWED_EMAIL_DOMAINS`, `BOOTSTRAP_ADMIN_EMAIL`, `PUBLIC_BASE_URL`,
   `PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH`, `PASSWORD_REQUIRE_CHAR_CLASSES`,
-  `GMAIL_SENDER_ADDRESS`, `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`.
-  Todas van a los dos compose y a la plantilla.
+  `MAIL_MODE`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER_ADDRESS`
+  (C25, ✅), y para el modo `gmail` `GMAIL_SENDER_ADDRESS`, `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_ID` y
+  `GOOGLE_CLIENT_SECRET`. Todas van a los dos compose y a la plantilla.
 
 ---
 
@@ -885,7 +920,8 @@ TLS.
 | N8 | Campos editables del perfil | Teléfono, anexo y contraseña | C19 |
 | N9 | Valores de cargo | La lista del usuario, con ajustes | §3.1 |
 | N10 | ¿El editor ve credenciales? | Sin restricción | C20 (confirmar la lectura) |
-| N2 | Transporte del correo | Gmail API con el cliente OAuth existente | C21, §4.1 |
+| N2 | Transporte del correo | Gmail API con el cliente OAuth existente (2026-10-23: **sustituido en producción por SMTP con contraseña de aplicación**; Gmail API queda como modo alternativo) | C21, C25, §4.1 |
+| N13 | Casilla remitente | `correos.automaticos@slepllanquihue.cl`, cuenta dedicada del dominio (2026-10-23) | C25 |
 | N11 | `positions`: ¿lista o valor único? | Lista con al menos un valor; los casos con varios serán puntuales | C22, §3.1 |
 | N12 | Ajustes al enum de cargos | Agregar `DOCENTE` y `ASISTENTE_EDUCACION`; no agregar `ENCARGADO_CONVIVENCIA` | C23, §3.1 |
 | — | Alta automática como lector con Google (2026-10-19) | El contenido es público en la organización y el universo es demasiado grande y dinámico para cargarlo a mano | C24, R12, T11 |
@@ -899,7 +935,7 @@ TLS.
 
 | # | Pregunta | Recomendación de partida |
 |---|---|---|
-| N13 | **¿Cuál es la casilla remitente?** Con C21 hace falta una casilla `@slepllanquihue.cl` que envíe las invitaciones y los restablecimientos. ¿Existe una, o hay que pedírsela a TI? | Una casilla dedicada, no personal (por ejemplo, una de notificaciones o no-reply). Si se usara la casilla de una persona, al irse o cambiar su contraseña se cortaría el envío para todos. |
+| N19 | **¿Las contraseñas de aplicación están permitidas por el administrador de Workspace y el servidor de producción puede salir por el puerto 587?** La prueba con `smtp.gmail.com:587` funcionó desde el equipo de desarrollo, no desde el servidor. | Confirmar con TI antes del primer despliegue con `MAIL_MODE=smtp`. Si no, usar `MAIL_MODE=gmail` (C21). |
 | C20 | **Confirmar la lectura de N10**: el rol `editor` ve en claro las contraseñas de licencias y del SSID. | Presentarlo tal cual. Si la lectura es incorrecta, cambia la matriz de §3.3 y el editor vuelve a recibir los valores redactados. |
 
 ---
@@ -940,7 +976,7 @@ TLS.
 2. Link al Artifact de diagramas.
 3. Historias de usuario agrupadas por épica.
 4. Matriz de trazabilidad.
-5. Preguntas abiertas (N13, N18, la confirmación de C20 y las que agregues).
+5. Preguntas abiertas (N19, la confirmación de C20 y las que agregues).
 6. Detente y espera la aprobación.
 
 ---

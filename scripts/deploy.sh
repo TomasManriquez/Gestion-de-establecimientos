@@ -42,6 +42,16 @@ for VAR in MONGO_ROOT_USERNAME MONGO_ROOT_PASSWORD JWT_SECRET ADMIN_PASSWORD DAT
     fi
 done
 
+# Con MAIL_MODE=smtp (ADR-017) el backend no arranca sin las cinco variables SMTP_*: avisar antes del build.
+if [ "${MAIL_MODE}" = "smtp" ]; then
+    for VAR in SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD SMTP_SENDER_ADDRESS; do
+        if [ -z "${!VAR:-}" ]; then
+            echo "❌ ERROR: Con MAIL_MODE=smtp la variable ${VAR} debe estar definida en .env"
+            exit 1
+        fi
+    done
+fi
+
 echo "  ✅ Requisitos verificados."
 
 # ─── Backup preventivo antes de actualizar ───────────────────────────────────

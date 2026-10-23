@@ -191,14 +191,14 @@ backend/app/
 ├── units/           # ✅ units y subrogations (F4)
 ├── platforms/       # ✅ registro de plataformas y sus roles
 ├── audit/           # ✅ F4: audit_log, solo de agregado (entity/service/controller)
-├── mail/            # ✅ F4, infraestructura: mail_service.py (un solo archivo, modos gmail y console)
+├── mail/            # ✅ F4, infraestructura: mail_service.py (un solo archivo, modos smtp, gmail y console; ADR-017)
 └── …                # establishments, counterparts, metrics, analytics sin cambios de estructura
 ```
 
 Dirección de imports (ADR-013): `auth → users → {units, platforms, establishments, audit}` y
 `counterparts → users`, sin ciclos (un test lo verifica desde F4: `test_BE45_*`). Dos controllers componen servicios de dos módulos para
 evitar los ciclos `users ↔ units` y `users ↔ auth`. `mail` es infraestructura, al nivel de
-`database/`: los módulos de dominio no saben que existe Gmail.
+`database/`: los módulos de dominio no saben qué transporte de correo se usa.
 
 El `lifespan` llama a `db_service.connect()` (seed de establecimientos e índices) y después a
 `run_bootstrap()` (`main.py`): `units_service.ensure_bootstrap_units()`,

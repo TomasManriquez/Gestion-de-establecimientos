@@ -154,12 +154,17 @@ no arranca.**
 |---|---|---|
 | `ALLOWED_EMAIL_DOMAINS` | **ninguno** | Lista separada por comas (`slepllanquihue.cl`). Valida las altas y el claim `hd` de Google |
 | `BOOTSTRAP_ADMIN_EMAIL` | **ninguno** | Correo del admin sembrado o migrado |
-| `PUBLIC_BASE_URL` | **ninguno** | Origen público **sin ruta ni barra final**; forma el enlace de los correos. Con `MAIL_MODE=gmail` debe ser `https` (salvo `localhost`) |
-| `MAIL_MODE` | **ninguno** | `gmail` (envío real) o `console` (escribe el mensaje en el log; solo desarrollo, el arranque lo rechaza si `PUBLIC_BASE_URL` no es `localhost` o `127.0.0.1`). Con `console` no hacen falta las cuatro variables de Gmail/Google siguientes |
-| `GMAIL_SENDER_ADDRESS` | **ninguno** | Casilla remitente dedicada, no personal |
-| `GMAIL_REFRESH_TOKEN` | **ninguno** | **Secreto.** Token de la casilla remitente, obtenido una vez (§9). Trátese como `JWT_SECRET` |
-| `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Desde F4 los dos compose la pasan al contenedor (`${GOOGLE_CLIENT_ID:-}`); obligatoria con `MAIL_MODE=gmail` |
-| `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Lo usa el refresco del token de Gmail |
+| `PUBLIC_BASE_URL` | **ninguno** | Origen público **sin ruta ni barra final**; forma el enlace de los correos. Con `MAIL_MODE=smtp` o `gmail` debe ser `https` (salvo `localhost`) |
+| `MAIL_MODE` | **ninguno** | `smtp` (✅ envío real por SMTP, ADR-017), `gmail` (✅ envío real por Gmail API, alternativa) o `console` (escribe el mensaje en el log; solo desarrollo, el arranque lo rechaza si `PUBLIC_BASE_URL` no es `localhost` o `127.0.0.1`). Con `console` no hace falta ninguna credencial de correo |
+| `SMTP_HOST` | **ninguno** | Servidor SMTP (`smtp.gmail.com`). Obligatoria con `MAIL_MODE=smtp` |
+| `SMTP_PORT` | **ninguno** | `587` (STARTTLS) o `465` (TLS implícito); otro valor impide el arranque. Obligatoria con `smtp` |
+| `SMTP_USERNAME` | **ninguno** | Cuenta que inicia sesión (la casilla remitente). Obligatoria con `smtp` |
+| `SMTP_PASSWORD` | **ninguno** | **Secreto.** Contraseña de aplicación de la casilla (§9). Trátese como `JWT_SECRET`; da acceso SMTP **e IMAP** |
+| `SMTP_SENDER_ADDRESS` | **ninguno** | Dirección del encabezado `From`. Obligatoria con `smtp`; debe ser un correo válido |
+| `GMAIL_SENDER_ADDRESS` | **ninguno** | Solo `MAIL_MODE=gmail`. Casilla remitente dedicada, no personal |
+| `GMAIL_REFRESH_TOKEN` | **ninguno** | Solo `MAIL_MODE=gmail`. **Secreto.** Token de la casilla remitente, obtenido una vez (§9.1). Trátese como `JWT_SECRET` |
+| `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Desde F4 los dos compose la pasan al contenedor (`${GOOGLE_CLIENT_ID:-}`); obligatoria con `MAIL_MODE=gmail` y para el login con Google (F6) |
+| `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Solo `MAIL_MODE=gmail`: lo usa el refresco del token de Gmail |
 | `GOOGLE_AUTO_PROVISION` | **ninguno** (obligatoria) | `true` o `false`, nada más. Con `true`, quien entra con una cuenta del dominio y no existe obtiene una cuenta de **lector** en `datos`, sin asignar (ADR-015). **En producción la activa el responsable** tras las condiciones de `04` §9.6; la plantilla trae `false`. Ambos compose la exigen (`${GOOGLE_AUTO_PROVISION:?…}`) |
 | `PASSWORD_MIN_LENGTH` | `15` | Mínimo ≥ 8 (NIST SP 800-63B-4: 15 sin MFA) |
 | `PASSWORD_MAX_LENGTH` | `64` | Mínimo permitido 64; la política también rechaza lo que pase de 72 bytes (límite de bcrypt) |
@@ -168,7 +173,7 @@ no arranca.**
 
 **Cada variable pasa a ser obligatoria en la fase que la usa**, no antes: F3 exige
 `BOOTSTRAP_ADMIN_EMAIL`, `ALLOWED_EMAIL_DOMAINS`, `JWT_SECRET`, `ADMIN_PASSWORD` y la política de
-contraseñas; F4 agrega `MAIL_MODE` y `PUBLIC_BASE_URL` (y las de Gmail/Google si `MAIL_MODE=gmail`);
+contraseñas; F4 agrega `MAIL_MODE` y `PUBLIC_BASE_URL` (y las de Gmail/Google si `MAIL_MODE=gmail`; las `SMTP_*` si `MAIL_MODE=smtp`, ADR-017 ✅);
 F6 agrega el uso de `GOOGLE_CLIENT_ID` para el login y la variable obligatoria `GOOGLE_AUTO_PROVISION`. Mientras la cuenta remitente no exista se trabaja con
 `MAIL_MODE=console`: el mensaje, **con el enlace completo**, sale por el log del backend
 (`docker compose logs backend | grep "MAIL console"`), que es como se prueba el alta en desarrollo.
@@ -421,7 +426,8 @@ lo evidencia.
 | Cambia el endpoint de healthcheck | `Dockerfile.prod` (backend), `docker-compose.prod.yml` (los tres healthchecks), `nginx.conf` (`/health`). |
 | Toca `auth/`, `ProtectedRoute` o `database_service` | Punto único de falla: rama aislada, punto de restauración, y tests de autenticación pasando antes y después (regla 3 de `GEMINI.md`). |
 | 🧭 Agrega un componente de shadcn | `npx shadcn@latest add …` (nunca descargar a mano ni usar `--overwrite` sin aprobación); revisar con `--dry-run` las dependencias `@radix-ui/*` que trae, porque obligan a reconstruir la imagen del frontend. Requiere corregir antes `components.json` (D18). |
-| Envía correo desde el backend (✅ F4) | `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_*` y `GOOGLE_*` en los cuatro archivos y en `deploy.sh`; el consentimiento inicial de la casilla es una tarea manual (§9). **La imagen del backend se reconstruye** (`httpx` entra en `requirements.txt`). |
+| Envía correo desde el backend (✅ F4) | `MAIL_MODE`, `PUBLIC_BASE_URL`, `GMAIL_*` y `GOOGLE_*` en los cuatro archivos y en `deploy.sh`; el consentimiento inicial de la casilla es una tarea manual (§9.1). **La imagen del backend se reconstruye** (`httpx` entra en `requirements.txt`). |
+| Pasa el correo a SMTP (✅ ADR-017) | Código nuevo en `mail_service.py` y `config.py`: la imagen del backend se reconstruye, **sin dependencias nuevas** (`smtplib`). `SMTP_*` en los cuatro archivos y en `deploy.sh` (que las exige con `MAIL_MODE=smtp`); `.env.production.template` trae `MAIL_MODE=smtp`. Un entorno ya desplegado con `MAIL_MODE=gmail` sigue funcionando sin cambios. En el servidor: `SMTP_PASSWORD` solo en el `.env`, y **antes del primer despliegue probar la salida por el puerto 587** (§9). |
 | Agrega un contador o una colección con TTL (✅ F4) | `ensure_indexes()` con `expireAfterSeconds`; comprobar que sigue siendo idempotente. Los índices nuevos de F4 (`auth_tokens`, `rate_limits`, `audit_log`, `subrogations`) se crean al arrancar. |
 | Depende de la IP del cliente (rate limiting) | `--forwarded-allow-ips` en `Dockerfile.prod` y `X-Forwarded-For` en `nginx.conf`. **Verificar en el primer despliegue** que el proxy del host (delante de `127.0.0.1:8080`) reenvía `X-Forwarded-For`: de lo contrario el límite por IP se comparte entre todos. Prueba: dos fallos de login desde equipos distintos no deben sumarse en `db.rate_limits`. |
 | Actualiza un entorno existente a F4 | Backup (`scripts/backup-mongo.sh`); `.env` con `MAIL_MODE` y `PUBLIC_BASE_URL`; `docker compose up -d --build backend` (dependencia nueva). Los usuarios `invited` creados antes de F4 tienen `invitation.last_error: "mail_not_configured"`: reenviarles la invitación. Rollback: tag `pre-usuarios-f4`; las colecciones nuevas las ignora el código anterior. |
@@ -437,7 +443,7 @@ lo evidencia.
 | El login del admin falla | El admin ya existía: `ADMIN_PASSWORD` solo se usa para crearlo. Entrar con el correo o con `admin` y la contraseña vigente | `db.users.findOne({email:"<BOOTSTRAP_ADMIN_EMAIL>"})` · §1.3 |
 | Un usuario recién creado no puede entrar | Queda `invited` hasta definir su contraseña con el enlace del correo | `invitation` en `GET /api/users/{id}`: `last_error` indica por qué no salió el correo (`mail_auth_failed`, `mail_send_failed`, `mail_timeout`); reenviar con `POST /api/users/{id}/invitation` |
 | `429` al iniciar sesión | Rate limiting (5 fallos por cuenta+IP o 30 por IP en 15 min) | Cabecera `Retry-After`. Si **todos** los usuarios chocan a la vez, la IP no llega al backend: ver §7 |
-| `MAIL_MODE=console solo se permite con PUBLIC_BASE_URL en localhost` | Se dejó `console` en un entorno con URL pública | Usar `MAIL_MODE=gmail` y completar las variables de §2.1 |
+| `MAIL_MODE=console solo se permite con PUBLIC_BASE_URL en localhost` | Se dejó `console` en un entorno con URL pública | Usar `MAIL_MODE=smtp` o `gmail` y completar las variables de §2.1 |
 | Todas las llamadas a `/api` fallan en dev | Frontend fuera de Docker con el proxy apuntando a `backend:8000` | §1.2 |
 | El mapa de la ficha dice "Ubicación no disponible" | La base se re-sembró y se perdió `location` | `db.establishments.countDocuments({location:{$exists:true}})` · §4.1 |
 | El dashboard muestra ceros | No hay métricas del año 2026, que está hardcodeado | `db.metrics.countDocuments({year:2026})` · `03` §5.16 |
@@ -448,11 +454,39 @@ lo evidencia.
 
 ---
 
-## 9. Casilla remitente de Gmail (checklist manual)
+## 9. Casilla remitente de correo (checklist manual)
 
-> **Estado: el código está implementado (F4); falta la parte manual.** Son tareas de la consola de Google
-> Cloud y de Google Workspace que **ni el código ni un agente pueden hacer**: las ejecuta una persona con
-> permisos de administrador. Hasta completarlas se trabaja con `MAIL_MODE=console`. Decisión y riesgos: ADR-012.
+> **Estado (2026-10-23): en producción el envío es por SMTP (ADR-017); el código está implementado y falta la
+> parte manual.** Son tareas de la cuenta de Google y de Workspace que **ni el código ni un agente pueden
+> hacer**: las ejecuta una persona. Hasta completarlas se trabaja con `MAIL_MODE=console`.
+> El modo `gmail` (§9.1) sigue implementado como alternativa.
+
+La casilla es `correos.automaticos@slepllanquihue.cl`: dedicada, no personal.
+
+1. [ ] **Activar la verificación en dos pasos** en la cuenta de la casilla (sin ella Google no ofrece
+   contraseñas de aplicación).
+2. [ ] **Confirmar con TI** que el administrador de Workspace permite las contraseñas de aplicación. Si las
+   desactiva, el envío falla con `mail_auth_failed`: usar el modo `gmail` (§9.1).
+3. [ ] **Generar la contraseña de aplicación** (cuenta de Google → Seguridad → Contraseñas de aplicaciones).
+   Se muestra una sola vez, en cuatro bloques de cuatro caracteres.
+4. [ ] **Deshabilitar IMAP en la casilla** (Gmail → Configuración → Reenvío y correo POP/IMAP → *Inhabilitar
+   IMAP*). Con IMAP habilitado, esa contraseña también permitiría leer la carpeta Enviados, que contiene
+   enlaces de invitación vigentes (ADR-017). SMTP sigue funcionando.
+5. [ ] **Guardarla como secreto** en el `.env` del servidor (`SMTP_PASSWORD`), junto con `SMTP_HOST`,
+   `SMTP_PORT`, `SMTP_USERNAME` y `SMTP_SENDER_ADDRESS`. **Nunca** en el repositorio, en un log ni en un chat.
+   Un script de prueba que la contenga **no se versiona**: bórralo o léela del entorno.
+6. [ ] **Probar la salida por el puerto 587 desde el servidor de producción** (no desde un equipo de
+   desarrollo): `nc -vz smtp.gmail.com 587` o equivalente. Si está bloqueado, pedir a TI abrirlo o usar el
+   modo `gmail` (443).
+7. [ ] **Si cambia la clave de la cuenta**, o un administrador revoca la contraseña de aplicación, generar una
+   nueva (paso 3) y actualizar `SMTP_PASSWORD`. Mientras tanto los usuarios quedan `invited` y el error se
+   ve en `users.invitation.last_error`; al restablecer el envío, el admin reenvía las invitaciones.
+8. [ ] Confirmar con TI que el filtro de salida o de spam del dominio no bloquea los correos de la casilla
+   antes de la primera alta masiva.
+
+### 9.1 Alternativa: Gmail API (modo `gmail`, ✅ implementado en F4)
+
+Solo si las contraseñas de aplicación dejan de estar permitidas. Ya no es el camino de producción.
 
 1. [ ] **Elegir o pedir a TI la casilla remitente**: `@slepllanquihue.cl`, dedicada
    (notificaciones o no-reply), no personal. Si fuera personal, al irse su dueño o cambiar su
@@ -465,7 +499,9 @@ lo evidencia.
    cualquier equipo con el repositorio y Python (usa solo `httpx`, que ya está en `requirements.txt`):
    `cd backend && GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… python scripts/gmail_consent.py`
    (con `--no-browser` imprime la URL). El cliente OAuth debe ser de tipo **«Aplicación de escritorio»**, o
-   web con `http://127.0.0.1:8765/` como URI de redirección autorizada (`--port` cambia el puerto). Pide
+   web con `http://127.0.0.1:8765/` **con la barra final**, registrada en ese mismo cliente, como URI de
+   redirección autorizada (`--port` cambia el puerto; los cambios pueden tardar en propagarse). Un cliente
+   web sin esa URI exacta falla con `redirect_uri_mismatch`. Pide
    solo el scope `gmail.send`, usa PKCE y verifica `state`. Imprime el **refresh token** por pantalla; no lo
    escribe en ningún archivo ni log (un test lo fija). Si Google no devuelve token (la cuenta ya consintió),
    revocar el acceso en `myaccount.google.com/permissions` y repetir.

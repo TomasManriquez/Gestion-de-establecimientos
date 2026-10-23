@@ -33,9 +33,14 @@ services:
       - PASSWORD_REQUIRE_CHAR_CLASSES=0
       # Correo: en desarrollo el mensaje (con su enlace) sale por el log del backend.
       # `console` solo se acepta con PUBLIC_BASE_URL en localhost. Para probar el envío
-      # real: MAIL_MODE=gmail y las cuatro variables de abajo en el .env de la raiz.
+      # real: MAIL_MODE=smtp y las cinco variables SMTP_* en el .env de la raiz (o MAIL_MODE=gmail y las GMAIL_*).
       - MAIL_MODE=${MAIL_MODE:-console}
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:5173}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_SENDER_ADDRESS=${SMTP_SENDER_ADDRESS:-}
       - GMAIL_SENDER_ADDRESS=${GMAIL_SENDER_ADDRESS:-}
       - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}

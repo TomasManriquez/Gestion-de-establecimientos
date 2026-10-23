@@ -915,7 +915,7 @@ funcionando.
 | `auth_tokens.token_hash` | `auth_tokens` | Nunca sale. |
 | `users.personal_phone` | `users` | Dato personal (Ley 19.628; Ley 21.719 desde dic-2026). Fuera de la proyección del listado; solo lo ven el admin global y el propio usuario. |
 | `users.email`, nombres | `users` | Visibles solo para `iam/admin` y el propio usuario; `GET /api/units` solo expone id y nombre a mostrar de las jefaturas. |
-| `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_SECRET` | entorno | Secretos como `JWT_SECRET`. Nunca en el repo ni en logs. |
+| `GMAIL_REFRESH_TOKEN`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD` | entorno | Secretos como `JWT_SECRET`. Nunca en el repo ni en logs. `SMTP_PASSWORD` (ADR-017) da acceso SMTP e IMAP a la casilla remitente. |
 
 ### 9.12 Ciclo de vida del usuario
 
