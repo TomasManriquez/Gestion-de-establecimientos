@@ -42,6 +42,11 @@ export const establishmentsApi = {
   all: () => axios.get('/api/establishments', { params: { page_size: 200 } }).then((r) => r.data.items),
 };
 
+export const analyticsApi = {
+  /** Matrícula por establecimiento y año (ADR-018): el tablero calcula filtros y comparaciones. */
+  enrollment: (signal) => axios.get('/api/analytics/enrollment', { signal }).then(data),
+};
+
 /**
  * Normaliza un error de axios al formato que usan los formularios.
  *   - 409 del backend:   detail = {code, message, field}
