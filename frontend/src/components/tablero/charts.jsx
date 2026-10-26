@@ -18,6 +18,7 @@ function nice(v) {
 
 /** Evolución de la matrícula: total o una línea por comuna. `markFrom` marca el año en que entran los jardines. */
 export function EvolutionChart({ data, byComuna, markFrom, ariaLabel }) {
+  const [hover, setHover] = React.useState(null);   // {key, i} del punto bajo el mouse o con el foco (vista por comuna)
   const { years, series } = data;
   if (!years.length) return <p className="py-10 text-center text-sm text-slep-muted">Sin datos para este filtro.</p>;
   const W = 700; const x0 = 96; const x1 = 590;
@@ -58,12 +59,36 @@ export function EvolutionChart({ data, byComuna, markFrom, ariaLabel }) {
           <text className="tb-dot" x={X(i)} y={Y(p.value) - 12} textAnchor="middle" fontSize="13.5" fontWeight="700" fill="#17324d">{fmt(p.value)}</text>
         </g>
       ))}
-      {byComuna && series.map((s) => s.points.map((p, i) => (
-        <g key={`${s.key}-${p.year}`} className="tb-dot">
-          <circle cx={X(i)} cy={Y(p.value)} r={s.selected ? 4 : 3} fill={s.selected ? BLUE : DIM} stroke="#fff" strokeWidth="2" />
-          <text x={X(i)} y={Y(p.value) - 9} textAnchor="middle" fontSize="11.5" fontWeight={s.selected ? 700 : 400} fill={s.selected ? '#17324d' : '#94a9bb'}>{fmt(p.value)}</text>
-        </g>
-      )))}
+      {byComuna && series.map((s) => s.points.map((p, i) => {
+        const on = hover && hover.key === s.key && hover.i === i;
+        return (
+          <g key={`${s.key}-${p.year}`}>
+            <circle className="tb-dot" cx={X(i)} cy={Y(p.value)} r={on ? 6 : s.selected ? 4 : 3} fill={s.selected ? BLUE : DIM} stroke="#fff" strokeWidth="2" />
+            {/* zona de captura más grande que el punto, también con teclado */}
+            <circle data-point={`${s.key}|${p.year}`} cx={X(i)} cy={Y(p.value)} r="12" fill="transparent" tabIndex={0}
+              onMouseEnter={() => setHover({ key: s.key, i })} onMouseLeave={() => setHover(null)}
+              onFocus={() => setHover({ key: s.key, i })} onBlur={() => setHover(null)}>
+              <title>{`${titleCase(s.label)} · ${p.year}: ${fmt(p.value)}`}</title>
+            </circle>
+          </g>
+        );
+      }))}
+      {byComuna && hover && (() => {
+        const s = series.find((z) => z.key === hover.key);
+        const p = s?.points[hover.i];
+        if (!p) return null;
+        const w = 132; const h = 40;
+        const cx = Math.min(Math.max(X(hover.i), x0 + w / 2), x1 + 60 - w / 2);
+        const above = Y(p.value) - h - 12 > 4;
+        const ty = above ? Y(p.value) - h - 12 : Y(p.value) + 14;
+        return (
+          <g pointerEvents="none" role="presentation">
+            <rect x={cx - w / 2} y={ty} width={w} height={h} rx="8" fill="#17324d" fillOpacity="0.96" />
+            <text x={cx} y={ty + 16} textAnchor="middle" fontSize="11.5" fill="#cfe3f3">{titleCase(s.label)} · {p.year}</text>
+            <text x={cx} y={ty + 33} textAnchor="middle" fontSize="14" fontWeight="700" fill="#fff">{fmt(p.value)}</text>
+          </g>
+        );
+      })()}
       {byComuna && series.map((s) => {
         const last = s.points[s.points.length - 1];
         return <text key={s.key} x={600} y={Y(last.value) + 4} fontSize="12" fontWeight="700" fill={s.selected ? '#17324d' : '#94a9bb'}>{titleCase(s.label)}</text>;
