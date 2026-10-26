@@ -176,7 +176,7 @@ export default function TableroMatricula() {
         <ChartCard title="Evolución de la matrícula" className="flex-[2_1_34rem]"
           action={<Segmented size="sm" label="Vista de la evolución" value={evoMode} onChange={setEvoMode} options={[{ value: 'total', label: 'Total' }, { value: 'comuna', label: 'Por comuna' }]} />}
           source={source('enrollment', `Matrícula · ${model.years.length ? `${model.years[0]}–${model.years[model.years.length - 1]}` : ''} · ver origen`)}>
-          <EvolutionChart data={data.evo} byComuna={evoMode === 'comuna'} markFrom={data.jardinesFrom} ariaLabel={`Matrícula por año: ${data.evo.series[0]?.points.map((p) => `${p.year} ${fmt(p.value)}`).join(', ')}`} />
+          <EvolutionChart data={data.evo} byComuna={evoMode === 'comuna'} markFrom={data.jardinesFrom} ariaLabel={`Matrícula por año. ${data.evo.series.map((sr) => `${evoMode === 'comuna' ? `${titleCase(sr.label)}: ` : ''}${sr.points.map((p) => `${p.year} ${fmt(p.value)}`).join(', ')}`).join('. ')}`} />
         </ChartCard>
         <ChartCard title="Por comuna" className="flex-[1_1_20rem]" source={source('enrollment', 'Matrícula por comuna · ver origen')}>
           <ComunaBars rows={data.bars} selected={filter.comuna} onSelect={(c) => set({ comuna: c })} showDelta={compare != null} />

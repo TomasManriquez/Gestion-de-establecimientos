@@ -145,4 +145,16 @@ describe('FE24: tablero de matrícula', () => {
     expect(within(area).getByRole('button', { name: 'Rural' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(kpi('Matrícula 2026')).getByText('80')).toBeInTheDocument();                // B 10 + E 70
   });
+
+  it('FE24-J: la evolución por comuna rotula el valor exacto de cada punto anual', async () => {
+    render(<TableroMatricula />);
+    await screen.findByRole('heading', { name: 'Matrícula' });
+    fireEvent.click(within(screen.getByRole('group', { name: 'Vista de la evolución' })).getByRole('button', { name: 'Por comuna' }));
+    const chart = screen.getByRole('img', { name: /Matrícula por año\. Fresia: 2024 90, 2025 120, 2026 120\. Frutillar: 2024 60, 2025 80, 2026 110/ });
+    const labels = Array.from(chart.querySelectorAll('text')).map((t) => t.textContent);
+    ['90', '120', '60', '80', '110'].forEach((v) => expect(labels).toContain(v));
+    expect(labels.filter((t) => t === '120')).toHaveLength(2);                              // Fresia 2025 y 2026
+    expect(labels).toContain('Fresia');
+    expect(labels).toContain('Frutillar');
+  });
 });

@@ -20,20 +20,21 @@ function nice(v) {
 export function EvolutionChart({ data, byComuna, markFrom, ariaLabel }) {
   const { years, series } = data;
   if (!years.length) return <p className="py-10 text-center text-sm text-slep-muted">Sin datos para este filtro.</p>;
-  const W = 700; const x0 = 84; const x1 = 590;
+  const W = 700; const x0 = 96; const x1 = 590;
+  const yb = byComuna ? 270 : 190;            // base del gráfico: la vista por comuna es más alta para separar las líneas
   const X = (i) => (years.length === 1 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (years.length - 1));
   const vals = series.flatMap((s) => s.points.map((p) => p.value)).filter((v) => v > 0);
   let lo = Math.min(...vals); let hi = Math.max(...vals); let step;
   if (byComuna) { lo = 0; step = nice(Math.max(hi, 4) / 4); hi = Math.ceil(hi / step) * step; }
   else { step = nice(Math.max(hi - lo, hi * 0.08, 4) / 3); lo = Math.max(0, Math.floor(lo / step) * step - step); hi = Math.ceil(hi / step) * step; }
   if (hi <= lo) hi = lo + step;
-  const Y = (v) => 190 - ((v - lo) / (hi - lo)) * 166;
+  const Y = (v) => yb - ((v - lo) / (hi - lo)) * (yb - 24);
   const grid = []; for (let v = lo; v <= hi + 0.001 && grid.length < 7; v += step) grid.push(v);
   const path = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'} ${X(i).toFixed(1)} ${Y(p.value).toFixed(1)}`).join(' ');
   const total = !byComuna ? series[0].points : null;
   const markIdx = markFrom != null ? years.indexOf(markFrom) : -1;
   return (
-    <svg width="100%" viewBox={`0 0 ${W} 222`} role="img" aria-label={ariaLabel} className="block overflow-visible">
+    <svg width="100%" viewBox={`0 0 ${W} ${yb + 32}`} role="img" aria-label={ariaLabel} className="block overflow-visible">
       {grid.map((v) => (
         <g key={v}>
           <line x1={x0} x2={x1} y1={Y(v)} y2={Y(v)} stroke="#e3edf5" />
@@ -42,11 +43,11 @@ export function EvolutionChart({ data, byComuna, markFrom, ariaLabel }) {
       ))}
       {markIdx > 0 && (
         <g>
-          <line x1={X(markIdx)} x2={X(markIdx)} y1={12} y2={190} stroke="#94a9bb" strokeDasharray="3 4" />
-          <text x={X(markIdx) + 6} y={184} fontSize="12" fill="#5b6f82">jardines desde {markFrom}</text>
+          <line x1={X(markIdx)} x2={X(markIdx)} y1={12} y2={yb} stroke="#94a9bb" strokeDasharray="3 4" />
+          <text x={X(markIdx) + 6} y={yb - 6} fontSize="12" fill="#5b6f82">jardines desde {markFrom}</text>
         </g>
       )}
-      {total && <path className="tb-line" d={`${path(total)} L ${X(total.length - 1)} 190 L ${X(0)} 190 Z`} fill="#168fd5" fillOpacity="0.1" />}
+      {total && <path className="tb-line" d={`${path(total)} L ${X(total.length - 1)} ${yb} L ${X(0)} ${yb} Z`} fill="#168fd5" fillOpacity="0.1" />}
       {series.map((s) => (
         <path key={s.key} className="tb-line" d={path(s.points)} fill="none" strokeWidth={byComuna && s.selected && s.key !== 'total' ? 3 : 2.5}
           stroke={byComuna && !s.selected ? DIM : BLUE} strokeLinejoin="round" strokeLinecap="round" />
@@ -57,11 +58,17 @@ export function EvolutionChart({ data, byComuna, markFrom, ariaLabel }) {
           <text className="tb-dot" x={X(i)} y={Y(p.value) - 12} textAnchor="middle" fontSize="13.5" fontWeight="700" fill="#17324d">{fmt(p.value)}</text>
         </g>
       ))}
+      {byComuna && series.map((s) => s.points.map((p, i) => (
+        <g key={`${s.key}-${p.year}`} className="tb-dot">
+          <circle cx={X(i)} cy={Y(p.value)} r={s.selected ? 4 : 3} fill={s.selected ? BLUE : DIM} stroke="#fff" strokeWidth="2" />
+          <text x={X(i)} y={Y(p.value) - 9} textAnchor="middle" fontSize="11.5" fontWeight={s.selected ? 700 : 400} fill={s.selected ? '#17324d' : '#94a9bb'}>{fmt(p.value)}</text>
+        </g>
+      )))}
       {byComuna && series.map((s) => {
         const last = s.points[s.points.length - 1];
-        return <text key={s.key} x={598} y={Y(last.value) + 4} fontSize="12" fontWeight="700" fill={s.selected ? '#17324d' : '#94a9bb'}>{s.label}</text>;
+        return <text key={s.key} x={600} y={Y(last.value) + 4} fontSize="12" fontWeight="700" fill={s.selected ? '#17324d' : '#94a9bb'}>{titleCase(s.label)}</text>;
       })}
-      {years.map((y, i) => <text key={y} x={X(i)} y={214} textAnchor="middle" fontSize="13" fill="#5b6f82">{y}</text>)}
+      {years.map((y, i) => <text key={y} x={X(i)} y={yb + 24} textAnchor="middle" fontSize="13" fill="#5b6f82">{y}</text>)}
     </svg>
   );
 }
