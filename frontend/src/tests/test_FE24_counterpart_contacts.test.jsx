@@ -131,3 +131,29 @@ describe('FE24: títulos normalizados', () => {
     expect(detail.className).not.toMatch(/font-semibold|text-\[11px\]/);
   });
 });
+
+describe('FE24: contacto del director', () => {
+  const withContact = () => ({ ...establishment(), general_info: { ...establishment().general_info,
+    director_email: 'juan.ojeda@slepllanquihue.cl', director_phone: '+56987654321' } });
+
+  it('FE24-I: el popup «Contacto» muestra correo y teléfono como texto, sin enlaces, y los copia', async () => {
+    const user = userEvent.setup();
+    installClipboard();
+    await renderFicha(withContact());
+    await user.click(screen.getByRole('button', { name: 'Contacto' }));
+    const popup = await screen.findByText('Director / Encargado', { selector: 'span' }).then((el) => el.closest('#director-contact-popup'));
+    expect(within(popup).getByText('juan.ojeda@slepllanquihue.cl')).toBeInTheDocument();
+    expect(within(popup).getByText('+56987654321')).toBeInTheDocument();
+    expect(popup.querySelector('a[href^="mailto:"], a[href^="tel:"]')).toBeNull();
+    await user.click(within(popup).getByRole('button', { name: 'Copiar correo de Juan Ojeda Cárcamo' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('juan.ojeda@slepllanquihue.cl'));
+  });
+
+  it('FE24-J: sin correo ni teléfono registrados, el popup lo dice', async () => {
+    const user = userEvent.setup();
+    await renderFicha();
+    await user.click(screen.getByRole('button', { name: 'Contacto' }));
+    expect(await screen.findByText('Sin correo registrado')).toBeInTheDocument();
+    expect(screen.getByText('Sin teléfono registrado')).toBeInTheDocument();
+  });
+});

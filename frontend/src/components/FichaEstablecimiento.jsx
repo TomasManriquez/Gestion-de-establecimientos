@@ -343,26 +343,18 @@ export default function FichaEstablecimiento({ currentUser }) {
                         </button>
                       </div>
                       <div className="border-t border-slate-100 pt-3 space-y-2 text-xs">
-                        <div className="flex items-center gap-2.5 text-slate-600">
-                          <Mail size={14} className="text-slate-400 flex-shrink-0" />
-                          {establishment.general_info.director_email ? (
-                            <a href={`mailto:${establishment.general_info.director_email}`} className="font-semibold text-sky-600 hover:underline break-all">
-                              {establishment.general_info.director_email}
-                            </a>
-                          ) : (
-                            <span className="text-slate-400 italic">Sin correo registrado</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2.5 text-slate-600">
-                          <Phone size={14} className="text-slate-400 flex-shrink-0" />
-                          {establishment.general_info.director_phone ? (
-                            <a href={`tel:${establishment.general_info.director_phone}`} className="font-semibold text-slate-700 hover:text-sky-600 hover:underline">
-                              {establishment.general_info.director_phone}
-                            </a>
-                          ) : (
-                            <span className="text-slate-400 italic">Sin teléfono registrado</span>
-                          )}
-                        </div>
+                        {establishment.general_info.director_email ? (
+                          <ContactLine icon={Mail} kind="Correo" value={establishment.general_info.director_email}
+                            person={establishment.general_info.director} />
+                        ) : (
+                          <p className="text-slate-500 italic">Sin correo registrado</p>
+                        )}
+                        {establishment.general_info.director_phone ? (
+                          <ContactLine icon={Phone} kind="Teléfono" value={establishment.general_info.director_phone}
+                            person={establishment.general_info.director} />
+                        ) : (
+                          <p className="text-slate-500 italic">Sin teléfono registrado</p>
+                        )}
                       </div>
                     </div>
                   )}
