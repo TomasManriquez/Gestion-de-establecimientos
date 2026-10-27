@@ -205,3 +205,26 @@
 .maplibregl-popup-tip {
   border-top-color: white !important;
 }
+
+
+/* Tablero de matrícula: transiciones sutiles al filtrar y al pasar el mouse. */
+.tb-card { transition: box-shadow .2s ease; }
+.tb-card:hover { box-shadow: 0 8px 22px rgba(23, 50, 77, .08); }
+.tb-press { transition: transform .12s ease, background-color .15s ease, color .15s ease; }
+.tb-press:active { transform: scale(.97); }
+.tb-row { transition: background-color .15s ease; }
+.tb-row:hover { background: #eef6fc; }
+.tb-pill { transition: transform .3s cubic-bezier(.2, .7, .2, 1); }
+.tb-bar { transition: width .5s cubic-bezier(.2, .7, .2, 1), background-color .25s ease, opacity .25s ease; }
+.tb-col { transition: height .5s cubic-bezier(.2, .7, .2, 1); }
+.tb-tile { transition: left .5s cubic-bezier(.2, .7, .2, 1), top .5s cubic-bezier(.2, .7, .2, 1), width .5s cubic-bezier(.2, .7, .2, 1), height .5s cubic-bezier(.2, .7, .2, 1), opacity .25s ease, filter .2s ease; }
+.tb-tile:hover { filter: brightness(1.1); }
+.tb-cell { transition: opacity .25s ease, transform .12s ease; }
+.tb-cell:hover { transform: scale(1.05); }
+.tb-dot { transition: opacity .3s ease; }
+.tb-line { transition: d .55s cubic-bezier(.2, .7, .2, 1), stroke .3s ease; }
+.tb-sheet { animation: tbSheet .26s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes tbSheet { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .tb-card, .tb-press, .tb-row, .tb-pill, .tb-bar, .tb-col, .tb-tile, .tb-cell, .tb-dot, .tb-line, .tb-sheet { transition: none !important; animation: none !important; }
+}
