@@ -4,8 +4,9 @@ import axios from 'axios';
 import { 
   ArrowLeft, Edit3, School, Users, Wifi, Printer, 
   UserCheck, History, Calendar, CheckCircle2, XCircle, Info, PhoneCall,
-  Mail, Phone, X, TrendingUp
+  Mail, Phone, X, TrendingUp, Copy, Check
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts';
@@ -28,9 +29,54 @@ const roleLabel = (role) => {
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
+/** Copia al portapapeles. Sin la API moderna (contexto no seguro) cae en un textarea temporal. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    document.body.removeChild(area);
+    return ok;
+  }
+}
+
+/** Dato de contacto como texto seleccionable (sin hipervínculo) y un botón que lo copia. */
+function ContactLine({ icon: Icon, kind, value, person }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (await copyText(value)) {
+      setCopied(true);
+      toast.success(`${kind} copiado`);
+      setTimeout(() => setCopied(false), 1500);
+    } else {
+      toast.error(`No se pudo copiar el ${kind.toLowerCase()}. Selecciónalo y cópialo a mano.`);
+    }
+  };
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-slate-600">
+      <Icon size={12} className="shrink-0 text-slate-400" aria-hidden="true" />
+      <span className="min-w-0 flex-1 select-text break-all">{value}</span>
+      <button type="button" onClick={copy} title={`Copiar ${kind.toLowerCase()}`}
+        aria-label={`Copiar ${kind.toLowerCase()} de ${person}`}
+        className="shrink-0 p-1 rounded-md text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors">
+        {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+      </button>
+    </div>
+  );
+}
+
 /**
  * Contrapartes en una sola tarjeta: una fila por persona con cargo y nombre; correo y teléfono
- * como íconos (el dato completo va en `title` y en el nombre accesible).
+ * visibles bajo el nombre, seleccionables, con un botón para copiarlos.
  */
 function CounterpartList({ title, dotClass, items, empty }) {
   return (
@@ -45,23 +91,11 @@ function CounterpartList({ title, dotClass, items, empty }) {
       ) : (
         <ul className="divide-y divide-slate-100 text-sm">
           {items.map((cp, idx) => (
-            <li key={cp._id || idx} className="flex items-center gap-2 px-5 py-2 hover:bg-slate-50/70 transition-colors">
-              <div className="min-w-0 flex-1">
-                <span className="block text-[11px] font-semibold text-slate-400">{roleLabel(cp.role)}</span>
-                <span className="block font-semibold text-slate-800 truncate" title={cp.name}>{cp.name}</span>
-              </div>
-              {cp.email && (
-                <a href={`mailto:${cp.email}`} title={cp.email} aria-label={`Escribir a ${cp.name}: ${cp.email}`}
-                  className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors">
-                  <Mail size={15} />
-                </a>
-              )}
-              {cp.phone && (
-                <a href={`tel:${cp.phone}`} title={cp.phone} aria-label={`Llamar a ${cp.name}: ${cp.phone}`}
-                  className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors">
-                  <Phone size={15} />
-                </a>
-              )}
+            <li key={cp._id || idx} className="px-5 py-2 hover:bg-slate-50/70 transition-colors">
+              <span className="block text-[11px] font-semibold text-slate-400">{roleLabel(cp.role)}</span>
+              <span className="block font-semibold text-slate-800 truncate" title={cp.name}>{cp.name}</span>
+              {cp.email && <ContactLine icon={Mail} kind="Correo" value={cp.email} person={cp.name} />}
+              {cp.phone && <ContactLine icon={Phone} kind="Teléfono" value={cp.phone} person={cp.name} />}
             </li>
           ))}
         </ul>
@@ -144,7 +178,12 @@ export default function FichaEstablecimiento({ currentUser }) {
   }
 
   // Group counterparts by origin
-  const schoolCounterparts = counterparts.filter(c => c.origin === 'ESTABLECIMIENTO');
+  // El director ya figura arriba en «Director / Encargado» (con su «Contacto»): no se repite en el equipo.
+  // Si la ficha no tiene director registrado, se conserva para no perder a la persona.
+  const hasDirector = Boolean(establishment?.general_info?.director);
+  const schoolCounterparts = counterparts.filter(
+    c => c.origin === 'ESTABLECIMIENTO' && !(hasDirector && c.role === 'DIRECTOR')
+  );
   const slepCounterparts = counterparts.filter(c => c.origin === 'SLEP');
 
   // Format historical metrics data for Recharts
