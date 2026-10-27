@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
 
 import Login from './components/Login';
-import Dashboard from './components/Dashboard';
+import TableroMatricula from './components/TableroMatricula';
 import Directory from './components/Directory';
 import FichaEstablecimiento from './components/FichaEstablecimiento';
 import EditFicha from './components/EditFicha';
@@ -103,7 +103,7 @@ export default function App() {
 
           {/* Tableros: el acceso directo es Matrícula; /tableros/:tablero queda para el portal. */}
           <Route path="/tableros"                           element={<Navigate to="/tableros/matricula" replace />} />
-          <Route path="/tableros/matricula"                 element={<Dashboard />} />
+          <Route path="/tableros/matricula"                 element={<TableroMatricula />} />
           {/* Ruta anterior del panel: se conserva para los enlaces y marcadores existentes. */}
           <Route path="/dashboard"                          element={<Navigate to="/tableros/matricula" replace />} />
           <Route path="/establecimientos"                   element={<Directory />} />

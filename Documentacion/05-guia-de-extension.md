@@ -349,7 +349,10 @@ Elige el tipo con cuidado: un porcentaje va como `float`, no como `str`. `attend
    existentes no lo tienen y es una brecha registrada (`03` §5.17), no un patrón a seguir.
 4. **No hardcodees el año.** Los cuatro pipelines actuales fijan `2026` y es el acoplamiento
    temporal conocido del backend. Usa un parámetro con default calculado.
-5. Frontend: `Dashboard.jsx` consume `/api/analytics/charts` y grafica con `recharts`.
+5. Frontend: el tablero de matrícula (`TableroMatricula.jsx`) recibe datos por establecimiento y año de
+   `/api/analytics/enrollment` y calcula en `lib/enrollment.js`; un indicador nuevo = un campo en el punto del
+   contrato (`analytics_entity.EnrollmentPoint`), su cálculo en `lib/enrollment.js` y su tarjeta o gráfico en
+   `components/tablero/`. (`Dashboard.jsx` y `/charts` son el diseño anterior, sin ruta.)
 
 ### 2.5 Agregar un filtro al listado
 
