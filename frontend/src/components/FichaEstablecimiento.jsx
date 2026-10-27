@@ -14,11 +14,14 @@ import EstablishmentMap from './EstablishmentMap';
 import ConectividadFicha from './ConectividadFicha';
 import { can } from '@/lib/access';
 
+/** Estilo único de las etiquetas de la ficha (cargo, «Director / Encargado», campos de detalle). slate-500 y no 400: cumple el contraste mínimo sobre blanco. */
+const LABEL_CLASS = 'text-xs text-slate-500';
+
 /** Fila de «Detalles generales»: etiqueta pequeña y valor, sin tarjeta propia. */
 function DetailRow({ label, value }) {
   return (
     <div className="px-5 py-2.5">
-      <dt className="text-xs text-slate-400">{label}</dt>
+      <dt className={LABEL_CLASS}>{label}</dt>
       <dd className="font-semibold text-slate-800">{value}</dd>
     </div>
   );
@@ -92,7 +95,7 @@ function CounterpartList({ title, dotClass, items, empty }) {
         <ul className="divide-y divide-slate-100 text-sm">
           {items.map((cp, idx) => (
             <li key={cp._id || idx} className="px-5 py-2 hover:bg-slate-50/70 transition-colors">
-              <span className="block text-[11px] font-semibold text-slate-400">{roleLabel(cp.role)}</span>
+              <span className={`block ${LABEL_CLASS}`}>{roleLabel(cp.role)}</span>
               <span className="block font-semibold text-slate-800 truncate" title={cp.name}>{cp.name}</span>
               {cp.email && <ContactLine icon={Mail} kind="Correo" value={cp.email} person={cp.name} />}
               {cp.phone && <ContactLine icon={Phone} kind="Teléfono" value={cp.phone} person={cp.name} />}
@@ -304,7 +307,7 @@ export default function FichaEstablecimiento({ currentUser }) {
               <dl className="divide-y divide-slate-100 text-sm">
                 <div className="relative flex items-center justify-between gap-3 px-5 py-2.5">
                   <div className="min-w-0">
-                    <dt className="text-xs text-slate-400">Director / Encargado</dt>
+                    <dt className={LABEL_CLASS}>Director / Encargado</dt>
                     <dd className="font-semibold text-slate-800 truncate">{establishment.general_info.director || 'Sin especificar'}</dd>
                   </div>
                   {establishment.general_info.director && (

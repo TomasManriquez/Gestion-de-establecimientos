@@ -120,3 +120,14 @@ describe('FE24: contacto de las contrapartes', () => {
     expect(within(slep).getByRole('button', { name: 'Copiar correo de Leonardo Oyarzo' })).toBeInTheDocument();
   });
 });
+
+describe('FE24: títulos normalizados', () => {
+  it('FE24-H: el cargo de cada contraparte usa el mismo estilo que «Director / Encargado»', async () => {
+    const team = await renderFicha();
+    const detail = screen.getByText('Director / Encargado');
+    const role = within(team).getByText('Utp jefe');
+    expect(role.className).toBe(`block ${detail.className}`);
+    expect(detail.className).toMatch(/text-xs/);
+    expect(detail.className).not.toMatch(/font-semibold|text-\[11px\]/);
+  });
+});
