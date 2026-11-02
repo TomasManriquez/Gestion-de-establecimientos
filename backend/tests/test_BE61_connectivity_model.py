@@ -13,7 +13,7 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database.connectivity_migration import (has_other, migrate_connectivity, normalize_status,
+from app.establishments.connectivity_service import (has_other, migrate_connectivity, normalize_status,
                                                  rbd_from_sheet, rows_from_sheet, without_internet)
 from tests.conftest import EDITOR_USER, VIEWER_USER, SAMPLE_ESTABLISHMENT, seed_users, bearer_for
 
@@ -124,14 +124,6 @@ def test_BE61_viewer_still_gets_the_wifi_password_redacted(fake_db):
     c = _client(fake_db, migrate_connectivity(OLD_TELSUR)[0])
     body = c.get("/api/establishments/7722", headers=bearer_for(VIEWER_USER)).json()
     assert body["connectivity"]["ssid_password"] == "[REDACTED]" and "secreta" not in str(body)
-
-
-def test_BE61_connectivity_chart_counts_by_block():
-    from app.analytics.analytics_service import connectivity_breakdown
-    other_only, _ = migrate_connectivity({}, sheet(in_2030=None, other_provider="Patagonia IP", other_type="fibra óptica"))
-    data = connectivity_breakdown([migrate_connectivity(OLD_TELSUR)[0], other_only, {}, None])   # {} y None sin migrar
-    assert {d["label"]: d["value"] for d in data} == {"Conectividad 2030": 1, "Banda ancha móvil": 0,
-                                                      "Otro tipo de conexión": 1, "Sin internet": 2}
 
 
 def test_BE61_unmigrated_document_is_served_in_the_new_shape(fake_db):

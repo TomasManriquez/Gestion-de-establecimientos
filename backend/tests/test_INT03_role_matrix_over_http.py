@@ -25,8 +25,7 @@ ROUTES = [
     ("GET", "/api/metrics/establishment/7722", None, READ),
     ("GET", "/api/metrics/establishment/7722/2026", None, READ),
     ("PUT", "/api/metrics/establishment/7722/2026", {"enrollment": 1}, WRITE),
-    ("GET", "/api/analytics/kpis", None, READ),
-    ("GET", "/api/analytics/charts", None, READ),
+    ("GET", "/api/analytics/enrollment", None, READ),
 ]
 ALLOWED = {"viewer": {READ}, "editor": {READ, WRITE}, "admin": {READ, WRITE, DELETE}, "none": set()}
 USERS = {"viewer": VIEWER_USER, "editor": EDITOR_USER, "admin": DATOS_ADMIN_USER, "none": NO_DATOS_USER}
@@ -39,8 +38,7 @@ def client(fake_db):
     fake_db.counterparts.seed({**SAMPLE_COUNTERPART, "_id": ObjectId(CP_ID)})
     from app.main import app
     with patch("app.analytics.analytics_controller.analytics_service") as svc:
-        svc.get_kpis = AsyncMock(return_value={})
-        svc.get_charts_data = AsyncMock(return_value={})
+        svc.get_enrollment_dataset = AsyncMock(return_value={"establishments": [], "points": [], "years": [], "indicators": {}})
         yield TestClient(app, raise_server_exceptions=False)
 
 

@@ -342,13 +342,12 @@ Elige el tipo con cuidado: un porcentaje va como `float`, no como `str`. `attend
 
 ### 2.4 Agregar una agregación o un gráfico
 
-1. `analytics_service.py`: método nuevo o pipeline nuevo dentro de `get_charts_data()`,
-   devolviendo `[{label, value}]` como las cuatro series existentes.
-2. Verifica que exista índice para el `$match` inicial (`02` §3.4). `metrics.year` ya está.
-3. `analytics_controller.py`: si es un endpoint nuevo, **declárale `response_model`** — los dos
-   existentes no lo tienen y es una brecha registrada (`03` §5.17), no un patrón a seguir.
-4. **No hardcodees el año.** Los cuatro pipelines actuales fijan `2026` y es el acoplamiento
-   temporal conocido del backend. Usa un parámetro con default calculado.
+1. `analytics_service.py`: **no consulta colecciones** (ADR-019, `test_BE63`). Pide los datos al servicio del módulo
+   dueño (`establishments_service`, `metrics_service`), agregando ahí un método de lectura si falta.
+2. Un campo nuevo del tablero se agrega al contrato (`analytics_entity.py`); `/enrollment` ya declara
+   `response_model`.
+3. `analytics_controller.py`: todo endpoint nuevo declara `response_model`.
+4. **No hardcodees el año.** Los años salen de los registros de `metrics`.
 5. Frontend: el tablero de matrícula (`TableroMatricula.jsx`) recibe datos por establecimiento y año de
    `/api/analytics/enrollment` y calcula en `lib/enrollment.js`; un indicador nuevo = un campo en el punto del
    contrato (`analytics_entity.EnrollmentPoint`), su cálculo en `lib/enrollment.js` y su tarjeta o gráfico en
@@ -411,8 +410,7 @@ de contraparte dentro del establecimiento. Volver a ese patrón es la regresión
 cometer. Ver ADR-002.
 
 **`metrics` versionada por `(rbd, year)`.** Un año nuevo es un documento nuevo. Nada en el
-backend necesita cambiar para registrar 2027 — salvo el hardcode de `2026` en `analytics_service`,
-que es justamente la brecha que impide que ese punto de extensión funcione solo. Ver ADR-003.
+backend necesita cambiar para registrar 2027: el hardcode de `2026` se retiró con `/kpis` y `/charts` (D6, ADR-019). Ver ADR-003.
 
 **Los arrays embebidos de `connectivity` y `printers`.** `bam[]`, `phone_extensions[]`,
 `printers.owned[]`, `printers.leased[]` admiten N elementos sin cambio de esquema. Un segundo
@@ -442,7 +440,7 @@ Registro ordenado por consecuencia. Cada entrada apunta al documento donde está
 
 | # | Deuda | Ubicación | Consecuencia |
 |---|---|---|---|
-| D6 | El año **2026 hardcodeado** en los pipelines | `analytics_service.py:10,48,74` | En 2027 el dashboard informa datos de 2026 en silencio. `03` §5.16 |
+| ~~D6~~ | ✅ Resuelto (2026-11-02, ADR-019): se retiraron los pipelines con el año fijo | `analytics_service.py` | `/enrollment` toma los años de `metrics`. `03` §5.16–5.17 |
 | D7 | El director existe duplicado en `general_info` y en `counterparts` | `seed_service.py:181-190` | Divergen al editar uno solo; ambos se muestran en la UI. `02` §4.1 |
 | D8 | `MetricBase` y `MetricUpdate` repiten 24 campos a mano | `metrics_entity.py` | Agregar una métrica y olvidar el segundo modelo la deja no editable, sin error. `02` §5 |
 | D9 | `EstablishmentSummary` requiere tres cambios coordinados (proyección, aplanamiento, modelo) | `establishments_service.py:6-17,70-73` | Un campo del listado se pierde en silencio si falta uno de los tres. §2.1 |
@@ -452,7 +450,7 @@ Registro ordenado por consecuencia. Cada entrada apunta al documento donde está
 | # | Deuda | Ubicación | Consecuencia |
 |---|---|---|---|
 | D10 | **Sin versionado de API** | los cinco controllers | Todo cambio breaking es un corte duro coordinado. `03` §3.1 |
-| D11 | Los endpoints de analytics no tienen `response_model` | `analytics_controller.py:7,11` | Sin contrato declarado; cambian de forma sin aviso. `03` §5.17 |
+| ~~D11~~ | ✅ Resuelto (2026-11-02, ADR-019): el único endpoint de analytics, `/enrollment`, declara `response_model` | `analytics_controller.py` | `03` §5.18 |
 | D12 | Sin manejador global de excepciones; `ObjectId` inválido → 500 | `counterparts_service.py:27,35,39` | Errores de cliente se reportan como fallo del servidor. `03` §3.3 |
 | D13 | `metrics_service.find_by_year()` implementado y no expuesto | `metrics_service.py:22` | Código muerto alcanzable; el plan histórico lo documenta como endpoint. `03` §7 |
 | D14 | El healthcheck no consulta MongoDB | `main.py:50` | Un backend sin base pasa como sano. `03` §5.1 |
@@ -510,7 +508,7 @@ si el sistema crece un orden de magnitud (otro SLEP, o granularidad por curso):
 |---|---|---|
 | `search` con `$regex` sin anclar | Collection scan de 78 documentos | Scan de miles por pulsación de tecla, con debounce de 300 ms. Necesita índice de texto |
 | `page_size` por defecto de 100 | Trae todo el directorio de una vez | Deja de cubrir el total; la paginación real del frontend (`Directory.jsx`) queda expuesta |
-| Pipelines de analytics sin caché | `$lookup` sobre decenas de documentos por carga del dashboard | `$lookup` sobre miles en cada carga. Necesita caché o colección materializada |
+| `/enrollment` entrega todos los puntos en cada carga | ~15 KB con 78 establecimientos × 5 años | Con diez veces más sigue siendo razonable; a dos órdenes de magnitud el cálculo vuelve al servidor (ADR-018) |
 | `find_by_rbd` lee el documento completo | Documentos pequeños | Documentos grandes leídos enteros para redactar dos campos. Necesita proyección de exclusión |
 | Una consulta a `users` por request autenticada | Colección de un documento | Una lectura extra por request. Necesita caché con ventana de propagación explícita |
 | `counterparts` sin índice sobre `role` | Colección pequeña | La consulta transversal que justifica la colección deja de ser viable |

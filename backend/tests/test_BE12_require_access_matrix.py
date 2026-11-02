@@ -86,7 +86,7 @@ def test_BE12_controller_passes_include_sensitive_true_for_editor():
 
 @pytest.mark.parametrize("path", ["/api/establishments", "/api/establishments/7722",
                                   "/api/counterparts/establishment/7722", "/api/metrics/establishment/7722",
-                                  "/api/analytics/kpis"])
+                                  "/api/analytics/enrollment"])
 def test_BE12_user_without_datos_access_forbidden(fake_db, path):
     c = setup(fake_db)
     assert c.get(path, headers=bearer_for(NO_DATOS_USER)).status_code == 403

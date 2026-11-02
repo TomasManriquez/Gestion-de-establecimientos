@@ -117,8 +117,7 @@ saber de antemano qué campos existían. La huella sigue visible en el seeding
   indistinguibles de datos reales (`02` §5).
 - La ficha requiere una tercera consulta.
 - **El punto de extensión no funciona solo**, porque `analytics_service` hardcodea `2026` en sus
-  pipelines (`analytics_service.py:10,48,74`, D6). Registrar 2027 no bastará para que el dashboard
-  lo muestre.
+  pipelines. **Resuelto el 2026-11-02 (ADR-019, D6):** esos pipelines se retiraron.
 
 **Alternativas descartadas.** Mantener los campos con sufijo de año (el problema). Un array
 embebido de métricas por año dentro del establecimiento: habría evitado la tercera consulta,
@@ -744,8 +743,41 @@ los años que tienen dato. El navegador calcula totales, filtros y comparaciones
 **Consecuencias.** A esta escala (78 establecimientos × 5 años) la respuesta pesa unos 15 KB; con diez veces
 más sigue siendo razonable. Si la red creciera dos órdenes de magnitud, el cálculo vuelve al servidor con
 los mismos filtros como parámetros. El endpoint expone nombres y métricas, nunca campos sensibles: lo puede
-leer `viewer`. `/kpis` y `/charts` quedan para el `Dashboard.jsx` actual hasta que el tablero nuevo lo reemplace.
+leer `viewer`. `/kpis` y `/charts` se retiraron el 2026-11-02 (ADR-019).
 
 **Alternativas descartadas.** Parametrizar `/charts` con año y filtros: un endpoint por combinación y
 latencia en cada clic. Un motor de BI embebido (Metabase, Superset): evaluado en la iteración de diseño;
 queda para el futuro constructor de tableros, no para este.
+
+## ADR-019 · Cada colección tiene un módulo dueño; la lógica compartida vive en él
+
+**Estado:** aceptada (2026-11-02). Aplica L11 y refuerza ADR-013.
+
+**Contexto.** `test_BE45` vigila los `import` entre módulos, pero tres lecturas cruzaban la frontera sin
+importar nada: `analytics` leía las colecciones `establishments` y `metrics` con `db_service.db.…`, `metrics`
+leía `establishments` para validar el `rbd`, y la lógica de migración de conectividad (dominio de
+`establishments`) vivía en `database/`, que cualquiera puede importar. Era acoplamiento invisible: cambiar un
+campo de `establishments` podía romper `analytics` sin que ninguna prueba lo dijera.
+
+**Decisión.**
+1. Cada colección tiene **un** módulo dueño (mapa en `test_BE63`); los demás la consumen por su servicio (L5).
+2. `analytics` solo conserva `/enrollment` y lo arma con `establishments_service.list_for_enrollment()` y
+   `metrics_service.find_all()`. Se retiran `/kpis`, `/charts` y `Dashboard.jsx` (cambio de contrato, D10;
+   sin cliente conocido).
+3. `metrics` valida el establecimiento con `establishments_service.existing_rbds`. Aristas nuevas en
+   `test_BE45`: `metrics → establishments` y `analytics → establishments, metrics`.
+4. La migración de conectividad pasa a `establishments/connectivity_service.py` (L11).
+5. **Excepción declarada:** `database/` crea los índices de todas las colecciones y siembra la carga inicial;
+   `database/seed_service.py` importa `establishments.connectivity_service` (función pura). Sacar la siembra a
+   una capa de arranque propia se difiere: funciona, corre una vez y toca el punto único de falla
+   `database_service.py`. Cuando se vuelva a tocar la siembra, `shortcut:` mover a `app/bootstrap/`.
+
+**Consecuencias.** `test_BE63` falla si un módulo nuevo usa una colección ajena o si `database` importa un
+módulo de dominio no declarado. El tablero de matrícula sigue igual para el usuario. Quien consumía `/kpis` o
+`/charts` recibe `404`. Quedan fuera de esta decisión, por diseño, el versionado de la API y los permisos por
+recurso: se resuelven con el primer módulo que los necesite (catálogo de proyectos).
+
+**Alternativas descartadas.** Un `utils/` compartido para la migración de conectividad (prohibido por L11).
+Mover la siembra ahora a `bootstrap/` con métodos `seed_*` por servicio: churn sin beneficio inmediato y sobre
+el componente más sensible. Un contenedor de tareas programadas y un motor de permisos genérico: sin primer
+consumidor, serían infraestructura sin uso.

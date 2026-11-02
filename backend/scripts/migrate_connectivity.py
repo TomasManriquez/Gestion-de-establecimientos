@@ -24,7 +24,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.database.connectivity_migration import (has_other, migrate_connectivity, rows_from_sheet,  # noqa: E402
+from app.establishments.connectivity_service import (has_other, migrate_connectivity, rows_from_sheet,  # noqa: E402
                                                  without_internet)
 
 

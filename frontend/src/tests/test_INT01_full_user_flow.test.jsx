@@ -8,8 +8,7 @@
  * y que no hay regresiones en el flujo principal del sistema.
  *
  * Verifica:
- *   1. Login → redirige a /dashboard
- *   2. Dashboard carga KPIs y gráficos
+ *   1. Login → redirige a /dashboard (que lleva a /tableros/matricula; su prueba está en FE22 y FE24)
  *   3. Navegar a Directorio → URL /establecimientos
  *   4. Filtrar por comuna → URL actualizada, tabla filtrada
  *   5. Click en establecimiento → URL /establecimientos/{rbd}
@@ -31,21 +30,6 @@ vi.mock('axios');
 // ─── Datos mock completos ─────────────────────────────────────────────────────
 
 const ADMIN_USER = { username: 'admin', full_name: 'Administrador SLEP', role: 'admin' };
-
-const MOCK_KPIS = {
-  total_establishments: 79,
-  total_enrollment_2026: 12500,
-  total_enrollment_2025: 12200,
-  total_teachers_2026: 890,
-  total_communes: 5,
-};
-
-const MOCK_CHARTS = {
-  enrollment_by_area: [{ label: 'URBANO', value: 9500 }, { label: 'RURAL', value: 3000 }],
-  enrollment_by_commune: [{ label: 'PUERTO VARAS', value: 5000 }],
-  establishments_by_category: [{ label: 'LICEO POLITÉCNICO', value: 3 }],
-  establishments_by_connectivity: [{ label: 'TELSUR', value: 45 }],
-};
 
 const MOCK_LISTING_ALL = {
   items: [
@@ -86,9 +70,6 @@ function setupAxiosMocks(comunaFilter = '') {
   axios.get.mockImplementation((url, config) => {
     const params = config?.params ?? {};
 
-    if (url === '/api/analytics/kpis') return Promise.resolve({ data: MOCK_KPIS });
-    if (url === '/api/analytics/charts') return Promise.resolve({ data: MOCK_CHARTS });
-
     if (url === '/api/establishments') {
       if (params.comuna === 'FRUTILLAR') return Promise.resolve({ data: MOCK_LISTING_FRUTILLAR });
       return Promise.resolve({ data: MOCK_LISTING_ALL });
@@ -113,26 +94,6 @@ describe('INT-01: Flujo completo de usuario autenticado', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     setupAxiosMocks();
-  });
-
-  it('INT-01-A: Dashboard carga y muestra KPIs después del login', async () => {
-    const { default: Dashboard } = await import('../../components/Dashboard.jsx');
-
-    render(
-      <MemoryRouter initialEntries={['/dashboard']}>
-        <Routes>
-          <Route path="/dashboard" element={<Dashboard />} />
-        </Routes>
-      </MemoryRouter>
-    );
-
-    await waitFor(() => {
-      // Los KPIs deben aparecer en la UI
-      expect(screen.queryByText('79') || screen.queryByText(/79/)).toBeTruthy();
-    }, { timeout: 3000 });
-
-    expect(axios.get).toHaveBeenCalledWith('/api/analytics/kpis');
-    expect(axios.get).toHaveBeenCalledWith('/api/analytics/charts');
   });
 
   it('INT-01-B: El directorio carga la lista sin campos sensibles', async () => {
