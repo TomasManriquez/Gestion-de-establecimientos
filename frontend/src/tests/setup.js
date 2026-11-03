@@ -42,8 +42,13 @@ if (typeof window !== 'undefined') {
   if (!proto.releasePointerCapture) proto.releasePointerCapture = () => {};
   if (!proto.scrollIntoView) proto.scrollIntoView = () => {};
   if (!window.matchMedia) {
+    // `min-width` se evalúa contra window.innerWidth (jsdom: 1024 = escritorio). Un test móvil fija innerWidth antes de renderizar.
+    const minWidth = (query) => {
+      const m = /min-width:\s*(\d+)px/.exec(query);
+      return m ? window.innerWidth >= Number(m[1]) : false;
+    };
     window.matchMedia = (query) => ({
-      matches: false, media: query, onchange: null,
+      get matches() { return minWidth(query); }, media: query, onchange: null,
       addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
     });
   }

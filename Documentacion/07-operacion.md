@@ -663,3 +663,40 @@ Requiere reconstruir la imagen del frontend y repetir la prueba. Se registró co
 Anotar en el cambio o ticket: fecha, quién revisó, versión de la configuración del proxy, resultado de las 13
 comprobaciones y, si falló alguna, cuándo se corrigió y se repitió.
 
+
+---
+
+## 12. PWA: verificación tras el despliegue (tarea manual)
+
+**Por qué.** El service worker y el manifest no llevan hash en el nombre: si el servidor o el proxy del host los
+deja cachear, los teléfonos se quedan con una versión vieja de la app sin que nada avise (ADR-020). Se hace una
+vez por despliegue que toque el frontend o el proxy. Requiere HTTPS (`datos.slepllanquihue.gob.cl` lo cumple:
+`https · HTTP/1.1 · ssl_verify=0`, 2026-11-03).
+
+**Rebuild.** Hay dependencias nuevas (`vite-plugin-pwa`, `workbox-build`, `workbox-window`):
+
+```bash
+docker compose -f docker-compose.prod.yml build frontend && docker compose -f docker-compose.prod.yml up -d frontend
+```
+
+| # | Qué comprobar | Comando (desde afuera) | Correcto | Incorrecto |
+|---|---|---|---|---|
+| 1 | `sw.js` no se cachea | `curl -sI https://HOST/sw.js \| grep -i cache-control` | `no-cache` | `max-age=…`, `immutable` o ausente |
+| 2 | `index.html` no se cachea | `curl -sI https://HOST/ \| grep -i cache-control` | `no-cache` | `max-age=…` o ausente |
+| 3 | Manifest | `curl -sI https://HOST/manifest.webmanifest \| grep -i -E "content-type\|cache-control"` | tipo con `manifest`, `no-cache` | `404` o `text/html` (cayó al fallback de la SPA) |
+| 4 | Los assets con hash siguen cacheados | `curl -sI https://HOST/assets/<archivo>.js \| grep -i cache-control` | `public, immutable` | `no-cache` |
+| 5 | La CSP deja registrar el worker | `curl -sI https://HOST/ \| grep -i -o "worker-src[^;]*"` | `worker-src 'self' blob:` | solo `blob:` |
+| 6 | Instalación | Android/Chrome: menú › «Instalar aplicación». iOS/Safari: Compartir › «Añadir a pantalla de inicio» | ícono del mosaico de la «L» y ventana sin barra de direcciones | no ofrece instalar |
+| 7 | Actualización | desplegar una versión nueva y reabrir la app instalada | aparece «Hay una versión nueva» | no aparece (revisar 1) |
+
+El proxy del host (§11) no debe agregar `expires` ni `Cache-Control` propios a esas rutas. La comprobación de
+`nginx.conf` con un Nginx real se puede hacer antes de desplegar (con el demonio de Docker activo):
+
+```bash
+docker run --rm --add-host backend:127.0.0.1 -p 18080:80 -v "$PWD/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" -v "$PWD/frontend/dist:/usr/share/nginx/html:ro" nginx:1.27-alpine
+```
+
+y, en otra terminal, los comandos 1 a 5 contra `http://localhost:18080`.
+
+> ⚠️ NO VERIFICADO: esa prueba no se ejecutó al implementar la fase 0 (Docker Desktop apagado); lo validado fue
+> el build, el service worker en Chrome y los tests `FE25`.

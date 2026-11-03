@@ -4,6 +4,7 @@ import axios from 'axios';
 import { BarChart3, Building2, LogOut, User, Users, ChevronLeft } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { isIamAdmin } from '@/lib/access';
+import { useIsDesktop } from '@/lib/useMediaQuery';
 
 const STORAGE_KEY = 'sidebar-collapsed';
 
@@ -44,6 +45,32 @@ function RailTip({ collapsed, label, children }) {
   );
 }
 
+/** Navegación móvil: barra fija abajo, al alcance del pulgar. Reemplaza al sidebar bajo `lg`. */
+function BottomNav({ pathname, admin, onLogout }) {
+  const tab = (active) => `flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-bold transition-colors ${
+    active ? 'bg-white/10 text-white' : 'text-slate-300'
+  }`;
+  return (
+    <nav aria-label="Principal"
+      className="fixed inset-x-0 bottom-0 z-30 flex border-t border-white/10 bg-slep-navy pb-[env(safe-area-inset-bottom)]">
+      <NavLink to="/tableros/matricula" className={({ isActive }) => tab(isActive || pathname.startsWith('/tableros'))}>
+        <BarChart3 size={20} aria-hidden="true" />Tableros
+      </NavLink>
+      <NavLink to="/establecimientos" className={({ isActive }) => tab(isActive || pathname.startsWith('/establecimientos/'))}>
+        <Building2 size={20} aria-hidden="true" />Directorio
+      </NavLink>
+      {admin && (
+        <NavLink to="/configuracion/usuarios" className={({ isActive }) => tab(isActive)}>
+          <Users size={20} aria-hidden="true" />Usuarios
+        </NavLink>
+      )}
+      <button type="button" onClick={onLogout} className={tab(false)}>
+        <LogOut size={20} aria-hidden="true" />Salir
+      </button>
+    </nav>
+  );
+}
+
 /**
  * AppLayout — FE-04
  * Layout compartido para todas las rutas autenticadas.
@@ -56,6 +83,7 @@ function RailTip({ collapsed, label, children }) {
 export default function AppLayout({ currentUser, onLogout }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const isDesktop = useIsDesktop();
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
   const toggle = () => setCollapsed((c) => {
@@ -89,8 +117,8 @@ export default function AppLayout({ currentUser, onLogout }) {
     <TooltipProvider delayDuration={200}>
       <div className="min-h-screen bg-slep-paper flex text-slep-ink font-sans antialiased">
 
-        {/* SIDEBAR */}
-        <aside
+        {/* SIDEBAR (solo escritorio; en móvil lo reemplaza BottomNav) */}
+        {isDesktop && <aside
           data-collapsed={collapsed ? 'true' : 'false'}
           className={`group/sidebar relative ${collapsed ? 'w-[72px]' : 'w-72'} shrink-0 h-screen sticky top-0 z-20 transition-[width] duration-300 ease-in-out motion-reduce:transition-none`}
         >
@@ -195,12 +223,12 @@ export default function AppLayout({ currentUser, onLogout }) {
           >
             <ChevronLeft size={14} className={`transition-transform duration-300 motion-reduce:transition-none ${collapsed ? 'rotate-180' : ''}`} />
           </button>
-        </aside>
+        </aside>}
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Barra institucional: logo del SLEP y franja de colores del mosaico */}
           <header className="bg-white">
-            <div className="flex items-center gap-4 px-8 py-3 lg:px-10">
+            <div className="flex items-center gap-4 px-4 py-3 sm:px-8 lg:px-10">
               <img src="/slep-llanquihue.png" alt="Servicio Local de Educación Pública Llanquihue" className="h-9 w-auto" />
               <span className="hidden h-8 w-px bg-slep-line sm:block" aria-hidden="true" />
               <p className="hidden text-lg font-bold leading-tight text-slep-ink sm:block">Gestión de Establecimientos</p>
@@ -211,12 +239,15 @@ export default function AppLayout({ currentUser, onLogout }) {
           </header>
 
           {/* MAIN — Outlet renderiza la ruta hija activa */}
-          <main className="flex-1 min-w-0 p-8 lg:p-10 overflow-y-auto">
+          {/* pb-24 en móvil: deja libre el alto de la barra inferior */}
+          <main className="flex-1 min-w-0 p-4 pb-24 sm:p-8 sm:pb-24 lg:p-10 overflow-y-auto">
             <div className="max-w-7xl mx-auto">
               <Outlet />
             </div>
           </main>
         </div>
+
+        {!isDesktop && <BottomNav pathname={pathname} admin={isIamAdmin(currentUser)} onLogout={handleLogout} />}
 
       </div>
     </TooltipProvider>

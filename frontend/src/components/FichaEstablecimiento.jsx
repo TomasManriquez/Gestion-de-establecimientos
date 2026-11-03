@@ -259,7 +259,7 @@ export default function FichaEstablecimiento({ currentUser }) {
       </div>
 
       {/* Tabs list */}
-      <div className="flex border-b border-slate-200 overflow-x-auto gap-2 pb-px">
+      <div className="flex border-b border-slate-200 overflow-x-auto gap-2 pb-px [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {[
           { id: 'general', label: 'Información General', icon: School },
           { id: 'statistics', label: 'Estadísticas e Historial', icon: History },
@@ -291,8 +291,8 @@ export default function FichaEstablecimiento({ currentUser }) {
         {activeTab === 'general' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-            {/* Full-width: Ubicación */}
-            <div className="lg:col-span-3">
+            {/* Full-width: Ubicación. En móvil va al final: el mapa ocuparía la primera pantalla entera. */}
+            <div className="order-last lg:order-none lg:col-span-3">
               <EstablishmentMap
                 lat={establishment.location?.lat}
                 lng={establishment.location?.lng}
