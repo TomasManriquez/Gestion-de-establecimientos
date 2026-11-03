@@ -39,7 +39,7 @@ class Printers(BaseModel):
 
 # Connectivity sub-models
 # Tres bloques independientes (un establecimiento puede tener los tres): programa 2030, BAM y
-# otro tipo de conexión. «Sin internet» no se guarda: se calcula (`connectivity_migration.without_internet`).
+# otro tipo de conexión. «Sin internet» no se guarda: se calcula (`connectivity_service.without_internet`).
 Status2030 = Literal["fibra_optica", "microondas", "starlink", "satelital", "pendiente_instalacion", "sin_internet"]
 OtherType = Literal["fibra_optica", "starlink", "microondas", "satelital", "movil", "otro"]
 

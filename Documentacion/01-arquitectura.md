@@ -358,5 +358,5 @@ frío incluye el tiempo de seeding completo antes de que Nginx levante.
 anterior) redirigen ahí. `/tableros/:tablero` queda reservada para el portal de tableros. Esa ruta monta
 `TableroMatricula.jsx` (ADR-018): carga `GET /api/analytics/enrollment` y calcula todo en el navegador con
 `lib/enrollment.js` (lógica pura, probada en `test_FE23_*`); los gráficos viven en `components/tablero/`.
-`Dashboard.jsx` y los endpoints `/kpis` y `/charts` ya no los usa ninguna ruta; quedan hasta decidir su retiro. Identidad: logo en
+`Dashboard.jsx` y los endpoints `/kpis` y `/charts` se retiraron el 2026-11-02 (ADR-019). Identidad: logo en
 `frontend/public/slep-llanquihue.png`, tokens `slep-*` y tipografía Carlito (equivalente métrico de Calibri).

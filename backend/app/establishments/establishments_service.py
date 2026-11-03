@@ -2,7 +2,7 @@ import re
 import math
 from typing import List, Optional
 from app.database.database_service import db_service
-from app.database.connectivity_migration import is_migrated, migrate_connectivity
+from app.establishments.connectivity_service import is_migrated, migrate_connectivity
 from app.establishments.establishments_entity import EstablishmentUpdate, RedactedPlaceholderError
 
 REDACTED = "[REDACTED]"
@@ -96,6 +96,17 @@ class EstablishmentsService:
             return set()
         cursor = db_service.db.establishments.find({"rbd": {"$in": rbds}}, {"rbd": 1})
         return {d["rbd"] async for d in cursor}
+
+    async def list_for_enrollment(self) -> List[dict]:
+        """Lectura mínima para el tablero de matrícula (ADR-018). `analytics` la consume en vez de leer la
+        colección: el dato lo sirve su módulo dueño (L11, ADR-019)."""
+        projection = {"rbd": 1, "name": 1, "comuna": 1, "area_type": 1, "general_info.category": 1,
+                      "status": 1, "closed_year": 1}
+        return [{
+            "rbd": d["rbd"], "name": d.get("name", ""), "comuna": d.get("comuna", ""),
+            "area_type": d.get("area_type", ""), "category": (d.get("general_info") or {}).get("category", "") or "",
+            "status": d.get("status") or "active", "closed_year": d.get("closed_year"),
+        } async for d in db_service.db.establishments.find({}, projection)]
 
     async def find_by_rbd(self, rbd: str, include_sensitive: bool = False) -> Optional[dict]:
         doc = await db_service.db.establishments.find_one({"rbd": rbd})

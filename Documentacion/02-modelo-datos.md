@@ -256,12 +256,12 @@ un establecimiento puede tener los tres y la ficha muestra solo los que tienen d
   `fibra_optica`, `starlink`, `microondas`, `satelital`, `movil`, `otro`, `download_speed`, `oc`,
   `expiry_date` (AAAA-MM-DD) y `support_whatsapp`. Vacío = no tiene.
 
-**«Sin internet» no se guarda**: se calcula (`database/connectivity_migration.without_internet`) cuando
+**«Sin internet» no se guarda**: se calcula (`establishments/connectivity_service.without_internet`) cuando
 está en 2030 con estado `sin_internet` o cuando no tiene ningún bloque. Se retiraron `internet_provider`
 (mezclaba Telsur con el proveedor de «otro tipo»), `internet_status`, `download_speed_2030` y `starlink`
 (una marca que no distinguía 2030 de independiente). La conversión vive en
-`database/connectivity_migration.py` y la usan el seeding y `scripts/migrate_connectivity.py`
-(`07` §11); mientras un documento no esté migrado, `find_by_rbd` y el gráfico lo convierten al vuelo.
+`establishments/connectivity_service.py` (L11) y la usan el seeding y `scripts/migrate_connectivity.py`
+(`07`, paso «Conectividad en tres bloques»); mientras un documento no esté migrado, `find_by_rbd` lo convierte al vuelo.
 
 **Los defaults mutables son instancias compartidas.** `Connectivity.other: OtherConnection = OtherConnection()`
 (`establishments_entity.py`) evalúa el default una sola vez al importar el módulo. Pydantic v2
@@ -305,7 +305,7 @@ cambios coordinados: la proyección, el aplanamiento y el modelo.
 | `counterparts` | `rbd` | simple | Contrapartes de una ficha |
 | `counterparts` | `(rbd, role)` | compuesto | Búsqueda de un rol en un EE |
 | `metrics` | `(rbd, year)` | **unique**, `year` descendente | Clave compuesta de negocio; impide dos registros del mismo año |
-| `metrics` | `year` | simple | `$match: {year: 2026}` de los pipelines de analytics |
+| `metrics` | `year` | simple | Consultas por año de `metrics_service` |
 
 Todos con `background=True`.
 

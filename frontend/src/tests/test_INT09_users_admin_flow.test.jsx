@@ -26,7 +26,7 @@ function mountApp(me, path = '/configuracion/usuarios') {
   localStorage.setItem('token', 'token-antiguo');      // resto de una versión anterior: App debe purgarlo
   const base = installGets;
   base({ '/api/auth/me': () => me });
-  // installGets resuelve rutas desconocidas con error: agregamos las que usa el Dashboard del layout.
+  // installGets resuelve rutas desconocidas con error: agregamos la que usa el tablero de matrícula (carga con el layout).
   const original = axios.get.getMockImplementation();
   axios.get.mockImplementation((url, config) => (url.startsWith('/api/analytics')
     ? Promise.resolve({ data: {} })

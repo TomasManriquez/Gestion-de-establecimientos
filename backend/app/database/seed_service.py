@@ -2,7 +2,7 @@ import os
 import json
 import logging
 
-from app.database.connectivity_migration import migrate_connectivity
+from app.establishments.connectivity_service import migrate_connectivity   # excepción declarada en test_BE63 (ADR-019)
 
 logger = logging.getLogger("database.seed")
 

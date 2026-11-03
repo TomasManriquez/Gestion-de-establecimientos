@@ -35,8 +35,7 @@ Base: `/api`. Sin versionado en la ruta. Servidor documentado en `main.py:27-31`
 | 13 | GET | `/api/metrics/establishment/{rbd}` | `datos`: admin, editor, viewer | `Metric[]` |
 | 14 | GET | `/api/metrics/establishment/{rbd}/{year}` | `datos`: admin, editor, viewer | `Metric` |
 | 15 | PUT | `/api/metrics/establishment/{rbd}/{year}` | `datos`: admin, editor | `Metric` |
-| 16 | GET | `/api/analytics/kpis` | `datos`: admin, editor, viewer | objeto de KPIs |
-| 17 | GET | `/api/analytics/charts` | `datos`: admin, editor, viewer | objeto de series |
+| 16–17 | — | ~~`/api/analytics/kpis`~~ y ~~`/api/analytics/charts`~~ | — | **Retirados (2026-11-02, ADR-019)** |
 | 18 | GET | `/api/analytics/enrollment` | `datos`: admin, editor, viewer | `EnrollmentDataset` |
 
 Más los tres endpoints que FastAPI monta solo: `/docs`, `/redoc`, `/openapi.json`.
@@ -466,34 +465,10 @@ nuevo sin `enrollment` se lee con `enrollment: 0`).
 - Los valores ya cargados fuera de rango (p. ej. una retención de 100,3 de la carga original) se
   leen igual; reenviarlos da `422`. La ficha los marca y solo envía lo que la persona cambió.
 
-### 5.16 `GET /api/analytics/kpis`
-Bearer. `200` →
-
-```json
-{"total_establishments": 78, "total_enrollment_2026": 0, "total_enrollment_2025": 0,
- "total_teachers_2026": 0, "total_communes": 5}
-```
-
-**El año 2026 está hardcodeado** en el pipeline (`analytics_service.py:10` y `:26`). En 2027 este
-endpoint seguirá informando 2026 hasta que alguien edite el código.
-
-### 5.17 `GET /api/analytics/charts`
-Bearer. `200` → cuatro series, cada una un array de `{label, value}`:
-
-```json
-{"enrollment_by_area": [{"label":"URBANO","value":0}],
- "enrollment_by_commune": [...], "establishments_by_category": [...],
- "establishments_by_connectivity": [...]}
-```
-
-`enrollment_by_area` y `enrollment_by_commune` usan `$lookup` de `metrics` contra
-`establishments` filtrando `year: 2026` (mismo hardcode). `establishments_by_category` limpia
-el prefijo numérico de la categoría (`"7. LICEO" → "LICEO"`, `:111-114`) — **esa limpieza vive
-solo aquí**, no en el modelo, así que el `category` del listado sí trae el prefijo y el del
-gráfico no. `establishments_by_connectivity` (desde 2026-10-22) cuenta por bloque, no por proveedor:
-etiquetas fijas `"Conectividad 2030"`, `"Banda ancha móvil"`, `"Otro tipo de conexión"` y `"Sin internet"`;
-un establecimiento cuenta en cada bloque que tenga (`analytics_service.connectivity_breakdown`). **Cambio
-de contrato** (D10): el `Dashboard.jsx` actual lo consume sin cambios porque solo lee `label`/`value`.
+### 5.16–5.17 `GET /api/analytics/kpis` y `/charts` — retirados
+Eliminados el 2026-11-02 (ADR-019). Su único cliente era `Dashboard.jsx`, que ya no tenía ruta desde que
+`/tableros/matricula` monta el tablero nuevo (ADR-018). Es un cambio de contrato (D10): quien los consuma recibe `404`. Con ellos se fueron el año 2026 hardcodeado (D6) y los
+pipelines con `$lookup` sobre colecciones ajenas. La conectividad por bloque ya no se agrega en el servidor.
 
 ### 5.18 `GET /api/analytics/enrollment`
 Bearer. `200` → `EnrollmentDataset` (ADR-018):
@@ -514,15 +489,7 @@ existe en `establishments` se omiten. `PUT /api/establishments/{rbd}` acepta ade
 → `422`; reabrir borra el año. `PUT /api/metrics/...` acepta `enrollment_as_of` y `attendance_as_of`
 (AAAA-MM o `""`).
 
-> 🔸 **BRECHA:** los endpoints de analytics **no tienen `response_model`**
-> (`analytics_controller.py:7,11`). Devuelven un dict libre, así que no aparecen tipados en
-> OpenAPI y nada impide que un cambio en el service altere la forma sin aviso. Son los dos
-> únicos endpoints sin contrato declarado. `/enrollment` (§5.18) sí lo declara.
->
-> 🔸 **BRECHA:** el año de referencia hardcodeado (2026, en
-> `analytics_service.py:10,48,74`) es el acoplamiento temporal más concreto del backend.
-> El diseño correcto es un query param `year` con default calculado, no una constante en el
-> código.
+
 
 ---
 

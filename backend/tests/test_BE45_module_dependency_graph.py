@@ -31,8 +31,8 @@ ALLOWED = {
     "platforms": {"audit"},
     "counterparts": {"users"},
     "establishments": set(),
-    "metrics": set(),
-    "analytics": set(),
+    "metrics": {"establishments"},
+    "analytics": {"establishments", "metrics"},
     "audit": set(),
     "mail": set(),
 }
