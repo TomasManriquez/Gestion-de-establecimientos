@@ -1,7 +1,7 @@
 /**
  * connectivity.js — conectividad en tres bloques: programa 2030, BAM y otro tipo de conexión.
  * Un establecimiento puede tener los tres. «Sin internet» no se guarda: se calcula igual que en el
- * backend (`app/database/connectivity_migration.without_internet`).
+ * backend (`app/establishments/connectivity_service.without_internet`).
  */
 export const STATUS_2030 = [
   { value: 'fibra_optica', label: 'Fibra óptica' },
