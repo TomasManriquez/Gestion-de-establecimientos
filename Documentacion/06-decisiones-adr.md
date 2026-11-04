@@ -799,7 +799,10 @@ establecimientos con fichas, contrapartes, métricas, conectividad e impresoras)
 1. **Una sola SPA adaptativa**, no un shell `/m`. Mismas rutas; bajo `lg` (1024 px) `AppLayout` pinta una barra
    inferior en vez del sidebar y `Directory` pinta tarjetas en vez de tabla. El corte lo decide `useIsDesktop`
    (`lib/useMediaQuery.js`), que sin `matchMedia` devuelve «escritorio». Los componentes móviles son propios; lo
-   que se comparte es la ruta y los datos.
+   que se comparte es la ruta y los datos. En el teléfono la prioridad es el dato: el tablero muestra las cuatro
+   tarjetas en 2×2 y pliega los filtros; las pestañas de la ficha son solo ícono (el nombre queda como texto para
+   lectores de pantalla y `title`); y «Cerrar sesión» sale de la barra inferior y pasa al menú de cuenta del header
+   (la sesión vence a las 3 h, así que no hace falta tenerlo a un toque).
 2. **PWA con `vite-plugin-pwa`** (`generateSW`, `registerType: 'prompt'`). El service worker precachea solo el
    shell (JS, CSS, HTML, íconos). **`/api` nunca pasa por el service worker** (`navigateFallbackDenylist`, sin
    rutas de runtime): ninguna respuesta autenticada queda en Cache Storage. La actualización espera a que la

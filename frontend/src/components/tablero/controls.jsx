@@ -47,10 +47,10 @@ export function Segmented({ options, value, onChange, label, size = 'md' }) {
 /** Lista desplegable nativa con el estilo del tablero. */
 export function SelectField({ id, label, value, onChange, options, className = '' }) {
   return (
-    <div className={`flex items-center gap-2.5 ${className}`}>
-      <label htmlFor={id} className="text-sm font-bold text-slep-ink">{label}</label>
+    <div className={`flex items-center gap-2.5 max-lg:flex-col max-lg:items-stretch max-lg:gap-1 ${className}`}>
+      <label htmlFor={id} className="text-sm font-bold text-slep-ink max-lg:text-xs max-lg:text-slep-muted">{label}</label>
       <select id={id} value={value ?? ''} onChange={(e) => onChange(e.target.value)}
-        className="h-10 min-w-[8.5rem] rounded-xl border border-slate-300 bg-slate-50 px-3 text-[15px] text-slep-ink transition-colors hover:border-slep-sky focus:border-slep-sky focus:outline-none">
+        className="h-10 min-w-[8.5rem] max-lg:w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-[15px] text-slep-ink transition-colors hover:border-slep-sky focus:border-slep-sky focus:outline-none">
         {options.map((o) => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
       </select>
     </div>

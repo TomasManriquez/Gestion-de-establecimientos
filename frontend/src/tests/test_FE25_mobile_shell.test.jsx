@@ -14,9 +14,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import userEvent from '@testing-library/user-event';
 import axios from 'axios';
 import AppLayout from '@/components/AppLayout';
 import Directory from '@/components/Directory';
+import TableroMatricula from '@/components/TableroMatricula';
 import { ADMIN } from './usersFixtures';
 
 vi.mock('axios');
@@ -53,8 +55,28 @@ describe('FE25: AppLayout adaptativo', () => {
     expect(screen.getByRole('link', { name: 'Tableros' })).toHaveAttribute('href', '/tableros/matricula');
     expect(screen.getByRole('link', { name: 'Directorio' }).className).toContain('bg-white/10');
     expect(screen.getByRole('link', { name: 'Usuarios' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Salir' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /barra lateral/ })).not.toBeInTheDocument();
+  });
+
+  it('FE25-A2: en móvil «Cerrar sesión» está en el menú de cuenta del header', async () => {
+    setWidth(375);
+    const onLogout = vi.fn();
+    axios.post.mockResolvedValue({});
+    render(
+      <MemoryRouter initialEntries={['/establecimientos']}>
+        <Routes>
+          <Route element={<AppLayout currentUser={ADMIN} onLogout={onLogout} />}>
+            <Route path="/establecimientos" element={<p>Directorio</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('menuitem', { name: 'Cerrar sesión' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cuenta' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Cerrar sesión' }));
+    await waitFor(() => expect(onLogout).toHaveBeenCalledTimes(1));
+    expect(axios.post).toHaveBeenCalledWith('/api/auth/logout');
   });
 
   it('FE25-B: en escritorio sigue el sidebar y no hay barra inferior', () => {
@@ -85,6 +107,42 @@ describe('FE25: Directorio adaptativo', () => {
     renderDirectory();
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Más filtros' })).not.toBeInTheDocument();
+  });
+});
+
+const DATASET = {
+  establishments: [{ rbd: 'A', name: 'Escuela A', comuna: 'FRESIA', area_type: 'URBANO', category: '4. ESCUELA COMPLETA', status: 'active', closed_year: null }],
+  points: [
+    { rbd: 'A', year: 2025, enrollment: 100, attendance: 0.9 },
+    { rbd: 'A', year: 2026, enrollment: 110, enrollment_as_of: '2026-03', teachers: 8 },
+  ],
+  years: [2025, 2026],
+  indicators: {
+    enrollment: { label: 'Matrícula', years: [2025, 2026] },
+    attendance: { label: 'Asistencia', years: [2025] },
+    teachers: { label: 'Docentes', years: [2026] },
+    assistants: { label: 'Asistentes', years: [] },
+  },
+};
+
+describe('FE25: Tablero adaptativo', () => {
+  it('FE25-G: en móvil los filtros del tablero se despliegan a pedido', async () => {
+    setWidth(375);
+    axios.get.mockResolvedValue({ data: DATASET });
+    render(<TableroMatricula />);
+    const toggle = await screen.findByRole('button', { name: 'Filtros' });
+    const comuna = screen.getByLabelText('Comuna');
+    expect(comuna.closest('.hidden')).not.toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Ocultar filtros' })).toHaveAttribute('aria-expanded', 'true');
+    expect(comuna.closest('.hidden')).toBeNull();
+  });
+
+  it('FE25-H: en escritorio los filtros siguen a la vista y no hay botón', async () => {
+    axios.get.mockResolvedValue({ data: DATASET });
+    render(<TableroMatricula />);
+    await screen.findByLabelText('Comuna');
+    expect(screen.queryByRole('button', { name: 'Filtros' })).not.toBeInTheDocument();
   });
 });
 

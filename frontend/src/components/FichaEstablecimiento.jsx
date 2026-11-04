@@ -271,14 +271,15 @@ export default function FichaEstablecimiento({ currentUser }) {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-5 py-3 font-semibold text-sm transition-all border-b-2 whitespace-nowrap font-outfit ${
+              title={tab.label}
+              className={`flex flex-1 items-center justify-center gap-2 px-3 py-3 lg:flex-none lg:px-5 font-semibold text-sm transition-all border-b-2 whitespace-nowrap font-outfit ${
                 activeTab === tab.id 
                   ? 'border-sky-600 text-sky-600' 
                   : 'border-transparent text-slate-400 hover:text-slate-600'
               }`}
             >
-              <Icon size={16} />
-              {tab.label}
+              <Icon size={20} className="lg:size-4" aria-hidden="true" />
+              <span className="sr-only lg:not-sr-only">{tab.label}</span>
             </button>
           );
         })}

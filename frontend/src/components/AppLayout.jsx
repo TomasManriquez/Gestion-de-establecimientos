@@ -3,6 +3,9 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { BarChart3, Building2, LogOut, User, Users, ChevronLeft } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { isIamAdmin } from '@/lib/access';
 import { useIsDesktop } from '@/lib/useMediaQuery';
 
@@ -46,7 +49,7 @@ function RailTip({ collapsed, label, children }) {
 }
 
 /** Navegación móvil: barra fija abajo, al alcance del pulgar. Reemplaza al sidebar bajo `lg`. */
-function BottomNav({ pathname, admin, onLogout }) {
+function BottomNav({ pathname, admin }) {
   const tab = (active) => `flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-bold transition-colors ${
     active ? 'bg-white/10 text-white' : 'text-slate-300'
   }`;
@@ -64,10 +67,27 @@ function BottomNav({ pathname, admin, onLogout }) {
           <Users size={20} aria-hidden="true" />Usuarios
         </NavLink>
       )}
-      <button type="button" onClick={onLogout} className={tab(false)}>
-        <LogOut size={20} aria-hidden="true" />Salir
-      </button>
     </nav>
+  );
+}
+
+/** Cuenta en móvil: «Cerrar sesión» queda a dos toques, no en la barra de navegación. */
+function UserMenu({ user, onLogout }) {
+  const name = user?.full_name || 'Usuario SLEP';
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger aria-label="Cuenta"
+        className="ml-auto grid size-10 shrink-0 place-items-center rounded-full bg-slep-navy text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
+        <User size={18} aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-52">
+        <DropdownMenuLabel className="truncate">{name}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onLogout} className="min-h-11 text-rose-700 focus:text-rose-700">
+          <LogOut aria-hidden="true" />Cerrar sesión
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -232,6 +252,7 @@ export default function AppLayout({ currentUser, onLogout }) {
               <img src="/slep-llanquihue.png" alt="Servicio Local de Educación Pública Llanquihue" className="h-9 w-auto" />
               <span className="hidden h-8 w-px bg-slep-line sm:block" aria-hidden="true" />
               <p className="hidden text-lg font-bold leading-tight text-slep-ink sm:block">Gestión de Establecimientos</p>
+              {!isDesktop && <UserMenu user={currentUser} onLogout={handleLogout} />}
             </div>
             <div className="flex h-1" aria-hidden="true">
               {STRIPE.map((c) => <span key={c} className={`flex-1 ${c}`} />)}
@@ -247,7 +268,7 @@ export default function AppLayout({ currentUser, onLogout }) {
           </main>
         </div>
 
-        {!isDesktop && <BottomNav pathname={pathname} admin={isIamAdmin(currentUser)} onLogout={handleLogout} />}
+        {!isDesktop && <BottomNav pathname={pathname} admin={isIamAdmin(currentUser)} />}
 
       </div>
     </TooltipProvider>

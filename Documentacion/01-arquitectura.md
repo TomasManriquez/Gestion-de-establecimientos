@@ -373,7 +373,7 @@ frontend/
 ├── public/icons/                  # icon-192/512 (el 512 también como maskable) y apple-touch-icon, del mosaico de la «L»
 ├── src/main.jsx                   # registerSW: aviso «Hay una versión nueva» con botón Actualizar
 ├── src/lib/useMediaQuery.js       # useMediaQuery / useIsDesktop (corte en 1024 px, igual que `lg`)
-├── src/components/AppLayout.jsx   # sidebar en escritorio; BottomNav (Tableros, Directorio, Usuarios, Salir) bajo `lg`
+├── src/components/AppLayout.jsx   # sidebar en escritorio; BottomNav (Tableros, Directorio, Usuarios) bajo `lg`; «Cerrar sesión» va en el menú de cuenta del header
 └── src/components/Directory.jsx   # tabla en escritorio; DirectoryCards + filtros plegables bajo `lg`
 ```
 

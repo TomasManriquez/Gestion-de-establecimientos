@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, TriangleAlert } from 'lucide-react';
+import { RefreshCw, SlidersHorizontal, TriangleAlert } from 'lucide-react';
 import { analyticsApi } from '@/lib/api';
+import { useIsDesktop } from '@/lib/useMediaQuery';
 import {
   buildModel, defaultYears, headline, evolution, jardinesFrom, byComunaBars, byGroup, urbanRural, heatmap,
   sizeHistogram, scatter, changes, sourceInfo, fmt, dec, signPct, signInt, titleCase, DEFAULT_FILTER, isFiltered, GROUPS,
@@ -17,13 +18,13 @@ const cutoff = (list) => (list.length ? `corte ${list.map(monthLabel).join(', ')
 
 function Kpi({ label, value, sub, subColor, accent, onSource, extra }) {
   return (
-    <div className="tb-card flex min-w-0 flex-1 basis-52 flex-col gap-1 rounded-2xl border border-slep-line bg-white px-[18px] pb-4 pt-3.5" style={{ borderTop: `4px solid ${accent}` }}>
-      <button type="button" onClick={onSource} aria-label={`${label}: ver origen del dato`} className="tb-press -mx-1 flex items-center justify-between rounded-md px-1 text-left text-sm font-bold text-slep-muted hover:text-slep-blue">
+    <div className="tb-card flex min-w-0 flex-col gap-1 rounded-2xl border border-slep-line bg-white px-3 pb-3 pt-2.5 lg:flex-1 lg:basis-52 lg:px-[18px] lg:pb-4 lg:pt-3.5" style={{ borderTop: `4px solid ${accent}` }}>
+      <button type="button" onClick={onSource} aria-label={`${label}: ver origen del dato`} className="tb-press -mx-1 flex items-center justify-between rounded-md px-1 text-left text-[13px] font-bold text-slep-muted hover:text-slep-blue lg:text-sm">
         {label}
         <span aria-hidden="true" className="text-xs">ⓘ</span>
       </button>
-      <span className="text-4xl font-bold leading-none tracking-tight text-slep-ink">{value}</span>
-      <span className="text-[13.5px] font-bold" style={{ color: subColor ?? '#5b6f82' }}>{sub}</span>
+      <span className="text-3xl font-bold leading-none tracking-tight text-slep-ink lg:text-4xl">{value}</span>
+      <span className="text-xs font-bold lg:text-[13.5px]" style={{ color: subColor ?? '#5b6f82' }}>{sub}</span>
       {extra}
     </div>
   );
@@ -34,6 +35,8 @@ function Kpi({ label, value, sub, subColor, accent, onSource, extra }) {
  * aquí con `lib/enrollment.js`. El año y la comparación se eligen arriba; los gráficos son además filtros.
  */
 export default function TableroMatricula() {
+  const isDesktop = useIsDesktop();
+  const [showFilters, setShowFilters] = useState(false);
   const [dataset, setDataset] = useState(null);
   const [error, setError] = useState(false);
   const [year, setYear] = useState(null);
@@ -127,30 +130,37 @@ export default function TableroMatricula() {
     ? <button type="button" onClick={() => pickYear(ind.lastYear)} className="tb-press -mx-1 self-start rounded-md px-1 text-[13px] font-bold text-slep-blue hover:underline">Último dato: {ind.lastYear} · ver</button>
     : null);
 
+  const cutoffChip = (
+    <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[13.5px] font-bold text-emerald-800">
+      <span className="size-2 rounded-full bg-emerald-600" aria-hidden="true" />{cutoff(e.asOf)}
+    </span>
+  );
+
   return (
     <div className="flex flex-col gap-4 text-slep-ink">
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
-          <p className="text-sm font-bold text-slep-blue">Tableros</p>
-          <h1 className="text-4xl font-bold tracking-tight">Matrícula</h1>
+        <div className="flex flex-col gap-0.5 max-lg:w-full max-lg:flex-row max-lg:items-end max-lg:justify-between">
+          <div className="flex flex-col gap-0.5">
+            <p className="text-sm font-bold text-slep-blue">Tableros</p>
+            <h1 className="text-3xl font-bold tracking-tight lg:text-4xl">Matrícula</h1>
+          </div>
+          {!isDesktop && cutoffChip}
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slep-line bg-white px-4 py-2">
+        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-slep-line bg-white px-4 py-2.5 max-lg:w-full lg:flex lg:flex-wrap lg:items-center lg:gap-x-5 lg:gap-y-2 lg:py-2">
           <SelectField id="tb-year" label="Año" value={year} options={yearOptions} onChange={(v) => pickYear(Number(v))} />
           <SelectField id="tb-compare" label="Comparar con" value={compare ?? ''} options={compareOptions} onChange={(v) => setCompare(v === '' ? null : Number(v))} />
-          <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[13.5px] font-bold text-emerald-800">
-            <span className="size-2 rounded-full bg-emerald-600" aria-hidden="true" />{cutoff(e.asOf)}
-          </span>
+          {isDesktop && cutoffChip}
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-3.5">
+      <div className="grid grid-cols-2 gap-2.5 lg:flex lg:flex-wrap lg:gap-3.5">
         <Kpi label="Establecimientos" value={fmt(head.establishments.value)} accent="#168fd5" onSource={open('establishments')}
           sub={`${head.establishments.withEnrollment} con matrícula`}
-          extra={compare != null && (e.entered > 0 || e.left > 0) ? <span className="text-xs text-slep-muted">{e.entered > 0 && `${e.entered} entran`}{e.entered > 0 && e.left > 0 && ' · '}{e.left > 0 && `${e.left} salen`} vs {compare}</span> : null} />
+          extra={compare != null && (e.entered > 0 || e.left > 0) ? <span className="hidden text-xs text-slep-muted lg:inline">{e.entered > 0 && `${e.entered} entran`}{e.entered > 0 && e.left > 0 && ' · '}{e.left > 0 && `${e.left} salen`} vs {compare}</span> : null} />
         <Kpi label={`Matrícula ${year}`} value={fmt(e.value)} accent="#36bce7" onSource={open('enrollment')}
           sub={compare != null && e.pct != null ? `${signPct(e.pct)} vs ${compare}` : compare != null ? 'sin base de comparación' : 'sin comparar'}
           subColor={e.pct != null ? (e.pct < 0 ? '#c22e44' : '#2f7d14') : undefined}
-          extra={compare != null && e.delta != null ? <span className="text-xs text-slep-muted">{signInt(e.delta)} alumnos en {e.matched} establecimientos presentes en ambos años</span> : null} />
+          extra={compare != null && e.delta != null ? <span className="hidden text-xs text-slep-muted lg:inline">{signInt(e.delta)} alumnos en {e.matched} establecimientos presentes en ambos años</span> : null} />
         <Kpi label={`Asistencia ${year}`} value={head.attendance.value == null ? '—' : `${dec(head.attendance.value * 100)} %`} accent="#76c93b" onSource={open('attendance')}
           sub={head.attendance.value == null ? 'sin dato este año' : `ponderada · ${head.attendance.n} de ${head.attendance.total} con dato`}
           extra={missing(head.attendance)} />
@@ -159,9 +169,18 @@ export default function TableroMatricula() {
           extra={missing(head.teachers)} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slep-line bg-white px-4 py-2.5">
-        <SelectField id="tb-comuna" label="Comuna" value={filter.comuna ?? ''} options={comunaOptions} onChange={(v) => set({ comuna: v === '' ? null : v })} />
-        <SelectField id="tb-tipo" label="Tipo" value={filter.tipo ?? ''} options={tipoOptions} onChange={(v) => set({ tipo: v === '' ? null : Number(v) })} />
+      {!isDesktop && (
+        <button type="button" onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slep-line bg-white text-sm font-bold text-slep-blue">
+          <SlidersHorizontal size={16} aria-hidden="true" />
+          {showFilters ? 'Ocultar filtros' : 'Filtros'}
+          {isFiltered(filter) && <span className="size-2 rounded-full bg-slep-blue" role="img" aria-label="con filtros activos" />}
+        </button>
+      )}
+
+      <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slep-line bg-white px-4 py-2.5 ${isDesktop || showFilters ? '' : 'hidden'}`}>
+        <SelectField id="tb-comuna" className="max-lg:min-w-[40%] max-lg:flex-1" label="Comuna" value={filter.comuna ?? ''} options={comunaOptions} onChange={(v) => set({ comuna: v === '' ? null : v })} />
+        <SelectField id="tb-tipo" className="max-lg:min-w-[40%] max-lg:flex-1" label="Tipo" value={filter.tipo ?? ''} options={tipoOptions} onChange={(v) => set({ tipo: v === '' ? null : Number(v) })} />
         <div className="flex items-center gap-2.5">
           <span className="text-sm font-bold">Área</span>
           <Segmented label="Área" value={filter.area} onChange={(v) => set({ area: v })} options={[{ value: 'all', label: 'Todas' }, { value: 'u', label: 'Urbano' }, { value: 'r', label: 'Rural' }]} />
