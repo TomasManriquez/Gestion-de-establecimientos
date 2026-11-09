@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { BarChart3, Building2, LogOut, User, Users, ChevronLeft } from 'lucide-react';
+import { BarChart3, Building2, LogOut, User, Users, ChevronLeft, ShieldCheck } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -210,6 +210,12 @@ export default function AppLayout({ currentUser, onLogout }) {
                     <NavLink to="/configuracion/usuarios" className={navClass()} aria-label="Usuarios">
                       <span className={SLOT}><Users size={18} /></span>
                       <span className={`whitespace-nowrap ${fade}`} aria-hidden={collapsed}>Usuarios</span>
+                    </NavLink>
+                  </RailTip>
+                  <RailTip collapsed={collapsed} label="Accesos">
+                    <NavLink to="/configuracion/accesos" className={navClass()} aria-label="Accesos">
+                      <span className={SLOT}><ShieldCheck size={18} /></span>
+                      <span className={`whitespace-nowrap ${fade}`} aria-hidden={collapsed}>Accesos</span>
                     </NavLink>
                   </RailTip>
                 </>

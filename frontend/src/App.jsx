@@ -13,6 +13,7 @@ import NotFound from './components/NotFound';
 import RequireAccess from './components/RequireAccess';
 import SetPassword from './components/SetPassword';
 import UsersPage from './components/users/UsersPage';
+import AccessGrantsPage from './components/access/AccessGrantsPage';
 import { Toaster } from '@/components/ui/sonner';
 
 /**
@@ -119,6 +120,7 @@ export default function App() {
           <Route element={<RequireAccess currentUser={currentUser} platform="iam" roles={['admin']} />}>
             <Route path="/configuracion" element={<Navigate to="/configuracion/usuarios" replace />} />
             <Route path="/configuracion/usuarios" element={<UsersPage currentUser={currentUser} />} />
+            <Route path="/configuracion/accesos" element={<AccessGrantsPage />} />
           </Route>
         </Route>
       </Route>
