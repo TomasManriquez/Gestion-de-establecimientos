@@ -87,5 +87,14 @@ class AccessService:
                                     "subject_id": doc["subject_id"]})
         return True
 
+    async def purge(self, resource_type: str, resource_id: str, actor_id: str) -> int:
+        """Borra las concesiones de un recurso que dejó de existir; una sola entrada de auditoría."""
+        n = (await db_service.db.resource_grants.delete_many(
+            {"resource_type": resource_type, "resource_id": resource_id})).deleted_count
+        if n:
+            await audit_service.record(actor_id, AuditAction.RESOURCE_GRANT_REVOKE, AuditTarget.RESOURCE_GRANT, resource_id,
+                                       {"resource_type": resource_type, "resource_id": resource_id, "revoked": n})
+        return n
+
 
 access_service = AccessService()

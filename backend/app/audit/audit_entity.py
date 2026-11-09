@@ -33,6 +33,12 @@ class AuditAction(str, Enum):
     VAULT_UPDATE = "vault.update"
     VAULT_DELETE = "vault.delete"
     VAULT_REVEAL = "vault.reveal"                     # única lectura auditada: la entrega real del secreto
+    PORTAL_TOPIC_CREATE = "portal_topic.create"       # ADR-021: temas y recursos del portal
+    PORTAL_TOPIC_UPDATE = "portal_topic.update"
+    PORTAL_TOPIC_DELETE = "portal_topic.delete"
+    PORTAL_RESOURCE_CREATE = "portal_resource.create"
+    PORTAL_RESOURCE_UPDATE = "portal_resource.update"
+    PORTAL_RESOURCE_DELETE = "portal_resource.delete"
 
 
 class AuditTarget(str, Enum):
@@ -42,6 +48,8 @@ class AuditTarget(str, Enum):
     SUBROGATION = "subrogation"
     RESOURCE_GRANT = "resource_grant"
     VAULT = "vault"
+    PORTAL_TOPIC = "portal_topic"
+    PORTAL_RESOURCE = "portal_resource"
 
 
 # `changes` jamás lleva credenciales (ADR-014). Se descartan por nombre, en cualquier nivel.

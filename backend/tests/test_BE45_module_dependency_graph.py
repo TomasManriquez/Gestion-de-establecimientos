@@ -36,6 +36,7 @@ ALLOWED = {
     "audit": set(),
     "access": {"users", "audit"},
     "vault": {"access", "audit", "auth", "establishments"},
+    "portal": {"access", "audit", "auth", "units"},
     "mail": set(),
 }
 

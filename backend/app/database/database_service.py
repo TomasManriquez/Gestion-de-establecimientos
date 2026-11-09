@@ -94,6 +94,9 @@ class DatabaseService:
         await self.db.resource_grants.create_index([("subject_type", 1), ("subject_id", 1), ("resource_type", 1)], background=True)
         # vault_credentials (propiedad de `vault`, ADR-021): las credenciales de un establecimiento
         await self.db.vault_credentials.create_index([("rbd", 1)], background=True)
+        # portal_topics y portal_resources (propiedad de `portal`, ADR-021): hijos de un tema y recursos por tema
+        await self.db.portal_topics.create_index([("parent_id", 1)], background=True)
+        await self.db.portal_resources.create_index([("topic_id", 1)], background=True)
 
         # audit_log (solo de agregado): la consulta habitual es "lo más reciente" y por objeto/actor/lote
         await self.db.audit_log.create_index([("at", -1)], background=True)

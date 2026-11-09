@@ -26,6 +26,7 @@ OWNER = {
     "audit": {"audit_log"},
     "access": {"resource_grants"},
     "vault": {"vault_credentials"},
+    "portal": {"portal_topics", "portal_resources"},
     "establishments": {"establishments"},
     "counterparts": {"counterparts"},
     "metrics": {"metrics"},
