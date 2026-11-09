@@ -920,6 +920,19 @@ queda diferida (ADR-021). Índices: único `(resource_type, resource_id, subject
 `(subject_type, subject_id, resource_type)` para «¿qué puede ver esta persona?». Cada alta y baja se audita
 como `resource_grant.create|revoke` (objetivo `resource_grant`). Solo `iam/admin` la escribe.
 
+### 9.9.2 ✅ `vault_credentials` (propiedad de `vault`, ADR-021 fase 2)
+
+```json
+{"_id":"ObjectId","rbd":"string","name":"string","username":"string | null","password_enc":"token Fernet",
+ "url":"http(s)://… | null","created_by":"id","created_at":"ISODate","updated_by":"id","updated_at":"ISODate"}
+```
+
+Varias credenciales por establecimiento (SIGE es una más). `password_enc` se cifra con Fernet y la llave
+`VAULT_KEY`; **no sale en ninguna respuesta** salvo `POST …/reveal` (`03` §8.6), no entra en `audit_log` y no
+se guardan contraseñas antiguas. Índice `(rbd)`. Cambios auditados como `vault.create|update|delete` y
+`vault.reveal` (objetivo `vault`, `target_id` = id de la credencial); el log lleva `rbd`, `name` y los campos
+visibles que cambiaron, y de la contraseña solo `password_changed: true`.
+
 ### 9.10 ✅ Migración del admin sembrado
 
 Hoy el único usuario es `{username, hashed_password, full_name, role}` (§6) y no tiene correo.

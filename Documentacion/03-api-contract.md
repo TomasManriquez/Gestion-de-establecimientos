@@ -712,3 +712,21 @@ cualquier otro rol, `401` sin sesión). Modelo en `02` §9.9.1.
 
 `resource_type` ∈ `portal_resource` \| `vault`. `resource_id` es `*` o un identificador de 1 a 64 caracteres
 `[A-Za-z0-9_-]`. La concesión da solo `ver`.
+
+### 8.6 ✅ `/api/v1/establishments/{rbd}/vault` — bóveda de credenciales (ADR-021 fase 2)
+
+Acceso: cualquier persona autenticada llega a la ruta, pero solo pasa quien tiene una concesión `vault` sobre ese
+`rbd` (o `"*"`) o es `iam/admin`; el resto recibe `403` (el rol en `datos` no abre nada), `401` sin sesión, `404`
+si el establecimiento no existe. Tener la concesión permite también crear, editar y borrar (el permiso `manage`
+separado está diferido). Modelo en `02` §9.9.2.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/api/v1/establishments/{rbd}/vault` | `200` lista de credenciales, sin contraseña (`has_password: true`) |
+| POST | `…/vault` | `201` la credencial. Body `{name, username?, password, url?}` (`extra="forbid"`; `url` solo `http(s)`) |
+| PUT | `…/vault/{id}` | `200`. Todos los campos opcionales; sin `password` no cambia; `username`/`url` en `null` se borran. `404` |
+| DELETE | `…/vault/{id}` | `204`. `404` |
+| POST | `…/vault/{id}/reveal` | `200 {password}` con `Cache-Control: no-store`. `429` + `Retry-After` al pasar de 100 por hora por persona; `503` si no se pudo escribir la auditoría (la contraseña no sale); `404` |
+
+`reveal` sigue este orden: permiso → `rate_guard` → registro `vault.reveal` en `audit_log` → `rate_hit` → entrega.
+Ninguna otra ruta devuelve la contraseña.

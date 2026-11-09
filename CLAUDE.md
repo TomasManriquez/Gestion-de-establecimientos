@@ -84,7 +84,7 @@ Ver `Documentacion/05-guia-de-extension.md` §5 para la lista completa y su esta
 - **D36**: los cambios a ficha, contrapartes y métricas no se auditan. No asumas que hay rastro.
 - **D37/D20**: `npm run lint` no corre (falta `eslint`). Nunca declares que el lint pasó.
 
-**Acceso por recurso (ADR-021; fase 1 ✅ implementada, bóveda y portal 🧭):** cada recurso del portal es `org` (toda cuenta de `datos`)
+**Acceso por recurso (ADR-021; fases 1 (concesiones) y 2 (bóveda, backend) ✅; portal y pestaña de la ficha 🧭):** cada recurso del portal es `org` (toda cuenta de `datos`)
 o `restricted` (nivel 2 del catastro y la bóveda). El rol de plataforma no abre recursos `restricted`;
 solo una concesión explícita, por persona (la de unidad llega después). Quien registra un recurso
 `restricted` recibe `ver` en el acto. `vault.reveal` se audita antes de entregar la clave y, si el

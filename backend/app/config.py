@@ -4,6 +4,8 @@ import re
 from typing import List, Mapping, Optional
 from urllib.parse import urlsplit
 
+from cryptography.fernet import Fernet
+
 
 class ConfigError(RuntimeError):
     """Configuración inválida o incompleta. Impide el arranque con un mensaje que nombra la variable."""
@@ -42,7 +44,7 @@ class Settings:
         "ADMIN_PASSWORD", "BOOTSTRAP_ADMIN_EMAIL", "ALLOWED_EMAIL_DOMAINS",
         "PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH", "PASSWORD_REQUIRE_CHAR_CLASSES",
         "MAIL_MODE", "PUBLIC_BASE_URL", "GMAIL_SENDER_ADDRESS", "GMAIL_REFRESH_TOKEN",
-        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_AUTO_PROVISION",
+        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_AUTO_PROVISION", "VAULT_KEY",
         "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_SENDER_ADDRESS",
     )
 
@@ -109,6 +111,14 @@ class Settings:
         if raw_provision not in ("true", "false"):
             raise ConfigError(f"GOOGLE_AUTO_PROVISION debe ser true o false (recibido: {raw_provision!r})")
         self.GOOGLE_AUTO_PROVISION: bool = raw_provision == "true"
+
+        # Bóveda de credenciales (ADR-021): llave Fernet, obligatoria y sin default. Inválida => no arranca.
+        self.VAULT_KEY: str = self._required("VAULT_KEY").strip()
+        try:
+            Fernet(self.VAULT_KEY.encode())
+        except (ValueError, TypeError):
+            raise ConfigError('VAULT_KEY no es una llave Fernet válida (genera una con: '
+                              'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")')
         if self.MAIL_MODE == "console":
             # Que no pueda quedar activo en producción sin querer: el log sale con el enlace.
             if not local:

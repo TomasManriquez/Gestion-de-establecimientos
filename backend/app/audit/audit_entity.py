@@ -29,6 +29,10 @@ class AuditAction(str, Enum):
     SUBROGATION_CANCEL = "subrogation.cancel"
     RESOURCE_GRANT_CREATE = "resource_grant.create"   # ADR-021: quién puede ver un recurso restringido
     RESOURCE_GRANT_REVOKE = "resource_grant.revoke"
+    VAULT_CREATE = "vault.create"                     # ADR-021: bóveda de credenciales; la contraseña nunca se registra
+    VAULT_UPDATE = "vault.update"
+    VAULT_DELETE = "vault.delete"
+    VAULT_REVEAL = "vault.reveal"                     # única lectura auditada: la entrega real del secreto
 
 
 class AuditTarget(str, Enum):
@@ -37,6 +41,7 @@ class AuditTarget(str, Enum):
     PLATFORM = "platform"
     SUBROGATION = "subrogation"
     RESOURCE_GRANT = "resource_grant"
+    VAULT = "vault"
 
 
 # `changes` jamás lleva credenciales (ADR-014). Se descartan por nombre, en cualquier nivel.

@@ -841,8 +841,8 @@ recarga sin avisar y puede perder una edición en curso.
 
 ## ADR-021 · Acceso por recurso con concesiones explícitas; temas del portal y bóveda de credenciales
 
-**Estado:** aceptada (2026-11-09). ✅ **Fase 1 implementada** (módulo `access`, `/api/v1/access/grants`,
-`test_BE64_*`): lo demás es `🧭 DISEÑO` hasta que cada fase lo implemente y un test lo verifique. Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
+**Estado:** aceptada (2026-11-09). ✅ **Fases 1 y 2 implementadas** (módulos `access` y `vault`, `/api/v1/access/grants` y
+`/api/v1/establishments/{rbd}/vault`, `test_BE64_*` y `test_BE65_*`; la pestaña del frontend y el portal siguen en `🧭 DISEÑO`). Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
 enmienda ADR-014 (una excepción de lectura auditable) y cierra la deuda que ADR-019 dejó abierta («los permisos
 por recurso se resuelven con el primer módulo que los necesite»).
 
@@ -941,6 +941,8 @@ quién debe ver un recurso protegido** (G4).
      El límite **frena y deja huella**, no impide: una cuenta con acceso a `"*"` y comprometida tardaría horas,
      no minutos, en volcar todo, y cada paso queda en `audit_log`. Verificar 21 establecimientos con unas tres
      credenciales cada uno son unas 63 revelaciones, dentro del límite.
+   - **Escritura.** Quien tiene la concesión también crea, edita y borra credenciales de esa bóveda (`ver` implica
+     escribir mientras el permiso `manage` siga diferido); queda en el log de cambios.
    - **Sin conexión.** La bóveda no entra en el snapshot de la PWA (ADR-020).
 7. **Rutas.** Los routers nuevos van bajo `/api/v1/` (primer paso para D10); los existentes no se tocan:
    - `/api/v1/access/grants`
@@ -958,7 +960,7 @@ quién debe ver un recurso protegido** (G4).
 **Consecuencias.**
 - **Nuevas colecciones:** `resource_grants`, `portal_topics`, `portal_resources` y `vault_credentials`. Se agregan
   a `02`, al mapa de dueños de `test_BE63` y, con sus aristas (`portal → access`, `vault → access`,
-  `vault → audit`, `vault → auth` por `rate_guard`), a `test_BE45`. `AuditTarget` suma `vault` y
+  `vault → audit`, `vault → auth` por `rate_guard`, `vault → establishments` para validar el `rbd`), a `test_BE45`. `AuditTarget` suma `vault` y
   `resource_grant`; `AuditAction`, las cinco acciones nuevas.
 - **Regla 3 de despliegue:**
   - Dependencia nueva `cryptography`, que obliga a reconstruir la imagen del backend.
