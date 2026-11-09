@@ -27,6 +27,8 @@ class AuditAction(str, Enum):
     PLATFORM_UPDATE = "platform.update"
     SUBROGATION_CREATE = "subrogation.create"
     SUBROGATION_CANCEL = "subrogation.cancel"
+    RESOURCE_GRANT_CREATE = "resource_grant.create"   # ADR-021: quién puede ver un recurso restringido
+    RESOURCE_GRANT_REVOKE = "resource_grant.revoke"
 
 
 class AuditTarget(str, Enum):
@@ -34,6 +36,7 @@ class AuditTarget(str, Enum):
     UNIT = "unit"
     PLATFORM = "platform"
     SUBROGATION = "subrogation"
+    RESOURCE_GRANT = "resource_grant"
 
 
 # `changes` jamás lleva credenciales (ADR-014). Se descartan por nombre, en cualquier nivel.

@@ -900,12 +900,25 @@ verifica sobre el AST); `changes` jamás contiene hashes, contraseñas ni tokens
 (`[REDACTED]`). `actor_id` es `null` para acciones del sistema (arranque, seed). `bulk_id` agrupa un lote. Las
 acciones son: `user.create|update|disable|enable|invite|password_reset|password_set|autoprovision` (esta última: alta automática con Google, `actor_id` nulo),
 `access.grant|revoke`, `unit.create|update|move|deactivate|activate|head`, `platform.update`,
-`subrogation.create|cancel`. Una operación fallida (409) o sin cambios reales no deja registro. Índices:
+`subrogation.create|cancel`, `resource_grant.create|revoke` (ADR-021). Una operación fallida (409) o sin cambios reales no deja registro. Índices:
 `(at desc)`, `(target_type, target_id, at desc)`, `(actor_id, at desc)` y `bulk_id` (disperso).
 
 `rate_limits` guarda `{key, count, expires_at}`; la clave es `<alcance>:<sha256[:32]>` de lo que se limita
 (correo, IP, id), así que no contiene datos en claro. Índices: único `key` y TTL sobre `expires_at`. Es una
 ventana fija por clave: al vencer, la siguiente `hit` abre una nueva.
+
+### 9.9.1 ✅ `resource_grants` (propiedad de `access`, ADR-021 fase 1)
+
+```json
+{"_id":"ObjectId","resource_type":"portal_resource|vault","resource_id":"string | \"*\"",
+ "subject_type":"user","subject_id":"id de la persona","granted_by":"id","granted_at":"ISODate"}
+```
+
+Una fila = «esta persona puede **ver** este recurso». `resource_id: "*"` cubre todos los recursos de ese tipo
+(p. ej. todas las bóvedas). Por ahora el sujeto es siempre una persona; la concesión por unidad y subunidad
+queda diferida (ADR-021). Índices: único `(resource_type, resource_id, subject_type, subject_id)` y
+`(subject_type, subject_id, resource_type)` para «¿qué puede ver esta persona?». Cada alta y baja se audita
+como `resource_grant.create|revoke` (objetivo `resource_grant`). Solo `iam/admin` la escribe.
 
 ### 9.10 ✅ Migración del admin sembrado
 

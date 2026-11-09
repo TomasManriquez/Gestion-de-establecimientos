@@ -24,6 +24,7 @@ OWNER = {
     "units": {"units", "subrogations"},
     "platforms": {"platforms"},
     "audit": {"audit_log"},
+    "access": {"resource_grants"},
     "establishments": {"establishments"},
     "counterparts": {"counterparts"},
     "metrics": {"metrics"},

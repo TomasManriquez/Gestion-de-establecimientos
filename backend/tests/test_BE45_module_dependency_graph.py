@@ -34,6 +34,7 @@ ALLOWED = {
     "metrics": {"establishments"},
     "analytics": {"establishments", "metrics"},
     "audit": set(),
+    "access": {"users", "audit"},
     "mail": set(),
 }
 

@@ -841,8 +841,8 @@ recarga sin avisar y puede perder una edición en curso.
 
 ## ADR-021 · Acceso por recurso con concesiones explícitas; temas del portal y bóveda de credenciales
 
-**Estado:** 🧭 **propuesta** (2026-11-09), pendiente de aprobación. No hay código: todo lo que sigue es `🧭 DISEÑO`
-hasta que cada fase lo implemente y un test lo verifique. Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
+**Estado:** aceptada (2026-11-09). ✅ **Fase 1 implementada** (módulo `access`, `/api/v1/access/grants`,
+`test_BE64_*`): lo demás es `🧭 DISEÑO` hasta que cada fase lo implemente y un test lo verifique. Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
 enmienda ADR-014 (una excepción de lectura auditable) y cierra la deuda que ADR-019 dejó abierta («los permisos
 por recurso se resuelven con el primer módulo que los necesite»).
 
@@ -880,12 +880,14 @@ quién debe ver un recurso protegido** (G4).
 
    El índice único es `(resource_type, resource_id, subject_type, subject_id)`. La concesión da **ver**: no hay
    más permisos. `subject_type` se deja en el documento para que sumar `"unit"` no cambie el índice.
-3. **Una única función de decisión:** `access_service.can(user, resource_type, resource_id) -> bool`.
-   - Devuelve `true` si el recurso es `org`, si el usuario es `iam/admin`, o si existe una concesión para
-     `resource_id` o para `"*"` a nombre del usuario.
-   - Para las listas se usa `access_service.visible_ids(user, resource_type)`, en una sola consulta, sin N+1.
-   - Los controllers la usan como dependencia `require_grant(...)`. **El service no recibe el usuario** (L3):
-     recibe ids o booleanos, igual que hoy.
+3. **Una única función de decisión:** `access_service.can(user_id, resource_type, resource_id, *, is_iam_admin=False) -> bool`.
+   - Devuelve `true` si `is_iam_admin`, o si existe una concesión para `resource_id` o para `"*"` a nombre de la
+     persona. **Que el recurso sea `org` lo decide quien llama (`portal`), no `access`:** así `access` no
+     importa `portal` ni `auth`, y la flecha va en un solo sentido (`portal → access`).
+   - Para las listas se usa `access_service.visible_ids(user_id, resource_type, *, is_iam_admin=False)`, en una sola
+     consulta, sin N+1: devuelve el conjunto de ids, o `None` si la persona ve todos (admin o concesión `"*"`).
+   - **El service no recibe el usuario** (L3): recibe ids y booleanos, igual que hoy. La dependencia
+     `require_grant(...)` para los controllers se agrega en la fase 2, con su primer uso (la bóveda).
    - Si algún día hace falta un motor de permisos, este es el único punto que cambia.
 4. **Quién concede.** Por ahora solo `iam/admin` crea y revoca concesiones, y cada cambio se audita
    (`resource_grant.create` y `resource_grant.revoke`; `access.grant` ya significa «acceso a plataforma»). La

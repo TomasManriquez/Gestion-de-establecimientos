@@ -18,6 +18,7 @@ from app.establishments.establishments_controller import router as est_router
 from app.counterparts.counterparts_controller import router as cp_router
 from app.metrics.metrics_controller import router as metrics_router
 from app.analytics.analytics_controller import router as analytics_router
+from app.access.access_controller import router as access_router
 
 logger = logging.getLogger("main")
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +67,7 @@ app.include_router(users_router)
 app.include_router(units_router)
 app.include_router(platforms_router)
 app.include_router(audit_router)
+app.include_router(access_router)
 
 @app.get("/")
 async def root():

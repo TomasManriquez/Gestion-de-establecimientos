@@ -698,3 +698,17 @@ tokens legados con `sub = username` se aceptan mientras dure la compatibilidad.
 vía `require_access`), `page_size ≤ 200` y la forma de error de FastAPI (§3.3). Los códigos de
 error de dominio siguen siendo una brecha abierta: las rutas nuevas devuelven el `detail` por
 defecto, salvo los `errors[].code` de `BulkResult`.
+
+### 8.5 ✅ `/api/v1/access/grants` — concesiones por recurso (ADR-021 fase 1)
+
+Primer router bajo `/api/v1/` (D10); los existentes no cambian. Acceso: `iam/admin` en todas las rutas (`403` para
+cualquier otro rol, `401` sin sesión). Modelo en `02` §9.9.1.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/api/v1/access/grants` | `200` lista de concesiones. Filtros opcionales: `resource_type`, `resource_id`, `user_id` |
+| POST | `/api/v1/access/grants` | `201` la concesión. Body `{resource_type, resource_id, user_id}` (`extra="forbid"`). `404` persona inexistente, `422` cuenta no activa o body inválido, `409` ya concedida |
+| DELETE | `/api/v1/access/grants/{id}` | `204`. `404` si no existe o el id no es válido |
+
+`resource_type` ∈ `portal_resource` \| `vault`. `resource_id` es `*` o un identificador de 1 a 64 caracteres
+`[A-Za-z0-9_-]`. La concesión da solo `ver`.

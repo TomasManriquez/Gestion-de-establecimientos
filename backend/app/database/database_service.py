@@ -88,6 +88,11 @@ class DatabaseService:
         await self.db.rate_limits.create_index("key", unique=True, background=True)
         await self.db.rate_limits.create_index("expires_at", expireAfterSeconds=0, background=True)
 
+        # resource_grants (propiedad de `access`, ADR-021): una concesión por (tipo, recurso, sujeto)
+        await self.db.resource_grants.create_index(
+            [("resource_type", 1), ("resource_id", 1), ("subject_type", 1), ("subject_id", 1)], unique=True, background=True)
+        await self.db.resource_grants.create_index([("subject_type", 1), ("subject_id", 1), ("resource_type", 1)], background=True)
+
         # audit_log (solo de agregado): la consulta habitual es "lo más reciente" y por objeto/actor/lote
         await self.db.audit_log.create_index([("at", -1)], background=True)
         await self.db.audit_log.create_index([("target_type", 1), ("target_id", 1), ("at", -1)], background=True)
