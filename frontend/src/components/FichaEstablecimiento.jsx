@@ -259,7 +259,7 @@ export default function FichaEstablecimiento({ currentUser }) {
       </div>
 
       {/* Tabs list */}
-      <div className="flex border-b border-slate-200 overflow-x-auto gap-2 pb-px">
+      <div className="flex border-b border-slate-200 overflow-x-auto gap-2 pb-px [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {[
           { id: 'general', label: 'Información General', icon: School },
           { id: 'statistics', label: 'Estadísticas e Historial', icon: History },
@@ -271,14 +271,15 @@ export default function FichaEstablecimiento({ currentUser }) {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-5 py-3 font-semibold text-sm transition-all border-b-2 whitespace-nowrap font-outfit ${
+              title={tab.label}
+              className={`flex flex-1 items-center justify-center gap-2 px-3 py-3 lg:flex-none lg:px-5 font-semibold text-sm transition-all border-b-2 whitespace-nowrap font-outfit ${
                 activeTab === tab.id 
                   ? 'border-sky-600 text-sky-600' 
                   : 'border-transparent text-slate-400 hover:text-slate-600'
               }`}
             >
-              <Icon size={16} />
-              {tab.label}
+              <Icon size={20} className="lg:size-4" aria-hidden="true" />
+              <span className="sr-only lg:not-sr-only">{tab.label}</span>
             </button>
           );
         })}
@@ -291,8 +292,8 @@ export default function FichaEstablecimiento({ currentUser }) {
         {activeTab === 'general' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-            {/* Full-width: Ubicación */}
-            <div className="lg:col-span-3">
+            {/* Full-width: Ubicación. En móvil va al final: el mapa ocuparía la primera pantalla entera. */}
+            <div className="order-last lg:order-none lg:col-span-3">
               <EstablishmentMap
                 lat={establishment.location?.lat}
                 lng={establishment.location?.lng}

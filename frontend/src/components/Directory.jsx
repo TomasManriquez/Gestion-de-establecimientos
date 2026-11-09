@@ -1,7 +1,45 @@
 import React, { useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Filter, RefreshCw, ChevronRight } from 'lucide-react';
+import { Search, Filter, RefreshCw, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { useIsDesktop } from '@/lib/useMediaQuery';
+
+/** Directorio en móvil: una tarjeta por establecimiento; toda ella es el enlace (objetivo táctil amplio). */
+function DirectoryCards({ items, loading, from }) {
+  if (loading) {
+    return (
+      <p className="flex items-center justify-center gap-2 px-6 py-12 text-sm text-slate-400">
+        <RefreshCw size={16} className="animate-spin text-sky-500" />
+        Cargando base de datos...
+      </p>
+    );
+  }
+  if (items.length === 0) {
+    return <p className="px-6 py-12 text-center text-sm text-slate-400">No se encontraron establecimientos con los criterios ingresados.</p>;
+  }
+  return (
+    <ul className="divide-y divide-slate-100">
+      {items.map(est => (
+        <li key={est.rbd}>
+          <Link to={`/establecimientos/${est.rbd}`} state={{ from }}
+            className="flex min-h-16 items-center gap-3 px-4 py-3 transition-colors active:bg-sky-50">
+            <div className="min-w-0 flex-1">
+              <p className="font-bold leading-snug text-slate-800">{est.name}</p>
+              <p className="mt-0.5 text-xs text-slate-500">RBD {est.rbd_full} · {est.comuna}</p>
+              <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${
+                  est.area_type === 'URBANO' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'
+                }`}>{est.area_type}</span>
+                {est.category && <span>{est.category}</span>}
+              </p>
+            </div>
+            <ChevronRight size={18} className="shrink-0 text-slate-400" aria-hidden="true" />
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /**
  * Directory — FE-01
@@ -23,6 +61,9 @@ export default function Directory() {
   const [items, setItems] = React.useState([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const isDesktop = useIsDesktop();
+  // En móvil solo la búsqueda está a la vista; los demás filtros se despliegan a pedido.
+  const [showMore, setShowMore] = React.useState(false);
 
   const comunas = ['PUERTO VARAS', 'FRUTILLAR', 'FRESIA', 'LLANQUIHUE', 'LOS MUERMOS'];
   const areas   = ['URBANO', 'RURAL'];
@@ -100,10 +141,10 @@ export default function Directory() {
   return (
     <div className="space-y-6 animate-fade-in">
       <header>
-        <h1 className="text-3xl font-extrabold font-outfit text-slate-800 tracking-tight">
+        <h1 className="text-2xl lg:text-3xl font-extrabold font-outfit text-slate-800 tracking-tight">
           Directorio de Recintos
         </h1>
-        <p className="text-slate-500 text-sm mt-1">
+        <p className="hidden lg:block text-slate-500 text-sm mt-1">
           Busque y filtre la ficha de establecimientos educacionales de la comuna y acceda a su ficha técnica.
         </p>
       </header>
@@ -140,6 +181,15 @@ export default function Directory() {
             </div>
           </div>
 
+          {!isDesktop && (
+            <button type="button" onClick={() => setShowMore(s => !s)} aria-expanded={showMore}
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 text-sm font-semibold text-sky-700">
+              <SlidersHorizontal size={16} aria-hidden="true" />
+              {showMore ? 'Ocultar filtros' : 'Más filtros'}
+            </button>
+          )}
+
+          <div className={`space-y-5 ${isDesktop || showMore ? '' : 'hidden'}`}>
           {/* Comuna */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-500">Comuna</label>
@@ -195,11 +245,12 @@ export default function Directory() {
               ))}
             </select>
           </div>
+          </div>
         </aside>
 
         {/* Tabla del directorio */}
         <div className="flex-1 w-full bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+          {isDesktop ? <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -277,7 +328,7 @@ export default function Directory() {
                 )}
               </tbody>
             </table>
-          </div>
+          </div> : <DirectoryCards items={items} loading={loading} from={'?' + searchParams.toString()} />}
 
           <div className="p-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-sans">
             <span>Mostrando <b>{items.length}</b> de <b>{total}</b> establecimientos</span>

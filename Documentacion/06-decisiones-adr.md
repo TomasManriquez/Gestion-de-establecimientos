@@ -781,3 +781,58 @@ recurso: se resuelven con el primer módulo que los necesite (catálogo de proye
 Mover la siembra ahora a `bootstrap/` con métodos `seed_*` por servicio: churn sin beneficio inmediato y sobre
 el componente más sensible. Un contenedor de tareas programadas y un motor de permisos genérico: sin primer
 consumidor, serían infraestructura sin uso.
+
+---
+
+## ADR-020 · La app móvil es la misma SPA instalada como PWA, con datos offline de solo lectura
+
+**Estado:** aceptada (2026-11-03). **Fase 0 implementada** (shell instalable y diseño adaptativo). Las fases 1 a 3
+llevan la marca `🧭 DISEÑO` hasta que se implementen y un test las verifique.
+
+**Contexto.** Quien trabaja en terreno (territoriales, visitas a escuelas rurales) consulta fichas desde el
+teléfono y a menudo sin buena señal. La interfaz era de escritorio (sidebar fijo de 72 o 288 px, directorio como
+`<table>`) y no había manifest, service worker ni almacenamiento local de datos. El dataset completo (78
+establecimientos con fichas, contrapartes, métricas, conectividad e impresoras) pesa ≈210 KB sin comprimir
+(`backend/establishments.json`), así que no hace falta sincronización incremental ni paginación.
+
+**Decisión.**
+1. **Una sola SPA adaptativa**, no un shell `/m`. Mismas rutas; bajo `lg` (1024 px) `AppLayout` pinta una barra
+   inferior en vez del sidebar y `Directory` pinta tarjetas en vez de tabla. El corte lo decide `useIsDesktop`
+   (`lib/useMediaQuery.js`), que sin `matchMedia` devuelve «escritorio». Los componentes móviles son propios; lo
+   que se comparte es la ruta y los datos. En el teléfono la prioridad es el dato: el tablero muestra las cuatro
+   tarjetas en 2×2 y pliega los filtros; las pestañas de la ficha son solo ícono (el nombre queda como texto para
+   lectores de pantalla y `title`); y «Cerrar sesión» sale de la barra inferior y pasa al menú de cuenta del header
+   (la sesión vence a las 3 h, así que no hace falta tenerlo a un toque).
+2. **PWA con `vite-plugin-pwa`** (`generateSW`, `registerType: 'prompt'`). El service worker precachea solo el
+   shell (JS, CSS, HTML, íconos). **`/api` nunca pasa por el service worker** (`navigateFallbackDenylist`, sin
+   rutas de runtime): ninguna respuesta autenticada queda en Cache Storage. La actualización espera a que la
+   persona la acepte (aviso con botón «Actualizar»), porque recargar sola podría perder una edición en curso.
+3. 🧭 **Offline de solo lectura (fase 1).** `GET /api/sync/snapshot` (aditivo, con `ETag` y `304`) entrega
+   establecimientos, contrapartes y métricas de una vez; el cliente lo guarda en IndexedDB y el Directorio y la
+   Ficha leen de ahí (primero lo guardado, revalidación en segundo plano, «Actualizado hace X»). El módulo `sync`
+   compone los servicios dueños de cada colección (ADR-013, ADR-019). Editar exige conexión.
+4. 🧭 **Datos sensibles.** El snapshot **omite `connectivity.ssid_password` para todo rol**: se ve solo con
+   conexión (`04` §3 redacta por rol en el servidor; un teléfono perdido no debe filtrar credenciales). Cerrar
+   sesión borra el snapshot.
+5. 🧭 **Arranque sin red.** `App.jsx` hoy llama a `handleLogout()` ante *cualquier* error de `/api/auth/me`; sin
+   red eso manda al login. Se distinguirá el error de red (sin `response`) del `401`: sin red se abre con la
+   identidad guardada y un plazo máximo desde la última sincronización.
+
+**Consecuencias.** `nginx.conf`: `sw.js`, `registerSW.js`, `index.html` y `manifest.webmanifest` salen con
+`Cache-Control: no-cache` (por `expires -1`, que no rompe la herencia de las cabeceras de seguridad) y la CSP
+pasa a `worker-src 'self' blob:`. Sin eso un `sw.js` cacheado un año nunca se actualizaría. Dependencias nuevas
+(`vite-plugin-pwa`, `workbox-build`, `workbox-window`): rebuild de la imagen del frontend; sin variables de entorno
+nuevas. El primer acceso descarga ≈2,1 MB (todo el JS va en un solo chunk de 1,9 MB; separar `maplibre-gl` y
+`recharts` queda pendiente). Los tests simulan el ancho con `window.innerWidth` (`setup.js`, `test_FE25_*`).
+Verificado en la fase 0: build, service worker activado en Chrome con el shell precacheado y apertura sin red de
+`/establecimientos/7722` (que hoy termina en `/login`, punto 5).
+
+> ⚠️ NO VERIFICADO: las cabeceras de `nginx.conf` contra un Nginx real (el demonio de Docker no estaba
+> disponible al implementar). Comprobación en `07` §12.
+
+**Alternativas descartadas.** Un shell `/m` aparte: duplica cada cambio de la ficha, los enlaces dejan de ser
+universales (tablets, horizontal, ventanas angostas) y los tests actuales no cubren esas pantallas. Cola de
+ediciones sin conexión: exige resolver conflictos y reautenticar al reenviar (la sesión dura 3 h y no tiene
+refresh); queda como fase 3 opcional. Cachear `/api` con Workbox en tiempo de ejecución: dejaría respuestas
+autenticadas (y credenciales de admin) en Cache Storage, sin la redacción por rol. `registerType: 'autoUpdate'`:
+recarga sin avisar y puede perder una edición en curso.

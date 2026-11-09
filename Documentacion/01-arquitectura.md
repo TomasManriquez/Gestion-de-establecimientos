@@ -360,3 +360,36 @@ anterior) redirigen ahí. `/tableros/:tablero` queda reservada para el portal de
 `lib/enrollment.js` (lógica pura, probada en `test_FE23_*`); los gráficos viven en `components/tablero/`.
 `Dashboard.jsx` y los endpoints `/kpis` y `/charts` se retiraron el 2026-11-02 (ADR-019). Identidad: logo en
 `frontend/public/slep-llanquihue.png`, tokens `slep-*` y tipografía Carlito (equivalente métrico de Calibri).
+
+---
+
+## 8. PWA y modo móvil (ADR-020)
+
+**✅ Fase 0 (2026-11-03).** La misma SPA se instala en el teléfono y se adapta al ancho; no hay un frontend móvil aparte.
+
+```
+frontend/
+├── vite.config.js                 # VitePWA: manifest, precache del shell, denylist de /api, registerType 'prompt'
+├── public/icons/                  # icon-192/512 (el 512 también como maskable) y apple-touch-icon, del mosaico de la «L»
+├── src/main.jsx                   # registerSW: aviso «Hay una versión nueva» con botón Actualizar
+├── src/lib/useMediaQuery.js       # useMediaQuery / useIsDesktop (corte en 1024 px, igual que `lg`)
+├── src/components/AppLayout.jsx   # sidebar en escritorio; BottomNav (Tableros, Directorio, Usuarios) bajo `lg`; «Cerrar sesión» va en el menú de cuenta del header
+└── src/components/Directory.jsx   # tabla en escritorio; DirectoryCards + filtros plegables bajo `lg`
+```
+
+Qué hace y qué no hace el service worker: precachea el shell (≈2,1 MB en el primer acceso) y sirve `index.html`
+para cualquier ruta de navegación salvo `/api/*`. **No toca `/api`**, así que sin red los datos no existen
+todavía: es la fase 1 (🧭 `GET /api/sync/snapshot` + IndexedDB, solo lectura, sin `ssid_password`; ADR-020).
+Hoy, sin red, la app abre desde la caché y termina en `/login` porque `App.jsx` cierra la sesión ante cualquier
+fallo de `/api/auth/me` (🧭 se corrige en la fase 1).
+
+Otros detalles de móvil: `index.html` usa `viewport-fit=cover` y la barra inferior respeta
+`env(safe-area-inset-bottom)`; `index.css` fija `16px` en `input/select/textarea` bajo `lg` (iOS Safari hace zoom
+al enfocar un campo con letra menor); en la ficha el mapa va al final en móvil. `nginx.conf` sirve `sw.js`,
+`registerSW.js`, `index.html` y `manifest.webmanifest` con `no-cache` y declara `worker-src 'self' blob:` en la CSP.
+
+> 🔸 **BRECHA:** la tipografía Carlito y las teselas del mapa siguen viniendo de Google Fonts y OpenStreetMap;
+> sin red no cargan (la fuente cae a Calibri/Segoe UI/Arial). Se resuelve en la fase 1 (fuente propia en el build).
+>
+> 🔸 **BRECHA:** `npm run lint` no corre: `eslint` no está en `devDependencies` y no hay configuración de ESLint.
+> Y `test_FE16-A` falla en Windows (compara rutas con `/` contra las de `path.join`).

@@ -76,6 +76,7 @@ son correctas *a esta escala* y dejan de serlo un orden de magnitud más arriba.
 | Entender la feature de usuarios e IAM (F3, F4 y F6 implementadas; F7 diseñada) | `06` ADR-009 a ADR-014, luego `02` §9, `03` §8 y `04` §9 |
 | Entender cómo se conectarán otras plataformas (`selloverde`) | `04` §10 |
 | Configurar el correo de invitaciones (SMTP; alternativa Gmail API) | `07` §9, ADR-017 |
+| Entender la app móvil instalable (PWA) y el modo offline | `06` ADR-020, `01` §8, `07` §12 |
 
 ---
 
@@ -114,6 +115,7 @@ según de dónde vino el dato.
 | **Admin global** | Quien tiene `iam/admin`. Es un rol distinto de `datos/admin`. 🧭 | `04` §9.3 |
 | **Unidad** | Unidad organizacional del SLEP, con nivel 1 a 5 (Dirección Ejecutiva, subdirecciones…). Los funcionarios SLEP pertenecen a una unidad; los usuarios de establecimiento, a un `rbd`. 🧭 | colección `units` |
 | **Jefatura / subrogancia** | Quien dirige una unidad; y quien la reemplaza temporalmente. La subrogancia da visibilidad, no permisos. ✅ F4 | `units.head_user_id`, `subrogations` |
+| **PWA** | *Progressive Web App.* La misma web, instalable en el teléfono con ícono propio y sin barra de direcciones; un *service worker* guarda el shell de la app para abrirla sin red. ✅ fase 0; datos offline 🧭 fase 1. | `06` ADR-020, `frontend/vite.config.js` |
 | **Invitación** | Estado `invited` de un usuario recién creado: recibe un correo con un enlace de un solo uso para definir su contraseña. ✅ F4 | `04` §9.5 |
 
 ---

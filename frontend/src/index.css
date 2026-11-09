@@ -86,6 +86,12 @@
   }
 }
 
+/* iOS Safari hace zoom al enfocar un campo con letra menor a 16 px. Los componentes usan text-xs/text-sm
+   (clases, más específicas que este selector), de ahí el !important; solo en pantallas bajo `lg`. */
+@media (max-width: 1023px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+
 /* Premium custom scrollbar styles */
 ::-webkit-scrollbar {
   width: 8px;
