@@ -581,7 +581,7 @@ efectivos son por cuenta+IP; una IP compartida (por ejemplo, la de una oficina) 
 **Alternativas descartadas.** Redis (prohibido para esta feature, una pieza más que operar).
 Contadores en memoria de cada worker (el límite efectivo se multiplica por el número de
 workers). Bloqueo de la cuenta tras N fallos (permite denegación de servicio dirigida).
-Auditar lecturas (volumen sin requisito que lo pida).
+Auditar lecturas (volumen sin requisito que lo pida; única excepción: `vault.reveal`, ADR-021).
 
 ---
 
@@ -836,3 +836,162 @@ ediciones sin conexión: exige resolver conflictos y reautenticar al reenviar (l
 refresh); queda como fase 3 opcional. Cachear `/api` con Workbox en tiempo de ejecución: dejaría respuestas
 autenticadas (y credenciales de admin) en Cache Storage, sin la redacción por rol. `registerType: 'autoUpdate'`:
 recarga sin avisar y puede perder una edición en curso.
+
+---
+
+## ADR-021 · Acceso por recurso con concesiones explícitas; temas del portal y bóveda de credenciales
+
+**Estado:** 🧭 **propuesta** (2026-11-09), pendiente de aprobación. No hay código: todo lo que sigue es `🧭 DISEÑO`
+hasta que cada fase lo implemente y un test lo verifique. Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
+enmienda ADR-014 (una excepción de lectura auditable) y cierra la deuda que ADR-019 dejó abierta («los permisos
+por recurso se resuelven con el primer módulo que los necesite»).
+
+**Contexto.** El SLEP quiere **un** portal de recursos (tableros, planillas, aplicaciones) ordenado por área
+temática, con recursos que solo ven ciertas personas. La ficha del establecimiento necesita además una **bóveda**
+para credenciales (la clave SIGE y otras) que solo ven personas elegidas, del SLEP o del propio establecimiento.
+Después vendrán vistas de datos de finanzas, compras, personas, gestión territorial y mantenimiento, también
+restringidas por unidad.
+
+Hoy el acceso es **un rol por plataforma** (`access[]`, ADR-009): limita acciones, no filas ni recursos. Toda
+persona del SLEP tiene cuenta en el dominio de Google y, al entrar por primera vez, queda como `datos/viewer` sin
+unidad asignada (ADR-015, `google_service.py:105-120`). Por eso **tener rol en la plataforma no dice nada sobre
+quién debe ver un recurso protegido** (G4).
+
+**Decisión.**
+
+1. **Dos capas.** El rol por plataforma (ADR-009) sigue siendo la puerta de entrada. Encima, cada recurso del
+   portal tiene `visibility`:
+   - **`org`:** lo ve toda cuenta con acceso a `datos`, sin consultar concesiones.
+   - **`restricted`:** se abre solo con una **concesión explícita**. Sin concesión, lo ve solo `iam/admin`.
+
+   La bóveda es siempre `restricted` (no tiene campo). Ni el rol de plataforma, ni el dominio del correo, ni
+   `is_slep_staff` abren un recurso `restricted`. Los establecimientos y el tablero de matrícula **no** pasan por
+   esta capa: siguen la regla de ADR-009 §5 (los roles limitan acciones, no filas).
+2. **Módulo `access`**, dueño de la colección **`resource_grants`** (ADR-019). **En esta iteración la concesión es
+   solo por persona.** Cada documento tiene esta forma:
+
+   ```
+   { resource_type,          # "portal_resource" | "vault"
+     resource_id,            # id del recurso; "*" = todos los de ese tipo
+     subject_type,           # solo "user" por ahora (el servicio rechaza otro valor)
+     subject_id,             # id de la persona
+     granted_by, granted_at }
+   ```
+
+   El índice único es `(resource_type, resource_id, subject_type, subject_id)`. La concesión da **ver**: no hay
+   más permisos. `subject_type` se deja en el documento para que sumar `"unit"` no cambie el índice.
+3. **Una única función de decisión:** `access_service.can(user, resource_type, resource_id) -> bool`.
+   - Devuelve `true` si el recurso es `org`, si el usuario es `iam/admin`, o si existe una concesión para
+     `resource_id` o para `"*"` a nombre del usuario.
+   - Para las listas se usa `access_service.visible_ids(user, resource_type)`, en una sola consulta, sin N+1.
+   - Los controllers la usan como dependencia `require_grant(...)`. **El service no recibe el usuario** (L3):
+     recibe ids o booleanos, igual que hoy.
+   - Si algún día hace falta un motor de permisos, este es el único punto que cambia.
+4. **Quién concede.** Por ahora solo `iam/admin` crea y revoca concesiones, y cada cambio se audita
+   (`resource_grant.create` y `resource_grant.revoke`; `access.grant` ya significa «acceso a plataforma»). La
+   concesión necesita que la persona ya tenga cuenta, es decir, que haya entrado al menos una vez con Google.
+5. **Temas del portal.** El módulo `portal` es dueño de `portal_topics` (tema → subtema, **máximo dos
+   niveles**) y de `portal_resources` (enlace, plataforma detectada, unidad dueña, tema y el catastro con su
+   nivel B.4).
+   - **El tema sirve para ordenar, no para dar permisos.** Mover un recurso de tema no cambia quién lo ve.
+   - **`visibility` nace del catastro (política B.4):** `restricted` si el nivel es 2; `org` si es 0 o 1. El
+     administrador puede cambiarla al validar el recurso.
+   - **Regla de negocio: quien registra un recurso `restricted` recibe `ver` sobre él** en el mismo acto. Sin eso
+     el registrador no podría ver lo que acaba de registrar. Las demás personas se agregan después.
+   - **Aviso obligatorio en la interfaz.** Al guardar un registro nivel 2, el formulario dice que quedó
+     restringido, que **solo las personas autorizadas pueden verlo** y que **debe solicitarse a un administrador**
+     la autorización de quien deba verlo.
+   - **Límite del control:** la restricción del portal gobierna quién ve el **enlace**. Para un recurso externo
+     (planilla de Google, informe de Power BI) **no protege el recurso**: quien tenga la URL entra según los
+     permisos de Google o de Power BI. El formulario y el aviso del punto anterior lo dicen. Solo están
+     protegidos de verdad lo que sirve el propio sistema y la bóveda.
+   - Un tema no es una unidad: cada recurso tiene un tema (para mostrarlo) y una unidad dueña (la responsable).
+6. **Bóveda.** El módulo `vault` es dueño de `vault_credentials`. Cada credencial tiene esta forma:
+
+   ```
+   { rbd, name, username?, password_enc, url?, created_by, created_at, updated_by, updated_at }
+   ```
+
+   Cada establecimiento puede tener varias credenciales; SIGE es una más. Las reglas:
+   - **Acceso.** Se concede con `resource_type="vault"`, sobre `resource_id=<rbd>` (la bóveda de un
+     establecimiento) o sobre `"*"` (todas), siempre a personas. No hay concesiones por credencial.
+   - **Cifrado.** La contraseña se guarda cifrada con Fernet (`cryptography`), usando la llave de la variable
+     **`VAULT_KEY`**. Es obligatoria y **no tiene valor por defecto** (`config._required`, sin repetir D2). Una
+     llave inválida detiene el arranque. La llave vive en el mismo servidor que la base (decisión del
+     responsable, 2026-11-09): protege ante una filtración de la base o de un respaldo, **no** ante quien tenga
+     acceso al servidor.
+   - **Respuestas.** Ninguna respuesta incluye la contraseña, salvo `POST …/{id}/reveal`, que sale con
+     `Cache-Control: no-store`. Las listas, el `POST` y el `PUT` devuelven `has_password: true`.
+   - **Log de cambios.** Se registran las acciones `vault.create`, `vault.update` y `vault.delete`. El campo de
+     contraseña se registra solo como «cambió», nunca con su valor, y no se guardan contraseñas antiguas.
+   - **`vault.reveal`: única excepción de lectura auditable** (enmienda ADR-014, que descartó auditar
+     lecturas). Se audita porque es la **entrega real del dato**: lo que importa no es que alguien abra la ficha,
+     sino que reciba el secreto. El registro lleva quién, qué credencial (`rbd` y `name`) y cuándo, nunca el
+     valor. **Falla cerrado:** el registro se escribe **antes** de devolver la contraseña; si la escritura falla,
+     la respuesta es `503` y la contraseña no sale. Es la inversa de ADR-014 para escrituras («no se revierte»),
+     y se justifica porque aquí lo que se protege es la confidencialidad, y la disponibilidad pierde: sin
+     auditoría no hay entrega.
+   - **Límite de revelaciones.** Se reutiliza el limitador de ADR-014 (`rate_guard`, `rate_hit`; `rate_limits`
+     con TTL, sin Redis). La clave es `rate_key("vault_reveal", user_id)`: **por persona, no por IP** (ya está
+     autenticada, y la IP de una oficina es compartida). **Ventana fija de 1 h, 100 revelaciones por persona.**
+     Se cuenta cada revelación, también la repetida de una misma credencial. Orden en el endpoint: `can()` →
+     `rate_guard` → registro de auditoría → `rate_hit` → entrega. Al exceder responde `429` con `Retry-After`.
+     El límite **frena y deja huella**, no impide: una cuenta con acceso a `"*"` y comprometida tardaría horas,
+     no minutos, en volcar todo, y cada paso queda en `audit_log`. Verificar 21 establecimientos con unas tres
+     credenciales cada uno son unas 63 revelaciones, dentro del límite.
+   - **Sin conexión.** La bóveda no entra en el snapshot de la PWA (ADR-020).
+7. **Rutas.** Los routers nuevos van bajo `/api/v1/` (primer paso para D10); los existentes no se tocan:
+   - `/api/v1/access/grants`
+   - `/api/v1/portal/...`
+   - `/api/v1/establishments/{rbd}/vault`
+
+**Diferido (registrado, no implementado).**
+- **Permiso `manage`:** permitir que alguien, además del `iam/admin`, gestione un recurso (editarlo y decidir
+  quién más lo ve). Se suma como un segundo tipo de concesión sin tocar `can()` para `ver`.
+- **Concesión por unidad y subunidad:** se activa cuando exista el registro de todas las personas con su unidad
+  (hoy las cuentas de Google entran sin unidad, ADR-015). Se agrega `subject_type: "unit"` y un campo
+  `include_subunits` que use `units.ancestors` (ADR-010). Es lo que habilita las vistas por unidad (finanzas,
+  compras, personas, gestión territorial, mantenimiento): cada vista es un `resource_type` nuevo.
+
+**Consecuencias.**
+- **Nuevas colecciones:** `resource_grants`, `portal_topics`, `portal_resources` y `vault_credentials`. Se agregan
+  a `02`, al mapa de dueños de `test_BE63` y, con sus aristas (`portal → access`, `vault → access`,
+  `vault → audit`, `vault → auth` por `rate_guard`), a `test_BE45`. `AuditTarget` suma `vault` y
+  `resource_grant`; `AuditAction`, las cinco acciones nuevas.
+- **Regla 3 de despliegue:**
+  - Dependencia nueva `cryptography`, que obliga a reconstruir la imagen del backend.
+  - Variable nueva `VAULT_KEY` en `.env.production.template` y en los dos `docker-compose*.yml` (con
+    `:?`, como `GOOGLE_AUTO_PROVISION`).
+- **La llave es un único punto de pérdida.** Sin `VAULT_KEY`, las credenciales no se pueden recuperar. El
+  respaldo de la llave va aparte del respaldo de Mongo (`07`). La rotación con `MultiFernet` queda diferida:
+  `shortcut: una sola llave, rotar cuando se sospeche filtración o cambie el custodio`.
+- **Conceder exige que la cuenta exista:** la persona tiene que haber entrado al menos una vez con Google.
+- **Frontend.** La pestaña Bóveda se muestra si `GET …/vault` responde `200` y se oculta si responde `403`.
+  Ocultar es comodidad: el servidor es la única barrera. La interfaz muestra «Alcanzaste el límite de
+  revelaciones; vuelve en X min» ante un `429`.
+- **Tests mínimos:**
+  - Matriz de `can()`: `org`, `restricted` sin concesión, con concesión a la persona, con `"*"`, `iam/admin`.
+  - El registrador de un recurso `restricted` lo ve de inmediato; otra persona sin concesión no.
+  - La contraseña nunca aparece en las listas, en el `PUT` ni en `audit_log`.
+  - `reveal` sin concesión responde `403`; con concesión queda auditado; si la auditoría falla, responde `503`
+    y no devuelve la contraseña; la revelación 101 de la hora responde `429`.
+  - Arrancar sin `VAULT_KEY` falla.
+- **Fases:**
+  1. `access` y la gestión de concesiones por persona.
+  2. `vault`, que es el caso más chico y el más sensible, y prueba el núcleo de acceso.
+  3. `portal`.
+  4. Concesión por unidad y subunidad, y vistas por unidad.
+
+**Alternativas descartadas.**
+- **OpenFGA, Zanzibar, OPA o casbin:** para unas 15 unidades y decenas de recursos, una colección y una función
+  bastan; el punto 3 deja abierta la salida.
+- **Permisos dentro del tema:** acopla orden con acceso, y mover un recurso de tema cambiaría quién lo ve.
+- **Ocultar por rol, como `ssid_password`:** la bóveda necesita una lista de personas, no un nivel de rol.
+- **Concesiones por credencial:** nadie las ha pedido; se pueden agregar como alcance.
+- **Guardar las contraseñas antiguas:** un segundo depósito de secretos sin requisito que lo pida.
+- **Auditar toda lectura de la bóveda (abrir la ficha, listar):** volumen sin valor; la entrega del secreto es
+  el único evento que importa.
+- **Cifrado en el cliente o un gestor externo** (Vault de HashiCorp, Bitwarden): más infraestructura que operar
+  para unas pocas centenas de credenciales. Si TI no acepta la llave en el servidor, esta decisión se reabre.
+- **Mover `ssid_password` y las credenciales de impresoras a la bóveda:** se confirmaron de uso público
+  (ADR-009, punto 4).
