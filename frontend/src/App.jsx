@@ -14,6 +14,7 @@ import RequireAccess from './components/RequireAccess';
 import SetPassword from './components/SetPassword';
 import UsersPage from './components/users/UsersPage';
 import AccessGrantsPage from './components/access/AccessGrantsPage';
+import PortalPage from './components/portal/PortalPage';
 import { Toaster } from '@/components/ui/sonner';
 
 /**
@@ -109,6 +110,11 @@ export default function App() {
           <Route path="/dashboard"                          element={<Navigate to="/tableros/matricula" replace />} />
           <Route path="/establecimientos"                   element={<Directory />} />
           <Route path="/establecimientos/:rbd"              element={<FichaEstablecimiento currentUser={currentUser} />} />
+
+          {/* Portal: cualquier cuenta con lectura en `datos`; qué recursos ve cada una lo decide el backend (ADR-021). */}
+          <Route element={<RequireAccess currentUser={currentUser} platform="datos" capability="read" />}>
+            <Route path="/portal" element={<PortalPage currentUser={currentUser} />} />
+          </Route>
 
           {/* Editar exige la capacidad `write` en `datos`; el backend la vuelve a exigir en cada PUT. */}
           <Route element={<RequireAccess currentUser={currentUser} platform="datos" capability="write"

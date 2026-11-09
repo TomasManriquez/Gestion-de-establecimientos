@@ -77,7 +77,7 @@ son correctas *a esta escala* y dejan de serlo un orden de magnitud más arriba.
 | Entender cómo se conectarán otras plataformas (`selloverde`) | `04` §10 |
 | Configurar el correo de invitaciones (SMTP; alternativa Gmail API) | `07` §9, ADR-017 |
 | Entender la app móvil instalable (PWA) y el modo offline | `06` ADR-020, `01` §8, `07` §12 |
-| Proteger un recurso por unidad o persona (portal, bóveda, vistas por unidad) — ✅ fases 1-2 (concesiones, bóveda con pestaña y pantalla de accesos), portal 🧭 | `06` ADR-021, `03` §8.5-8.6 |
+| Proteger un recurso por unidad o persona (portal, bóveda, vistas por unidad) — ✅ fases 1-3 (concesiones, bóveda, portal con temas y recursos), unidades 🧭 | `06` ADR-021, `03` §8.5-8.7 |
 
 ---
 

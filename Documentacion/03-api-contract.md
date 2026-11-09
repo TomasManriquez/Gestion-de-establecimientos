@@ -730,3 +730,23 @@ separado está diferido). Modelo en `02` §9.9.2.
 
 `reveal` sigue este orden: permiso → `rate_guard` → registro `vault.reveal` en `audit_log` → `rate_hit` → entrega.
 Ninguna otra ruta devuelve la contraseña.
+
+### 8.7 ✅ `/api/v1/portal` — temas y recursos del portal (ADR-021 fase 3)
+
+Lectura: cuenta con rol de lectura en `datos`. Escribir recursos: `datos` con `write`. Temas: solo `iam/admin`.
+Un recurso `restricted` que la persona no puede ver responde `404` (igual que uno inexistente) y no aparece en las
+listas. Modelo en `02` §9.9.3.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/api/v1/portal/topics` | `200` lista plana `{_id, name, parent_id}` |
+| POST | `…/topics` | `201`. Body `{name, parent_id?}`. `404` padre inexistente; `422` si el padre ya tiene padre |
+| PUT | `…/topics/{id}` | `200`. Body `{name}`. `404` |
+| DELETE | `…/topics/{id}` | `204`. `409` si tiene subtemas o recursos; `404` |
+| GET | `…/resources` | `200`. Los `org` más los `restricted` con concesión (todos, para `iam/admin`) |
+| GET | `…/resources/{id}` | `200`, o `404` si no existe o no puede verlo |
+| POST | `…/resources` | `201`. Body `{title, url, description?, topic_id, unit_id?, catastro_level}` (`url` solo `http(s)`; `422` si el tema o la unidad no existen). Si queda `restricted` y quien registra no es admin, recibe `ver` en el mismo acto |
+| PUT | `…/resources/{id}` | `200`. Solo `iam/admin` o quien lo registró (`403` otra persona); `visibility` solo `iam/admin` (`403`) |
+| DELETE | `…/resources/{id}` | `204`. Mismas reglas que `PUT`; borra también las concesiones del recurso |
+
+La restricción gobierna quién ve el **enlace**: no protege la planilla o el informe externo (ADR-021 §5).

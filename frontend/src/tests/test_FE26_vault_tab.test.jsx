@@ -79,7 +79,7 @@ describe('FE26: pantalla de accesos', () => {
     axios.delete.mockResolvedValue({});
     render(<MemoryRouter><AccessGrantsPage /></MemoryRouter>);
     await screen.findByText('Vera Lectura');
-    await screen.findByText('LICEO PV · RBD 7722');
+    await screen.findByText('Bóveda · LICEO PV · RBD 7722');
     fireEvent.click(screen.getByRole('button', { name: /Revocar acceso de Vera Lectura/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Revocar' }));
     await waitFor(() => expect(axios.delete).toHaveBeenCalledWith('/api/v1/access/grants/g1'));

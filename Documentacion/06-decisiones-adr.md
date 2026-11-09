@@ -841,8 +841,8 @@ recarga sin avisar y puede perder una edición en curso.
 
 ## ADR-021 · Acceso por recurso con concesiones explícitas; temas del portal y bóveda de credenciales
 
-**Estado:** aceptada (2026-11-09). ✅ **Fases 1 y 2 implementadas** (módulos `access` y `vault`, `/api/v1/access/grants` y
-`/api/v1/establishments/{rbd}/vault`, `test_BE64_*` y `test_BE65_*`; la pestaña Bóveda de la ficha y `/configuracion/accesos` también (`test_FE26_*`); el portal sigue en `🧭 DISEÑO`). Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
+**Estado:** aceptada (2026-11-09). ✅ **Fases 1, 2 y 3 implementadas** (módulos `access`, `vault` y `portal`, `/api/v1/access/grants` y
+`/api/v1/establishments/{rbd}/vault`, `test_BE64_*` y `test_BE65_*`; la pestaña Bóveda de la ficha y `/configuracion/accesos` también (`test_FE26_*`); el portal en `/api/v1/portal` y `/portal` (`test_BE66_*`, `test_FE27_*`)). Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
 enmienda ADR-014 (una excepción de lectura auditable) y cierra la deuda que ADR-019 dejó abierta («los permisos
 por recurso se resuelven con el primer módulo que los necesite»).
 

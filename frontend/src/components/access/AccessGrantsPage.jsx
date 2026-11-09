@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
 import EstablishmentCombobox from '@/components/users/EstablishmentCombobox';
-import { establishmentsApi, grantsApi, parseApiError, usersApi } from '@/lib/api';
+import { establishmentsApi, grantsApi, parseApiError, portalApi, usersApi } from '@/lib/api';
 import { fullNameOf } from '@/lib/format';
 
 const ALL = '*';
@@ -71,8 +71,11 @@ export default function AccessGrantsPage() {
   const [grants, setGrants] = useState(null);
   const [people, setPeople] = useState({});
   const [establishments, setEstablishments] = useState([]);
+  const [portalResources, setPortalResources] = useState([]);
   const [error, setError] = useState('');
 
+  const [kind, setKind] = useState('vault');            // 'vault' | 'portal_resource'
+  const [resourceId, setResourceId] = useState('');
   const [person, setPerson] = useState(null);
   const [allVaults, setAllVaults] = useState(false);
   const [rbd, setRbd] = useState('');
@@ -81,7 +84,7 @@ export default function AccessGrantsPage() {
 
   const load = useCallback(async () => {
     try {
-      const list = await grantsApi.list({ resource_type: 'vault' });
+      const list = await grantsApi.list();
       const ids = [...new Set(list.map((g) => g.subject_id))];
       const found = await Promise.all(ids.map((id) => usersApi.get(id).catch(() => null)));
       setPeople(Object.fromEntries(found.filter(Boolean).map((u) => [u._id, u])));
@@ -95,22 +98,30 @@ export default function AccessGrantsPage() {
   useEffect(() => {
     load();
     establishmentsApi.all().then(setEstablishments).catch(() => {});
+    portalApi.resources().then((r) => setPortalResources(r.filter((x) => x.visibility === 'restricted'))).catch(() => {});
   }, [load]);
 
-  const resourceLabel = (id) => (id === ALL ? 'Todas las bóvedas' : (() => {
-    const e = establishments.find((x) => x.rbd === id);
-    return e ? `${e.name} · RBD ${e.rbd}` : `RBD ${id}`;
-  })());
+  const resourceLabel = (g) => {
+    if (g.resource_type === 'portal_resource') {
+      if (g.resource_id === ALL) return 'Portal · todos los recursos restringidos';
+      return `Portal · ${portalResources.find((x) => x._id === g.resource_id)?.title ?? 'recurso eliminado'}`;
+    }
+    if (g.resource_id === ALL) return 'Todas las bóvedas';
+    const e = establishments.find((x) => x.rbd === g.resource_id);
+    return e ? `Bóveda · ${e.name} · RBD ${e.rbd}` : `Bóveda · RBD ${g.resource_id}`;
+  };
 
-  const canSave = person && (allVaults || rbd);
+  const target = kind === 'vault' ? rbd : resourceId;
+  const canSave = person && (allVaults || target);
 
   const grant = async () => {
     setSaving(true);
     try {
-      await grantsApi.create({ resource_type: 'vault', resource_id: allVaults ? ALL : rbd, user_id: person._id });
+      await grantsApi.create({ resource_type: kind, resource_id: allVaults ? ALL : target, user_id: person._id });
       toast.success(`${fullNameOf(person)} ahora tiene acceso`);
       setPerson(null);
       setRbd('');
+      setResourceId('');
       await load();
     } catch (err) {
       const e = parseApiError(err);
@@ -134,9 +145,9 @@ export default function AccessGrantsPage() {
   return (
     <div className="space-y-6 font-sans">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-extrabold font-outfit text-slate-800"><ShieldCheck aria-hidden="true" />Accesos a la bóveda</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-extrabold font-outfit text-slate-800"><ShieldCheck aria-hidden="true" />Accesos a recursos restringidos</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Solo las personas de esta lista ven las claves de un establecimiento. Ni el rol en Datos ni el correo del dominio dan acceso. Cada alta y baja queda registrada.
+          Solo las personas de esta lista ven las claves de un establecimiento o un recurso restringido del portal. Ni el rol en Datos ni el correo del dominio dan acceso. Cada alta y baja queda registrada.
         </p>
       </div>
 
@@ -146,14 +157,32 @@ export default function AccessGrantsPage() {
             <FieldLabel htmlFor="grant-person">Persona</FieldLabel>
             <PersonPicker value={person} onChange={setPerson} />
           </Field>
+          <Field>
+            <FieldLabel htmlFor="grant-kind">Qué se concede</FieldLabel>
+            <select id="grant-kind" value={kind} onChange={(e) => { setKind(e.target.value); setAllVaults(false); }}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-base">
+              <option value="vault">Bóveda de claves de un establecimiento</option>
+              <option value="portal_resource">Recurso restringido del portal</option>
+            </select>
+          </Field>
           <Field orientation="horizontal" className="items-center justify-between rounded-xl border p-3">
-            <FieldLabel htmlFor="grant-all">Todas las bóvedas (los 78 establecimientos)</FieldLabel>
+            <FieldLabel htmlFor="grant-all">{kind === 'vault' ? 'Todas las bóvedas (los 78 establecimientos)' : 'Todos los recursos restringidos del portal'}</FieldLabel>
             <Switch id="grant-all" checked={allVaults} onCheckedChange={setAllVaults} />
           </Field>
-          {!allVaults && (
+          {!allVaults && kind === 'vault' && (
             <Field>
               <FieldLabel htmlFor="grant-rbd">Establecimiento</FieldLabel>
               <EstablishmentCombobox id="grant-rbd" establishments={establishments} value={rbd} onChange={setRbd} />
+            </Field>
+          )}
+          {!allVaults && kind === 'portal_resource' && (
+            <Field>
+              <FieldLabel htmlFor="grant-resource">Recurso restringido</FieldLabel>
+              <select id="grant-resource" value={resourceId} onChange={(e) => setResourceId(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-base">
+                <option value="" disabled>Elige un recurso</option>
+                {portalResources.map((r) => <option key={r._id} value={r._id}>{r.title}</option>)}
+              </select>
             </Field>
           )}
           <Button type="button" disabled={!canSave || saving} onClick={grant} className="self-start">
@@ -165,17 +194,17 @@ export default function AccessGrantsPage() {
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
 
       {grants && (grants.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nadie tiene acceso a ninguna bóveda todavía (salvo los admin globales).</p>
+        <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nadie tiene acceso concedido todavía (salvo los admin globales).</p>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
           {grants.map((g) => (
             <li key={g._id} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <p className="truncate font-semibold text-slate-800">{people[g.subject_id] ? fullNameOf(people[g.subject_id]) : `Cuenta ${g.subject_id}`}</p>
-                <p className="truncate text-sm text-slate-500">{resourceLabel(g.resource_id)}</p>
+                <p className="truncate text-sm text-slate-500">{resourceLabel(g)}</p>
               </div>
               <Button type="button" variant="ghost" size="icon" onClick={() => setToRevoke(g)}
-                aria-label={`Revocar acceso de ${people[g.subject_id] ? fullNameOf(people[g.subject_id]) : g.subject_id} a ${resourceLabel(g.resource_id)}`}>
+                aria-label={`Revocar acceso de ${people[g.subject_id] ? fullNameOf(people[g.subject_id]) : g.subject_id} a ${resourceLabel(g)}`}>
                 <Trash2 size={16} />
               </Button>
             </li>
@@ -188,7 +217,7 @@ export default function AccessGrantsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Revocar este acceso?</AlertDialogTitle>
             <AlertDialogDescription>
-              {toRevoke && `${people[toRevoke.subject_id] ? fullNameOf(people[toRevoke.subject_id]) : 'La persona'} dejará de ver ${resourceLabel(toRevoke.resource_id)} en su próxima petición.`}
+              {toRevoke && `${people[toRevoke.subject_id] ? fullNameOf(people[toRevoke.subject_id]) : 'La persona'} dejará de ver ${resourceLabel(toRevoke)} en su próxima petición.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { BarChart3, Building2, LogOut, User, Users, ChevronLeft, ShieldCheck } from 'lucide-react';
+import { BarChart3, Building2, LogOut, User, Users, ChevronLeft, Library, ShieldCheck } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -61,6 +61,9 @@ function BottomNav({ pathname, admin }) {
       </NavLink>
       <NavLink to="/establecimientos" className={({ isActive }) => tab(isActive || pathname.startsWith('/establecimientos/'))}>
         <Building2 size={20} aria-hidden="true" />Directorio
+      </NavLink>
+      <NavLink to="/portal" className={({ isActive }) => tab(isActive)}>
+        <Library size={20} aria-hidden="true" />Portal
       </NavLink>
       {admin && (
         <NavLink to="/configuracion/usuarios" className={({ isActive }) => tab(isActive)}>
@@ -192,6 +195,13 @@ export default function AppLayout({ currentUser, onLogout }) {
                 >
                   <span className={SLOT}><Building2 size={18} /></span>
                   <span className={`whitespace-nowrap ${fade}`} aria-hidden={collapsed}>Directorio de Recintos</span>
+                </NavLink>
+              </RailTip>
+
+              <RailTip collapsed={collapsed} label="Portal de recursos">
+                <NavLink to="/portal" className={navClass()} aria-label="Portal de recursos">
+                  <span className={SLOT}><Library size={18} /></span>
+                  <span className={`whitespace-nowrap ${fade}`} aria-hidden={collapsed}>Portal de recursos</span>
                 </NavLink>
               </RailTip>
 

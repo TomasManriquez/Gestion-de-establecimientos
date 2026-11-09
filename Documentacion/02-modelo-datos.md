@@ -933,6 +933,26 @@ se guardan contraseñas antiguas. Índice `(rbd)`. Cambios auditados como `vault
 `vault.reveal` (objetivo `vault`, `target_id` = id de la credencial); el log lleva `rbd`, `name` y los campos
 visibles que cambiaron, y de la contraseña solo `password_changed: true`.
 
+### 9.9.3 ✅ `portal_topics` y `portal_resources` (propiedad de `portal`, ADR-021 fase 3)
+
+```json
+// portal_topics
+{"_id":"ObjectId","name":"string","parent_id":"id del tema padre | null"}
+// portal_resources
+{"_id":"ObjectId","title":"string","url":"http(s)://…","description":"string | null","platform":"string",
+ "topic_id":"id","unit_id":"id | null","catastro_level":"0 | 1 | 2","visibility":"org | restricted",
+ "created_by":"id","created_at":"ISODate","updated_by":"id","updated_at":"ISODate"}
+```
+
+Los temas tienen **dos niveles** (el padre no puede tener padre) y un tema con subtemas o recursos no se borra.
+`platform` se detecta del host de la URL al guardar (tabla fija en `portal_service._PLATFORMS`; otro host se
+muestra tal cual). `visibility` nace del `catastro_level`: `restricted` si es 2, `org` si es 0 o 1; subir el nivel
+a 2 restringe sin esperar al administrador, y solo `iam/admin` cambia `visibility` directamente. `unit_id` es la
+unidad responsable y no da permisos. Quién ve un recurso `restricted` lo deciden las concesiones
+`resource_type="portal_resource"` de `resource_grants` (§9.9.1); al borrar el recurso se borran sus concesiones.
+Índices: `portal_topics(parent_id)` y `portal_resources(topic_id)`. Auditoría: `portal_topic.*` y
+`portal_resource.*` (`create|update|delete`).
+
 ### 9.10 ✅ Migración del admin sembrado
 
 Hoy el único usuario es `{username, hashed_password, full_name, role}` (§6) y no tiene correo.

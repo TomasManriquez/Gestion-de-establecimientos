@@ -98,6 +98,16 @@ export const vaultApi = {
   reveal: (rbd, id) => axios.post(`/api/v1/establishments/${rbd}/vault/${id}/reveal`).then((r) => r.data.password),
 };
 
+/** Portal de recursos (ADR-021): temas de dos niveles y recursos con visibilidad `org` / `restricted`. */
+export const portalApi = {
+  topics: () => axios.get('/api/v1/portal/topics').then(data),
+  createTopic: (body) => axios.post('/api/v1/portal/topics', body).then(data),
+  resources: () => axios.get('/api/v1/portal/resources').then(data),
+  createResource: (body) => axios.post('/api/v1/portal/resources', body).then(data),
+  updateResource: (id, body) => axios.put(`/api/v1/portal/resources/${id}`, body).then(data),
+  removeResource: (id) => axios.delete(`/api/v1/portal/resources/${id}`).then(() => undefined),
+};
+
 /** Concesiones por recurso (ADR-021): solo `iam/admin`. */
 export const grantsApi = {
   list: (params) => axios.get(`/api/v1/access/grants`, { params }).then(data),
