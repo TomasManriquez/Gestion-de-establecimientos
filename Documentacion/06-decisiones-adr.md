@@ -841,7 +841,7 @@ recarga sin avisar y puede perder una edición en curso.
 
 ## ADR-021 · Acceso por recurso con concesiones explícitas; temas del portal y bóveda de credenciales
 
-**Estado:** aceptada (2026-11-09). ✅ **Fases 1, 2 y 3 implementadas** (módulos `access`, `vault` y `portal`, `/api/v1/access/grants` y
+**Estado:** aceptada (2026-11-09). ✅ **Fases 1 a 4 implementadas** (la 4: solo la concesión por unidad; el permiso `manage` y las vistas por unidad siguen diferidos) (módulos `access`, `vault` y `portal`, `/api/v1/access/grants` y
 `/api/v1/establishments/{rbd}/vault`, `test_BE64_*` y `test_BE65_*`; la pestaña Bóveda de la ficha y `/configuracion/accesos` también (`test_FE26_*`); el portal en `/api/v1/portal` y `/portal` (`test_BE66_*`, `test_FE27_*`)). Enmienda ADR-009 (punto 5, `ScopeFilter` diferido),
 enmienda ADR-014 (una excepción de lectura auditable) y cierra la deuda que ADR-019 dejó abierta («los permisos
 por recurso se resuelven con el primer módulo que los necesite»).
@@ -952,10 +952,15 @@ quién debe ver un recurso protegido** (G4).
 **Diferido (registrado, no implementado).**
 - **Permiso `manage`:** permitir que alguien, además del `iam/admin`, gestione un recurso (editarlo y decidir
   quién más lo ve). Se suma como un segundo tipo de concesión sin tocar `can()` para `ver`.
-- **Concesión por unidad y subunidad:** se activa cuando exista el registro de todas las personas con su unidad
-  (hoy las cuentas de Google entran sin unidad, ADR-015). Se agrega `subject_type: "unit"` y un campo
-  `include_subunits` que use `units.ancestors` (ADR-010). Es lo que habilita las vistas por unidad (finanzas,
-  compras, personas, gestión territorial, mantenimiento): cada vista es un `resource_type` nuevo.
+- **Vistas por unidad** (finanzas, compras, personas, gestión territorial, mantenimiento): cada vista es un
+  `resource_type` nuevo que se suma a `ResourceType` y reutiliza `can()`. No hay ninguna construida todavía.
+
+**Concesión por unidad y subunidad (✅ implementada, fase 4).** `subject_type: "unit"` con `include_subunits`.
+`can()` y `visible_ids()` reciben `unit_id` (el de la persona, que el controller toma de su cuenta; el service
+sigue sin recibir al usuario, L3) y la cubren si existe una concesión a su unidad, o a una ancestra con
+`include_subunits` (`units.ancestors`, ADR-010). Una cuenta sin unidad (las de Google entran así, ADR-015) no
+queda cubierta por ninguna concesión de unidad: hasta que cada persona tenga su unidad asignada, la
+concesión por unidad solo alcanza a quien ya la tenga. Nuevo arista `access → units`.
 
 **Consecuencias.**
 - **Nuevas colecciones:** `resource_grants`, `portal_topics`, `portal_resources` y `vault_credentials`. Se agregan
@@ -984,7 +989,7 @@ quién debe ver un recurso protegido** (G4).
   1. `access` y la gestión de concesiones por persona.
   2. `vault`, que es el caso más chico y el más sensible, y prueba el núcleo de acceso.
   3. `portal`.
-  4. Concesión por unidad y subunidad, y vistas por unidad.
+  4. Concesión por unidad y subunidad ✅; vistas por unidad (a medida que existan) y `manage` diferidos.
 
 **Alternativas descartadas.**
 - **OpenFGA, Zanzibar, OPA o casbin:** para unas 15 unidades y decenas de recursos, una colección y una función

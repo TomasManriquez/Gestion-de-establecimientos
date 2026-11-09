@@ -13,7 +13,9 @@ _IAM_ADMIN = Depends(require_access(PLATFORM_IAM, IAM_ADMIN))
 
 _ERRORS = {"user_not_found": (status.HTTP_404_NOT_FOUND, "La persona no existe"),
            "user_not_active": (status.HTTP_422_UNPROCESSABLE_ENTITY, "La cuenta no está activa"),
-           "already_granted": (status.HTTP_409_CONFLICT, "La persona ya tiene esa concesión")}
+           "unit_not_found": (status.HTTP_404_NOT_FOUND, "La unidad no existe"),
+           "unit_not_active": (status.HTTP_422_UNPROCESSABLE_ENTITY, "La unidad no está activa"),
+           "already_granted": (status.HTTP_409_CONFLICT, "Ya existe esa concesión")}
 
 
 @router.get("", response_model=List[Grant])

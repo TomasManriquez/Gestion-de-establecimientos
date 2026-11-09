@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
 import EstablishmentCombobox from '@/components/users/EstablishmentCombobox';
-import { establishmentsApi, grantsApi, parseApiError, portalApi, usersApi } from '@/lib/api';
+import { establishmentsApi, grantsApi, parseApiError, portalApi, unitsApi, usersApi } from '@/lib/api';
 import { fullNameOf } from '@/lib/format';
 
 const ALL = '*';
@@ -72,10 +72,14 @@ export default function AccessGrantsPage() {
   const [people, setPeople] = useState({});
   const [establishments, setEstablishments] = useState([]);
   const [portalResources, setPortalResources] = useState([]);
+  const [units, setUnits] = useState([]);
   const [error, setError] = useState('');
 
   const [kind, setKind] = useState('vault');            // 'vault' | 'portal_resource'
   const [resourceId, setResourceId] = useState('');
+  const [subject, setSubject] = useState('person');   // 'person' | 'unit'
+  const [unitId, setUnitId] = useState('');
+  const [includeSubunits, setIncludeSubunits] = useState(true);
   const [person, setPerson] = useState(null);
   const [allVaults, setAllVaults] = useState(false);
   const [rbd, setRbd] = useState('');
@@ -85,7 +89,7 @@ export default function AccessGrantsPage() {
   const load = useCallback(async () => {
     try {
       const list = await grantsApi.list();
-      const ids = [...new Set(list.map((g) => g.subject_id))];
+      const ids = [...new Set(list.filter((g) => g.subject_type !== 'unit').map((g) => g.subject_id))];
       const found = await Promise.all(ids.map((id) => usersApi.get(id).catch(() => null)));
       setPeople(Object.fromEntries(found.filter(Boolean).map((u) => [u._id, u])));
       setGrants(list);
@@ -98,8 +102,17 @@ export default function AccessGrantsPage() {
   useEffect(() => {
     load();
     establishmentsApi.all().then(setEstablishments).catch(() => {});
+    unitsApi.list({ status: 'active' }).then((u) => setUnits(Array.isArray(u) ? u : (u?.items ?? []))).catch(() => {});
     portalApi.resources().then((r) => setPortalResources(r.filter((x) => x.visibility === 'restricted'))).catch(() => {});
   }, [load]);
+
+  const subjectName = (g) => {
+    if (g.subject_type === 'unit') {
+      const u = units.find((x) => x._id === g.subject_id);
+      return `Unidad ${u?.name ?? g.subject_id}${g.include_subunits ? ' y sus subunidades' : ''}`;
+    }
+    return people[g.subject_id] ? fullNameOf(people[g.subject_id]) : `Cuenta ${g.subject_id}`;
+  };
 
   const resourceLabel = (g) => {
     if (g.resource_type === 'portal_resource') {
@@ -112,20 +125,22 @@ export default function AccessGrantsPage() {
   };
 
   const target = kind === 'vault' ? rbd : resourceId;
-  const canSave = person && (allVaults || target);
+  const canSave = (subject === 'person' ? person : unitId) && (allVaults || target);
 
   const grant = async () => {
     setSaving(true);
     try {
-      await grantsApi.create({ resource_type: kind, resource_id: allVaults ? ALL : target, user_id: person._id });
-      toast.success(`${fullNameOf(person)} ahora tiene acceso`);
+      const who = subject === 'person' ? { user_id: person._id } : { unit_id: unitId, include_subunits: includeSubunits };
+      await grantsApi.create({ resource_type: kind, resource_id: allVaults ? ALL : target, ...who });
+      toast.success(subject === 'person' ? `${fullNameOf(person)} ahora tiene acceso` : 'La unidad ahora tiene acceso');
       setPerson(null);
+      setUnitId('');
       setRbd('');
       setResourceId('');
       await load();
     } catch (err) {
       const e = parseApiError(err);
-      toast.error(e.status === 409 ? 'Esa persona ya tiene ese acceso.' : e.message);
+      toast.error(e.status === 409 ? 'Ese acceso ya existe.' : e.message);
     } finally {
       setSaving(false);
     }
@@ -147,16 +162,42 @@ export default function AccessGrantsPage() {
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-extrabold font-outfit text-slate-800"><ShieldCheck aria-hidden="true" />Accesos a recursos restringidos</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Solo las personas de esta lista ven las claves de un establecimiento o un recurso restringido del portal. Ni el rol en Datos ni el correo del dominio dan acceso. Cada alta y baja queda registrada.
+          Solo las personas y unidades de esta lista ven las claves de un establecimiento o un recurso restringido del portal. Ni el rol en Datos ni el correo del dominio dan acceso. Cada alta y baja queda registrada.
         </p>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor="grant-person">Persona</FieldLabel>
-            <PersonPicker value={person} onChange={setPerson} />
+            <FieldLabel htmlFor="grant-subject">A quién</FieldLabel>
+            <select id="grant-subject" value={subject} onChange={(e) => setSubject(e.target.value)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-base">
+              <option value="person">Una persona</option>
+              <option value="unit">Una unidad</option>
+            </select>
           </Field>
+          {subject === 'person' ? (
+            <Field>
+              <FieldLabel htmlFor="grant-person">Persona</FieldLabel>
+              <PersonPicker value={person} onChange={setPerson} />
+            </Field>
+          ) : (
+            <>
+              <Field>
+                <FieldLabel htmlFor="grant-unit">Unidad</FieldLabel>
+                <select id="grant-unit" value={unitId} onChange={(e) => setUnitId(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-base">
+                  <option value="" disabled>Elige una unidad</option>
+                  {units.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
+                </select>
+              </Field>
+              <Field orientation="horizontal" className="items-center justify-between rounded-xl border p-3">
+                <FieldLabel htmlFor="grant-sub">Incluir sus subunidades</FieldLabel>
+                <Switch id="grant-sub" checked={includeSubunits} onCheckedChange={setIncludeSubunits} />
+              </Field>
+              <p className="text-sm text-slate-500">Cubre a quienes tengan esa unidad asignada en su cuenta. Las cuentas sin unidad no quedan cubiertas.</p>
+            </>
+          )}
           <Field>
             <FieldLabel htmlFor="grant-kind">Qué se concede</FieldLabel>
             <select id="grant-kind" value={kind} onChange={(e) => { setKind(e.target.value); setAllVaults(false); }}
@@ -200,11 +241,11 @@ export default function AccessGrantsPage() {
           {grants.map((g) => (
             <li key={g._id} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
-                <p className="truncate font-semibold text-slate-800">{people[g.subject_id] ? fullNameOf(people[g.subject_id]) : `Cuenta ${g.subject_id}`}</p>
+                <p className="truncate font-semibold text-slate-800">{subjectName(g)}</p>
                 <p className="truncate text-sm text-slate-500">{resourceLabel(g)}</p>
               </div>
               <Button type="button" variant="ghost" size="icon" onClick={() => setToRevoke(g)}
-                aria-label={`Revocar acceso de ${people[g.subject_id] ? fullNameOf(people[g.subject_id]) : g.subject_id} a ${resourceLabel(g)}`}>
+                aria-label={`Revocar acceso de ${subjectName(g)} a ${resourceLabel(g)}`}>
                 <Trash2 size={16} />
               </Button>
             </li>
@@ -217,7 +258,7 @@ export default function AccessGrantsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Revocar este acceso?</AlertDialogTitle>
             <AlertDialogDescription>
-              {toRevoke && `${people[toRevoke.subject_id] ? fullNameOf(people[toRevoke.subject_id]) : 'La persona'} dejará de ver ${resourceLabel(toRevoke)} en su próxima petición.`}
+              {toRevoke && `${subjectName(toRevoke)} dejará de ver ${resourceLabel(toRevoke)} en su próxima petición.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

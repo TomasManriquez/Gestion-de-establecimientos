@@ -707,7 +707,7 @@ cualquier otro rol, `401` sin sesión). Modelo en `02` §9.9.1.
 | Método | Ruta | Respuesta |
 |---|---|---|
 | GET | `/api/v1/access/grants` | `200` lista de concesiones. Filtros opcionales: `resource_type`, `resource_id`, `user_id` |
-| POST | `/api/v1/access/grants` | `201` la concesión. Body `{resource_type, resource_id, user_id}` (`extra="forbid"`). `404` persona inexistente, `422` cuenta no activa o body inválido, `409` ya concedida |
+| POST | `/api/v1/access/grants` | `201` la concesión. Body `{resource_type, resource_id, user_id}` **o** `{…, unit_id, include_subunits?}` (uno solo de los dos; `extra="forbid"`). `404` persona o unidad inexistente, `422` cuenta o unidad no activa, o body inválido, `409` ya concedida |
 | DELETE | `/api/v1/access/grants/{id}` | `204`. `404` si no existe o el id no es válido |
 
 `resource_type` ∈ `portal_resource` \| `vault`. `resource_id` es `*` o un identificador de 1 a 64 caracteres

@@ -911,12 +911,13 @@ ventana fija por clave: al vencer, la siguiente `hit` abre una nueva.
 
 ```json
 {"_id":"ObjectId","resource_type":"portal_resource|vault","resource_id":"string | \"*\"",
- "subject_type":"user","subject_id":"id de la persona","granted_by":"id","granted_at":"ISODate"}
+ "subject_type":"user | unit","subject_id":"id de la persona o de la unidad","include_subunits":"bool",
+ "granted_by":"id","granted_at":"ISODate"}
 ```
 
 Una fila = «esta persona puede **ver** este recurso». `resource_id: "*"` cubre todos los recursos de ese tipo
-(p. ej. todas las bóvedas). Por ahora el sujeto es siempre una persona; la concesión por unidad y subunidad
-queda diferida (ADR-021). Índices: único `(resource_type, resource_id, subject_type, subject_id)` y
+(p. ej. todas las bóvedas). El sujeto es una persona o (fase 4) una unidad: cubre a quien tenga `unit_id` = esa unidad y,
+con `include_subunits`, a quien esté en un descendiente (`units.ancestors`, ADR-010). Quien no tiene unidad no queda cubierto. Índices: único `(resource_type, resource_id, subject_type, subject_id)` y
 `(subject_type, subject_id, resource_type)` para «¿qué puede ver esta persona?». Cada alta y baja se audita
 como `resource_grant.create|revoke` (objetivo `resource_grant`). Solo `iam/admin` la escribe.
 

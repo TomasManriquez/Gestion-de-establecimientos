@@ -33,7 +33,7 @@ async def _visible_or_404(ctx: AccessContext, resource_id: str) -> dict:
     """Un recurso que la persona no puede ver responde 404, igual que uno inexistente: no revela que existe."""
     doc = await portal_service.find_resource(resource_id)
     if doc is None or (doc["visibility"] != "org" and not await access_service.can(
-            ctx.user_id, RESOURCE_TYPE, resource_id, is_iam_admin=_is_admin(ctx))):
+            ctx.user_id, RESOURCE_TYPE, resource_id, is_iam_admin=_is_admin(ctx), unit_id=ctx.user.get("unit_id"))):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Recurso no encontrado")
     return doc
 
@@ -74,7 +74,8 @@ async def delete_topic(topic_id: str, ctx: AccessContext = _ADMIN):
 # ---- recursos -------------------------------------------------------------------------------------------
 @router.get("/resources", response_model=List[Resource])
 async def list_resources(topic_id: Optional[str] = None, ctx: AccessContext = _READ):
-    visible = await access_service.visible_ids(ctx.user_id, RESOURCE_TYPE, is_iam_admin=_is_admin(ctx))
+    visible = await access_service.visible_ids(ctx.user_id, RESOURCE_TYPE, is_iam_admin=_is_admin(ctx),
+                                               unit_id=ctx.user.get("unit_id"))
     return await portal_service.list_resources(visible, topic_id)
 
 

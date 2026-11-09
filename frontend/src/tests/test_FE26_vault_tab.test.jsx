@@ -67,6 +67,24 @@ describe('FE26: bóveda en la ficha', () => {
 });
 
 describe('FE26: pantalla de accesos', () => {
+  it('FE26-E: una concesión por unidad se nombra con la unidad y sus subunidades, y se crea con unit_id', async () => {
+    axios.get.mockImplementation((url) => {
+      if (url === '/api/v1/access/grants') return Promise.resolve({ data: [{ _id: 'g2', resource_type: 'vault', resource_id: '*', subject_type: 'unit', subject_id: 'un1', include_subunits: true }] });
+      if (url === '/api/units') return Promise.resolve({ data: [{ _id: 'un1', name: 'Finanzas' }] });
+      if (url === '/api/establishments') return Promise.resolve({ data: { items: [] } });
+      return Promise.resolve({ data: [] });
+    });
+    axios.post.mockResolvedValue({ data: {} });
+    render(<MemoryRouter><AccessGrantsPage /></MemoryRouter>);
+    await screen.findByText('Unidad Finanzas y sus subunidades');
+    fireEvent.change(screen.getByLabelText('A quién'), { target: { value: 'unit' } });
+    fireEvent.change(await screen.findByLabelText('Unidad'), { target: { value: 'un1' } });
+    fireEvent.click(screen.getByLabelText(/Todas las bóvedas \(los 78/));
+    fireEvent.click(screen.getByRole('button', { name: 'Conceder acceso' }));
+    await waitFor(() => expect(axios.post).toHaveBeenCalledWith('/api/v1/access/grants',
+      { resource_type: 'vault', resource_id: '*', unit_id: 'un1', include_subunits: true }));
+  });
+
   beforeEach(() => { vi.resetAllMocks(); });
 
   it('FE26-D: lista las concesiones con nombre de persona y establecimiento, y revoca con confirmación', async () => {

@@ -21,7 +21,7 @@ async def _authorize(ctx: AccessContext, rbd: str) -> None:
     Después, 404 si el establecimiento no existe. El rol de `datos` no abre nada."""
     is_admin = any(a.get("platform_id") == PLATFORM_IAM and a.get("role") in IAM_ADMIN
                    for a in ctx.user.get("access", []))
-    if not await access_service.can(ctx.user_id, "vault", rbd, is_iam_admin=is_admin):
+    if not await access_service.can(ctx.user_id, "vault", rbd, is_iam_admin=is_admin, unit_id=ctx.user.get("unit_id")):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     if await establishments_service.find_by_rbd(rbd) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Establecimiento no encontrado")
