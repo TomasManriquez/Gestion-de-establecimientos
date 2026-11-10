@@ -698,3 +698,55 @@ tokens legados con `sub = username` se aceptan mientras dure la compatibilidad.
 vía `require_access`), `page_size ≤ 200` y la forma de error de FastAPI (§3.3). Los códigos de
 error de dominio siguen siendo una brecha abierta: las rutas nuevas devuelven el `detail` por
 defecto, salvo los `errors[].code` de `BulkResult`.
+
+### 8.5 ✅ `/api/v1/access/grants` — concesiones por recurso (ADR-021 fase 1)
+
+Primer router bajo `/api/v1/` (D10); los existentes no cambian. Acceso: `iam/admin` en todas las rutas (`403` para
+cualquier otro rol, `401` sin sesión). Modelo en `02` §9.9.1.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/api/v1/access/grants` | `200` lista de concesiones. Filtros opcionales: `resource_type`, `resource_id`, `user_id` |
+| POST | `/api/v1/access/grants` | `201` la concesión. Body `{resource_type, resource_id, user_id}` **o** `{…, unit_id, include_subunits?}` (uno solo de los dos; `extra="forbid"`). `404` persona o unidad inexistente, `422` cuenta o unidad no activa, o body inválido, `409` ya concedida |
+| DELETE | `/api/v1/access/grants/{id}` | `204`. `404` si no existe o el id no es válido |
+
+`resource_type` ∈ `portal_resource` \| `vault`. `resource_id` es `*` o un identificador de 1 a 64 caracteres
+`[A-Za-z0-9_-]`. La concesión da solo `ver`.
+
+### 8.6 ✅ `/api/v1/establishments/{rbd}/vault` — bóveda de credenciales (ADR-021 fase 2)
+
+Acceso: cualquier persona autenticada llega a la ruta, pero solo pasa quien tiene una concesión `vault` sobre ese
+`rbd` (o `"*"`) o es `iam/admin`; el resto recibe `403` (el rol en `datos` no abre nada), `401` sin sesión, `404`
+si el establecimiento no existe. Tener la concesión permite también crear, editar y borrar (el permiso `manage`
+separado está diferido). Modelo en `02` §9.9.2.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/api/v1/establishments/{rbd}/vault` | `200` lista de credenciales, sin contraseña (`has_password: true`) |
+| POST | `…/vault` | `201` la credencial. Body `{name, username?, password, url?}` (`extra="forbid"`; `url` solo `http(s)`) |
+| PUT | `…/vault/{id}` | `200`. Todos los campos opcionales; sin `password` no cambia; `username`/`url` en `null` se borran. `404` |
+| DELETE | `…/vault/{id}` | `204`. `404` |
+| POST | `…/vault/{id}/reveal` | `200 {password}` con `Cache-Control: no-store`. `429` + `Retry-After` al pasar de 100 por hora por persona; `503` si no se pudo escribir la auditoría (la contraseña no sale); `404` |
+
+`reveal` sigue este orden: permiso → `rate_guard` → registro `vault.reveal` en `audit_log` → `rate_hit` → entrega.
+Ninguna otra ruta devuelve la contraseña.
+
+### 8.7 ✅ `/api/v1/portal` — temas y recursos del portal (ADR-021 fase 3)
+
+Lectura: cuenta con rol de lectura en `datos`. Escribir recursos: `datos` con `write`. Temas: solo `iam/admin`.
+Un recurso `restricted` que la persona no puede ver responde `404` (igual que uno inexistente) y no aparece en las
+listas. Modelo en `02` §9.9.3.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/api/v1/portal/topics` | `200` lista plana `{_id, name, parent_id}` |
+| POST | `…/topics` | `201`. Body `{name, parent_id?}`. `404` padre inexistente; `422` si el padre ya tiene padre |
+| PUT | `…/topics/{id}` | `200`. Body `{name}`. `404` |
+| DELETE | `…/topics/{id}` | `204`. `409` si tiene subtemas o recursos; `404` |
+| GET | `…/resources` | `200`. Los `org` más los `restricted` con concesión (todos, para `iam/admin`) |
+| GET | `…/resources/{id}` | `200`, o `404` si no existe o no puede verlo |
+| POST | `…/resources` | `201`. Body `{title, url, description?, topic_id, unit_id?, catastro_level}` (`url` solo `http(s)`; `422` si el tema o la unidad no existen). Si queda `restricted` y quien registra no es admin, recibe `ver` en el mismo acto |
+| PUT | `…/resources/{id}` | `200`. Solo `iam/admin` o quien lo registró (`403` otra persona); `visibility` solo `iam/admin` (`403`) |
+| DELETE | `…/resources/{id}` | `204`. Mismas reglas que `PUT`; borra también las concesiones del recurso |
+
+La restricción gobierna quién ve el **enlace**: no protege la planilla o el informe externo (ADR-021 §5).

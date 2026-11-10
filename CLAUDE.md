@@ -64,21 +64,34 @@ del frontend, `database_service.py`):
 
 ## 5. Brechas conocidas — no las repliques
 
-Ver `Documentacion/05-guia-de-extension.md` §5 para la lista completa. Las más relevantes para
-no reintroducir al tocar código cercano:
+Ver `Documentacion/05-guia-de-extension.md` §5 para la lista completa y su estado actual.
 
-- **D1**: el seeding (`database_service.py:207-219`) no persiste `location` — no asumas que el
-  campo sobrevive a un reseed.
-- **D2**: `JWT_SECRET`/`ADMIN_PASSWORD` tienen default funcional en `config.py`. No agregues
-  otro secreto con default silencioso.
-- **D3/D4**: el rol `viewer` tiene permisos de escritura de más, y el `PUT` de establecimiento
-  devuelve credenciales sin redactar. No repliques ese patrón en endpoints nuevos.
-- **D5**: `$regex` sin escapar en filtros del directorio — cualquier filtro nuevo por texto debe
-  escapar el input.
-- **D6**: el año 2026 está hardcodeado en `analytics_service.py`. No agregues otro pipeline con
-  el año fijo.
+**Resueltas — son el patrón a seguir, no lo reviertas:**
+
+- **D1**: el seeding ya persiste `location` (`seed_service.py`).
+- **D2**: `JWT_SECRET`/`ADMIN_PASSWORD` no tienen default y la app no arranca sin ellos
+  (`config._required`). Todo secreto nuevo se declara igual: obligatorio, sin default silencioso.
+- **D3/D4**: `viewer` solo lee y el `PUT` de establecimiento respeta `include_sensitive`. Todo
+  endpoint declara `require_access`; un test recorre las rutas. No lo omitas en endpoints nuevos
+  ni devuelvas secretos sin redactar.
+- **D5**: los filtros de texto escapan con `re.escape`. Todo filtro nuevo por texto hace lo mismo.
+- **D6**: el año fijo se retiró (ADR-019). No agregues pipelines con el año hardcodeado.
+
+**Abiertas — cuidado al tocar código cercano:**
+
 - **D10**: no hay versionado de API (`/api/`, sin `/v1`). Cualquier cambio de contrato es
-  potencialmente breaking — coordinar con frontend.
+  potencialmente breaking — coordinar con frontend. Los routers nuevos de ADR-021 van bajo `/api/v1/`.
+- **D36**: los cambios a ficha, contrapartes y métricas no se auditan. No asumas que hay rastro.
+- **D37/D20**: `npm run lint` no corre (falta `eslint`). Nunca declares que el lint pasó.
+
+**Acceso por recurso (ADR-021; fases 1 (concesiones), 2 (bóveda: backend, pestaña de la ficha y `/configuracion/accesos`) 3 (portal: `/portal`, `test_BE66_*` y `test_FE27_*`) y 4 (concesión por unidad y subunidad, `test_BE67_*`) ✅; `manage` y vistas por unidad 🧭):** cada recurso del portal es `org` (toda cuenta de `datos`)
+o `restricted` (nivel 2 del catastro y la bóveda). El rol de plataforma no abre recursos `restricted`;
+solo una concesión explícita, por persona (la de unidad llega después). Quien registra un recurso
+`restricted` recibe `ver` en el acto. `vault.reveal` se audita antes de entregar la clave y, si el
+registro falla, no se entrega. Toda cuenta del dominio entra como `datos/viewer` sin unidad
+(ADR-015), así que ni el rol, ni el dominio, ni `is_slep_staff` justifican dar acceso a un dato
+restringido. Las contraseñas de la bóveda nunca van en respuestas de lista, `PUT`, `audit_log`
+ni en el snapshot de la PWA.
 
 ## 6. Definition of Done
 

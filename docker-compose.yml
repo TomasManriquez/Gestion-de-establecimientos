@@ -47,6 +47,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       # Alta automática de cuentas del dominio como lector (C24). Sin default: true solo en desarrollo.
       - GOOGLE_AUTO_PROVISION=${GOOGLE_AUTO_PROVISION:?define GOOGLE_AUTO_PROVISION (true o false) en el .env de la raiz}
+      # Llave Fernet de la bóveda de credenciales (ADR-021). Sin default: perderla es perder las credenciales.
+      - VAULT_KEY=${VAULT_KEY:?define VAULT_KEY en el .env de la raiz}
     volumes:
       - ./backend:/app
     depends_on:

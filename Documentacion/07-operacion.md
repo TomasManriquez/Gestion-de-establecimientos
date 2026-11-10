@@ -166,6 +166,7 @@ no arranca.**
 | `GOOGLE_CLIENT_ID` | **ninguno** | Cliente OAuth. Desde F4 los dos compose la pasan al contenedor (`${GOOGLE_CLIENT_ID:-}`); obligatoria con `MAIL_MODE=gmail` y para el login con Google (F6) |
 | `GOOGLE_CLIENT_SECRET` | **ninguno** | **Secreto.** Solo `MAIL_MODE=gmail`: lo usa el refresco del token de Gmail |
 | `GOOGLE_AUTO_PROVISION` | **ninguno** (obligatoria) | `true` o `false`, nada más. Con `true`, quien entra con una cuenta del dominio y no existe obtiene una cuenta de **lector** en `datos`, sin asignar (ADR-015). **En producción la activa el responsable** tras las condiciones de `04` §9.6; la plantilla trae `false`. Ambos compose la exigen (`${GOOGLE_AUTO_PROVISION:?…}`) |
+| `VAULT_KEY` | **ninguno** (obligatoria) | **Secreto.** Llave Fernet de la bóveda de credenciales (ADR-021); una inválida detiene el arranque. Genera una con `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. **Sin ella las credenciales guardadas no se pueden recuperar:** respáldala en un lugar distinto del respaldo de Mongo (si van juntos, quien robe el respaldo descifra todo). Rotarla requiere recifrar (`MultiFernet` diferido). Ambos compose la exigen (`${VAULT_KEY:?…}`) |
 | `PASSWORD_MIN_LENGTH` | `15` | Mínimo ≥ 8 (NIST SP 800-63B-4: 15 sin MFA) |
 | `PASSWORD_MAX_LENGTH` | `64` | Mínimo permitido 64; la política también rechaza lo que pase de 72 bytes (límite de bcrypt) |
 | `PASSWORD_REQUIRE_CHAR_CLASSES` | `0` | De 0 a 4. NIST recomienda 0 |

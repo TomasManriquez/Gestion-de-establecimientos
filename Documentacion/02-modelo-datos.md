@@ -900,12 +900,59 @@ verifica sobre el AST); `changes` jamás contiene hashes, contraseñas ni tokens
 (`[REDACTED]`). `actor_id` es `null` para acciones del sistema (arranque, seed). `bulk_id` agrupa un lote. Las
 acciones son: `user.create|update|disable|enable|invite|password_reset|password_set|autoprovision` (esta última: alta automática con Google, `actor_id` nulo),
 `access.grant|revoke`, `unit.create|update|move|deactivate|activate|head`, `platform.update`,
-`subrogation.create|cancel`. Una operación fallida (409) o sin cambios reales no deja registro. Índices:
+`subrogation.create|cancel`, `resource_grant.create|revoke` (ADR-021). Una operación fallida (409) o sin cambios reales no deja registro. Índices:
 `(at desc)`, `(target_type, target_id, at desc)`, `(actor_id, at desc)` y `bulk_id` (disperso).
 
 `rate_limits` guarda `{key, count, expires_at}`; la clave es `<alcance>:<sha256[:32]>` de lo que se limita
 (correo, IP, id), así que no contiene datos en claro. Índices: único `key` y TTL sobre `expires_at`. Es una
 ventana fija por clave: al vencer, la siguiente `hit` abre una nueva.
+
+### 9.9.1 ✅ `resource_grants` (propiedad de `access`, ADR-021 fase 1)
+
+```json
+{"_id":"ObjectId","resource_type":"portal_resource|vault","resource_id":"string | \"*\"",
+ "subject_type":"user | unit","subject_id":"id de la persona o de la unidad","include_subunits":"bool",
+ "granted_by":"id","granted_at":"ISODate"}
+```
+
+Una fila = «esta persona puede **ver** este recurso». `resource_id: "*"` cubre todos los recursos de ese tipo
+(p. ej. todas las bóvedas). El sujeto es una persona o (fase 4) una unidad: cubre a quien tenga `unit_id` = esa unidad y,
+con `include_subunits`, a quien esté en un descendiente (`units.ancestors`, ADR-010). Quien no tiene unidad no queda cubierto. Índices: único `(resource_type, resource_id, subject_type, subject_id)` y
+`(subject_type, subject_id, resource_type)` para «¿qué puede ver esta persona?». Cada alta y baja se audita
+como `resource_grant.create|revoke` (objetivo `resource_grant`). Solo `iam/admin` la escribe.
+
+### 9.9.2 ✅ `vault_credentials` (propiedad de `vault`, ADR-021 fase 2)
+
+```json
+{"_id":"ObjectId","rbd":"string","name":"string","username":"string | null","password_enc":"token Fernet",
+ "url":"http(s)://… | null","created_by":"id","created_at":"ISODate","updated_by":"id","updated_at":"ISODate"}
+```
+
+Varias credenciales por establecimiento (SIGE es una más). `password_enc` se cifra con Fernet y la llave
+`VAULT_KEY`; **no sale en ninguna respuesta** salvo `POST …/reveal` (`03` §8.6), no entra en `audit_log` y no
+se guardan contraseñas antiguas. Índice `(rbd)`. Cambios auditados como `vault.create|update|delete` y
+`vault.reveal` (objetivo `vault`, `target_id` = id de la credencial); el log lleva `rbd`, `name` y los campos
+visibles que cambiaron, y de la contraseña solo `password_changed: true`.
+
+### 9.9.3 ✅ `portal_topics` y `portal_resources` (propiedad de `portal`, ADR-021 fase 3)
+
+```json
+// portal_topics
+{"_id":"ObjectId","name":"string","parent_id":"id del tema padre | null"}
+// portal_resources
+{"_id":"ObjectId","title":"string","url":"http(s)://…","description":"string | null","platform":"string",
+ "topic_id":"id","unit_id":"id | null","catastro_level":"0 | 1 | 2","visibility":"org | restricted",
+ "created_by":"id","created_at":"ISODate","updated_by":"id","updated_at":"ISODate"}
+```
+
+Los temas tienen **dos niveles** (el padre no puede tener padre) y un tema con subtemas o recursos no se borra.
+`platform` se detecta del host de la URL al guardar (tabla fija en `portal_service._PLATFORMS`; otro host se
+muestra tal cual). `visibility` nace del `catastro_level`: `restricted` si es 2, `org` si es 0 o 1; subir el nivel
+a 2 restringe sin esperar al administrador, y solo `iam/admin` cambia `visibility` directamente. `unit_id` es la
+unidad responsable y no da permisos. Quién ve un recurso `restricted` lo deciden las concesiones
+`resource_type="portal_resource"` de `resource_grants` (§9.9.1); al borrar el recurso se borran sus concesiones.
+Índices: `portal_topics(parent_id)` y `portal_resources(topic_id)`. Auditoría: `portal_topic.*` y
+`portal_resource.*` (`create|update|delete`).
 
 ### 9.10 ✅ Migración del admin sembrado
 

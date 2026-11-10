@@ -20,6 +20,7 @@ BASE = {
     "JWT_SECRET": "x" * 64, "ADMIN_PASSWORD": "una-clave-de-prueba",
     "ALLOWED_EMAIL_DOMAINS": "slepllanquihue.cl", "BOOTSTRAP_ADMIN_EMAIL": "admin@slepllanquihue.cl",
     "GOOGLE_AUTO_PROVISION": "false",
+    "VAULT_KEY": "j5784-HuyBLaX8V7tefnFaRGEQbEyB4n9BkS0gjv0uU=",
 }
 GMAIL = {
     **BASE, "MAIL_MODE": "gmail", "PUBLIC_BASE_URL": "https://gestion.slepllanquihue.cl",

@@ -598,6 +598,8 @@ Los IDs siguen la numeración real (último existente: BE08, INT02, FE05).
 | La subrogancia no concede permisos | `test_BE49_a_subrogation_grants_no_permission` |
 | El script de consentimiento no escribe el token a disco ni a un log | `test_BE50_*` |
 | Los módulos respetan el grafo de dependencias (ADR-013) | `test_BE45_*` |
+| Un recurso restringido solo lo ve quien tiene concesión (o `iam/admin`); el rol de plataforma no lo abre; solo `iam/admin` concede; cada cambio se audita | `test_BE64_*` |
+| La contraseña de la bóveda está cifrada en reposo y solo sale por `reveal`; `reveal` audita antes de entregar y falla cerrado (503); límite por persona; el log nunca lleva contraseñas; sin `VAULT_KEY` válida no arranca | `test_BE65_*` |
 
 ### 9.8 Configuración
 

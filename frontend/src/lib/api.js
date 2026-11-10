@@ -88,3 +88,29 @@ export function parseApiError(error) {
   }
   return { status, message, fields, code: detail && !Array.isArray(detail) && typeof detail === 'object' ? detail.code : undefined };
 }
+
+/** Bóveda de credenciales de un establecimiento (ADR-021). Solo `reveal` devuelve la contraseña. */
+export const vaultApi = {
+  list: (rbd) => axios.get(`/api/v1/establishments/${rbd}/vault`).then(data),
+  create: (rbd, body) => axios.post(`/api/v1/establishments/${rbd}/vault`, body).then(data),
+  update: (rbd, id, body) => axios.put(`/api/v1/establishments/${rbd}/vault/${id}`, body).then(data),
+  remove: (rbd, id) => axios.delete(`/api/v1/establishments/${rbd}/vault/${id}`).then(() => undefined),
+  reveal: (rbd, id) => axios.post(`/api/v1/establishments/${rbd}/vault/${id}/reveal`).then((r) => r.data.password),
+};
+
+/** Portal de recursos (ADR-021): temas de dos niveles y recursos con visibilidad `org` / `restricted`. */
+export const portalApi = {
+  topics: () => axios.get('/api/v1/portal/topics').then(data),
+  createTopic: (body) => axios.post('/api/v1/portal/topics', body).then(data),
+  resources: () => axios.get('/api/v1/portal/resources').then(data),
+  createResource: (body) => axios.post('/api/v1/portal/resources', body).then(data),
+  updateResource: (id, body) => axios.put(`/api/v1/portal/resources/${id}`, body).then(data),
+  removeResource: (id) => axios.delete(`/api/v1/portal/resources/${id}`).then(() => undefined),
+};
+
+/** Concesiones por recurso (ADR-021): solo `iam/admin`. */
+export const grantsApi = {
+  list: (params) => axios.get(`/api/v1/access/grants`, { params }).then(data),
+  create: (body) => axios.post(`/api/v1/access/grants`, body).then(data),
+  revoke: (id) => axios.delete(`/api/v1/access/grants/${id}`).then(() => undefined),
+};

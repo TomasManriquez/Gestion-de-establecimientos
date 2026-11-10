@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   ArrowLeft, Edit3, School, Users, Wifi, Printer, 
   UserCheck, History, Calendar, CheckCircle2, XCircle, Info, PhoneCall,
-  Mail, Phone, X, TrendingUp, Copy, Check
+  Mail, Phone, X, TrendingUp, Copy, Check, KeyRound
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -12,7 +12,9 @@ import {
 } from 'recharts';
 import EstablishmentMap from './EstablishmentMap';
 import ConectividadFicha from './ConectividadFicha';
+import VaultTab from './vault/VaultTab';
 import { can } from '@/lib/access';
+import { vaultApi } from '@/lib/api';
 
 /** Estilo único de las etiquetas de la ficha (cargo, «Director / Encargado», campos de detalle). slate-500 y no 400: cumple el contraste mínimo sobre blanco. */
 const LABEL_CLASS = 'text-xs text-slate-500';
@@ -126,6 +128,8 @@ export default function FichaEstablecimiento({ currentUser }) {
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('general');
+  // Bóveda (ADR-021): la pestaña existe solo si el servidor dejó listar (200). Un 403 es lo normal para casi todos.
+  const [vault, setVault] = useState(null);
   const [showDirectorContact, setShowDirectorContact] = useState(false);
   const canEdit = can(currentUser, 'datos', 'write');
 
@@ -149,6 +153,13 @@ export default function FichaEstablecimiento({ currentUser }) {
 
   useEffect(() => {
     fetchFichaData();
+  }, [rbd]);
+
+  useEffect(() => {
+    let alive = true;
+    setVault(null);
+    vaultApi.list(rbd).then((items) => alive && Array.isArray(items) && setVault(items)).catch(() => {});
+    return () => { alive = false; };
   }, [rbd]);
 
   // Click outside handler for director contact popover
@@ -264,7 +275,8 @@ export default function FichaEstablecimiento({ currentUser }) {
           { id: 'general', label: 'Información General', icon: School },
           { id: 'statistics', label: 'Estadísticas e Historial', icon: History },
           { id: 'connectivity', label: 'Internet y Conectividad', icon: Wifi },
-          { id: 'printers', label: 'Inventario Impresoras', icon: Printer }
+          { id: 'printers', label: 'Inventario Impresoras', icon: Printer },
+          ...(vault ? [{ id: 'vault', label: 'Bóveda', icon: KeyRound }] : []),
         ].map(tab => {
           const Icon = tab.icon;
           return (
@@ -546,6 +558,9 @@ export default function FichaEstablecimiento({ currentUser }) {
 
           </div>
         )}
+
+        {/* Tab 5: Bóveda de credenciales (solo con concesión; ADR-021) */}
+        {activeTab === 'vault' && vault && <VaultTab rbd={rbd} initial={vault} />}
 
         {/* Tab 4: Inventario Impresoras */}
         {activeTab === 'printers' && (
