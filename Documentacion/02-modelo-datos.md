@@ -942,6 +942,7 @@ visibles que cambiaron, y de la contraseña solo `password_changed: true`.
 // portal_resources
 {"_id":"ObjectId","title":"string","url":"http(s)://…","description":"string | null","platform":"string",
  "topic_id":"id","unit_id":"id | null","catastro_level":"0 | 1 | 2","visibility":"org | restricted",
+ "cover_type":"image/png | image/jpeg | image/webp | null","cover_data":"bytes | null",
  "created_by":"id","created_at":"ISODate","updated_by":"id","updated_at":"ISODate"}
 ```
 
@@ -951,7 +952,7 @@ muestra tal cual). `visibility` nace del `catastro_level`: `restricted` si es 2,
 a 2 restringe sin esperar al administrador, y solo `iam/admin` cambia `visibility` directamente. `unit_id` es la
 unidad responsable y no da permisos. Quién ve un recurso `restricted` lo deciden las concesiones
 `resource_type="portal_resource"` de `resource_grants` (§9.9.1); al borrar el recurso se borran sus concesiones.
-Índices: `portal_topics(parent_id)` y `portal_resources(topic_id)`. Auditoría: `portal_topic.*` y
+`cover_*` es la carátula opcional (una imagen que ilustra la tarjeta cuando el enlace solo muestra un login): hasta 512 KB, tipo por sus primeros bytes (sin SVG), guardada en el mismo documento y **excluida por proyección de listas y lecturas** (`has_cover` la anuncia; los bytes salen solo por `GET …/cover`). Índices: `portal_topics(parent_id)` y `portal_resources(topic_id)`. Auditoría: `portal_topic.*` y
 `portal_resource.*` (`create|update|delete`).
 
 ### 9.10 ✅ Migración del admin sembrado

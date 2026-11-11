@@ -9,6 +9,7 @@ _URL = r"^https?://\S+$"
 _ID = r"^[0-9a-f]{24}$"
 
 Visibility = Literal["org", "restricted"]
+COVER_MAX_BYTES = 512 * 1024       # carátula: el frontend la reduce antes de subir; el servidor igual lo exige
 CATASTRO_RESTRICTED = 2            # política B.4: nivel 2 nace restringido; 0 y 1, abierto a la organización
 
 
@@ -63,6 +64,7 @@ class Resource(BaseModel):
     unit_id: Optional[str] = None
     catastro_level: int
     visibility: Visibility
+    has_cover: bool = False
     created_by: str
     created_at: datetime
     updated_by: str

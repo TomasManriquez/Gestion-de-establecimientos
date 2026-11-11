@@ -106,6 +106,10 @@ export const portalApi = {
   createResource: (body) => axios.post('/api/v1/portal/resources', body).then(data),
   updateResource: (id, body) => axios.put(`/api/v1/portal/resources/${id}`, body).then(data),
   removeResource: (id) => axios.delete(`/api/v1/portal/resources/${id}`).then(() => undefined),
+  /** Carátula: los bytes llegan como Blob (la sesión va en la cabecera, un <img> directo no la enviaría). */
+  cover: (id) => axios.get(`/api/v1/portal/resources/${id}/cover`, { responseType: 'blob' }).then(data),
+  setCover: (id, blob) => axios.put(`/api/v1/portal/resources/${id}/cover`, blob, { headers: { 'Content-Type': blob.type } }).then(data),
+  removeCover: (id) => axios.delete(`/api/v1/portal/resources/${id}/cover`).then(data),
 };
 
 /** Concesiones por recurso (ADR-021): solo `iam/admin`. */

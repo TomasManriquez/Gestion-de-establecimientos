@@ -734,7 +734,7 @@ Ninguna otra ruta devuelve la contraseña.
 ### 8.7 ✅ `/api/v1/portal` — temas y recursos del portal (ADR-021 fase 3)
 
 Lectura: cuenta con rol de lectura en `datos`. Escribir recursos: `datos` con `write`. Temas: solo `iam/admin`.
-Un recurso `restricted` que la persona no puede ver responde `404` (igual que uno inexistente) y no aparece en las
+Los recursos incluyen `has_cover`. Un recurso `restricted` que la persona no puede ver responde `404` (igual que uno inexistente) y no aparece en las
 listas. Modelo en `02` §9.9.3.
 
 | Método | Ruta | Respuesta |
@@ -748,5 +748,8 @@ listas. Modelo en `02` §9.9.3.
 | POST | `…/resources` | `201`. Body `{title, url, description?, topic_id, unit_id?, catastro_level}` (`url` solo `http(s)`; `422` si el tema o la unidad no existen). Si queda `restricted` y quien registra no es admin, recibe `ver` en el mismo acto |
 | PUT | `…/resources/{id}` | `200`. Solo `iam/admin` o quien lo registró (`403` otra persona); `visibility` solo `iam/admin` (`403`) |
 | DELETE | `…/resources/{id}` | `204`. Mismas reglas que `PUT`; borra también las concesiones del recurso |
+| GET | `…/resources/{id}/cover` | Los bytes de la carátula (`Cache-Control: private, max-age=300`, `nosniff`). `404` si no existe, no tiene carátula o el recurso restringido no se puede ver |
+| PUT | `…/resources/{id}/cover` | Cuerpo = la imagen en bruto (PNG, JPEG o WebP, ≤ 512 KB). `200` el recurso con `has_cover: true`. `413` si pesa más, `422` si no es una de esas imágenes (el `Content-Type` no cuenta), `403` si no es admin ni quien lo registró |
+| DELETE | `…/resources/{id}/cover` | `200` el recurso con `has_cover: false`. Mismas reglas que `PUT` |
 
 La restricción gobierna quién ve el **enlace**: no protege la planilla o el informe externo (ADR-021 §5).

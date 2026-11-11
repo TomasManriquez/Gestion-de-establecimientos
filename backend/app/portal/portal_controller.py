@@ -1,12 +1,12 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.access.access_service import access_service
 from app.auth.auth_entity import AccessContext, DATOS_READ, DATOS_WRITE, IAM_ADMIN, PLATFORM_DATOS, PLATFORM_IAM
 from app.auth.auth_service import require_access
-from app.portal.portal_entity import (Resource, ResourceCreate, ResourceUpdate, Topic, TopicCreate, TopicUpdate)
-from app.portal.portal_service import RESOURCE_TYPE, PortalError, portal_service
+from app.portal.portal_entity import (COVER_MAX_BYTES, Resource, ResourceCreate, ResourceUpdate, Topic, TopicCreate, TopicUpdate)
+from app.portal.portal_service import RESOURCE_TYPE, PortalError, portal_service, sniff_image
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
 _READ = Depends(require_access(PLATFORM_DATOS, DATOS_READ))
@@ -82,7 +82,7 @@ async def list_resources(topic_id: Optional[str] = None, ctx: AccessContext = _R
 @router.get("/resources/{resource_id}", response_model=Resource)
 async def get_resource(resource_id: str, ctx: AccessContext = _READ):
     doc = await _visible_or_404(ctx, resource_id)
-    return {**doc, "_id": str(doc["_id"])}
+    return {**doc, "_id": str(doc["_id"]), "has_cover": bool(doc.get("cover_type"))}
 
 
 @router.post("/resources", response_model=Resource, status_code=status.HTTP_201_CREATED)
@@ -108,6 +108,44 @@ async def update_resource(resource_id: str, payload: ResourceUpdate, ctx: Access
         return await portal_service.update_resource(doc, payload, ctx.user_id, _is_admin(ctx))
     except PortalError as exc:
         raise _fail(exc)
+
+
+# ---- carátula: imagen opcional que ilustra la tarjeta (el enlace externo suele pedir login) ------------------
+@router.get("/resources/{resource_id}/cover")
+async def get_cover(resource_id: str, ctx: AccessContext = _READ):
+    """Mismos permisos que el recurso: un restringido que no puedes ver tampoco entrega su carátula."""
+    await _visible_or_404(ctx, resource_id)
+    cover = await portal_service.get_cover(resource_id)
+    if cover is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="El recurso no tiene carátula")
+    return Response(content=cover[1], media_type=cover[0],
+                    headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"})
+
+
+@router.put("/resources/{resource_id}/cover", response_model=Resource)
+async def put_cover(resource_id: str, request: Request, ctx: AccessContext = _WRITE):
+    """El cuerpo es la imagen en bruto (PNG, JPEG o WebP, hasta 512 KB). Mismas reglas de edición que el recurso."""
+    doc = await _visible_or_404(ctx, resource_id)
+    if not _may_manage(ctx, doc):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    too_big = HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="La carátula pesa más de 512 KB")
+    if int(request.headers.get("content-length") or 0) > COVER_MAX_BYTES:
+        raise too_big
+    data = await request.body()
+    if len(data) > COVER_MAX_BYTES:
+        raise too_big
+    content_type = sniff_image(data)
+    if content_type is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La carátula debe ser una imagen PNG, JPEG o WebP")
+    return await portal_service.set_cover(doc, content_type, data, ctx.user_id)
+
+
+@router.delete("/resources/{resource_id}/cover", response_model=Resource)
+async def delete_cover(resource_id: str, ctx: AccessContext = _WRITE):
+    doc = await _visible_or_404(ctx, resource_id)
+    if not _may_manage(ctx, doc):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    return await portal_service.set_cover(doc, None, None, ctx.user_id)
 
 
 @router.delete("/resources/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
