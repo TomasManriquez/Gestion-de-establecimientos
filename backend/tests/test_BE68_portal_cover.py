@@ -27,7 +27,7 @@ def ctx(fake_db):
 
 def _res(c, h, topic, level=1):
     return c.post(f"{P}/resources", json={"title": "Tablero", "url": "https://app.powerbi.com/x", "topic_id": topic,
-                                          "catastro_level": level}, headers=h).json()["_id"]
+                                          "data_categories": {0: [], 1: ["staff"], 2: ["students"]}[level]}, headers=h).json()["_id"]
 
 
 def _put(c, h, rid, data, ctype="image/png"):

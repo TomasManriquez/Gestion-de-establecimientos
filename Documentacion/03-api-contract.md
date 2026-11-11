@@ -745,8 +745,8 @@ listas. Modelo en `02` §9.9.3.
 | DELETE | `…/topics/{id}` | `204`. `409` si tiene subtemas o recursos; `404` |
 | GET | `…/resources` | `200`. Los `org` más los `restricted` con concesión (todos, para `iam/admin`) |
 | GET | `…/resources/{id}` | `200`, o `404` si no existe o no puede verlo |
-| POST | `…/resources` | `201`. Body `{title, url, description?, topic_id, unit_id?, catastro_level}` (`url` solo `http(s)`; `422` si el tema o la unidad no existen). Si queda `restricted` y quien registra no es admin, recibe `ver` en el mismo acto |
-| PUT | `…/resources/{id}` | `200`. Solo `iam/admin` o quien lo registró (`403` otra persona); `visibility` solo `iam/admin` (`403`) |
+| POST | `…/resources` | `201`. Body `{title, url, description?, topic_id, unit_id?, data_categories?}` (`data_categories` ⊂ `students, sensitive, external, staff, internal`; el servidor deduce `catastro_level` y `catastro_level` en el body da `422`; `url` solo `http(s)`; `422` si el tema o la unidad no existen). Si queda `restricted` y quien registra no es admin, recibe `ver` en el mismo acto |
+| PUT | `…/resources/{id}` | `200`. `data_categories` recalcula el nivel (subirlo a 2 restringe). Solo `iam/admin` o quien lo registró (`403` otra persona); `visibility` solo `iam/admin` (`403`) |
 | DELETE | `…/resources/{id}` | `204`. Mismas reglas que `PUT`; borra también las concesiones del recurso |
 | GET | `…/resources/{id}/cover` | Los bytes de la carátula (`Cache-Control: private, max-age=300`, `nosniff`). `404` si no existe, no tiene carátula o el recurso restringido no se puede ver |
 | PUT | `…/resources/{id}/cover` | Cuerpo = la imagen en bruto (PNG, JPEG o WebP, ≤ 512 KB). `200` el recurso con `has_cover: true`. `413` si pesa más, `422` si no es una de esas imágenes (el `Content-Type` no cuenta), `403` si no es admin ni quien lo registró |

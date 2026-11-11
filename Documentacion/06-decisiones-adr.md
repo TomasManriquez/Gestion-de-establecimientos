@@ -896,6 +896,7 @@ quién debe ver un recurso protegido** (G4).
    niveles**) y de `portal_resources` (enlace, plataforma detectada, unidad dueña, tema y el catastro con su
    nivel B.4).
    - **El tema sirve para ordenar, no para dar permisos.** Mover un recurso de tema no cambia quién lo ve.
+   - **El nivel sale del cuestionario de datos del formulario** (`data_categories`; el servidor lo calcula, el cliente no lo envía): estudiantes, datos sensibles o apoderados/externos → 2; funcionarios o información interna → 1; nada → 0. Los proyectos se registran en **subtemas** (el tema principal agrupa y puede quedar vacío; la interfaz ofrece un árbol).
    - **`visibility` nace del catastro (política B.4):** `restricted` si el nivel es 2; `org` si es 0 o 1. El
      administrador puede cambiarla al validar el recurso.
    - **Regla de negocio: quien registra un recurso `restricted` recibe `ver` sobre él** en el mismo acto. Sin eso

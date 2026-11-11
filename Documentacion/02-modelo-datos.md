@@ -941,14 +941,14 @@ visibles que cambiaron, y de la contraseña solo `password_changed: true`.
 {"_id":"ObjectId","name":"string","parent_id":"id del tema padre | null"}
 // portal_resources
 {"_id":"ObjectId","title":"string","url":"http(s)://…","description":"string | null","platform":"string",
- "topic_id":"id","unit_id":"id | null","catastro_level":"0 | 1 | 2","visibility":"org | restricted",
+ "topic_id":"id","unit_id":"id | null","data_categories":["students|sensitive|external|staff|internal"],"catastro_level":"0 | 1 | 2","visibility":"org | restricted",
  "cover_type":"image/png | image/jpeg | image/webp | null","cover_data":"bytes | null",
  "created_by":"id","created_at":"ISODate","updated_by":"id","updated_at":"ISODate"}
 ```
 
 Los temas tienen **dos niveles** (el padre no puede tener padre) y un tema con subtemas o recursos no se borra.
 `platform` se detecta del host de la URL al guardar (tabla fija en `portal_service._PLATFORMS`; otro host se
-muestra tal cual). `visibility` nace del `catastro_level`: `restricted` si es 2, `org` si es 0 o 1; subir el nivel
+muestra tal cual). `catastro_level` **lo deduce el servidor** del cuestionario `data_categories` (`portal_entity.level_of`): cualquiera de `students`, `sensitive` o `external` → 2; si no, `staff` o `internal` → 1; ninguna → 0. El cliente no lo envía. `visibility` nace de ese nivel: `restricted` si es 2, `org` si es 0 o 1; subir el nivel
 a 2 restringe sin esperar al administrador, y solo `iam/admin` cambia `visibility` directamente. `unit_id` es la
 unidad responsable y no da permisos. Quién ve un recurso `restricted` lo deciden las concesiones
 `resource_type="portal_resource"` de `resource_grants` (§9.9.1); al borrar el recurso se borran sus concesiones.

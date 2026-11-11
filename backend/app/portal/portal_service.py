@@ -15,11 +15,11 @@ from app.access.access_service import GrantError, access_service
 from app.audit.audit_entity import AuditAction, AuditTarget
 from app.audit.audit_service import audit_service, diff
 from app.database.database_service import db_service
-from app.portal.portal_entity import (CATASTRO_RESTRICTED, ResourceCreate, ResourceUpdate, TopicCreate)
+from app.portal.portal_entity import (CATASTRO_RESTRICTED, ResourceCreate, ResourceUpdate, TopicCreate, level_of)
 from app.units.units_service import units_service
 
 RESOURCE_TYPE = "portal_resource"
-_TRACKED = ("title", "url", "description", "topic_id", "unit_id", "catastro_level", "visibility")
+_TRACKED = ("title", "url", "description", "topic_id", "unit_id", "data_categories", "catastro_level", "visibility")
 _NO_COVER = {"cover_data": 0}          # la imagen no viaja en listas ni en lecturas del recurso: se pide aparte
 # shortcut: tabla fija de plataformas conocidas; cualquier otra se muestra por su host. Ampliar si aparece una nueva.
 _PLATFORMS = (("docs.google.com/spreadsheets", "Google Sheets"), ("docs.google.com", "Google Docs"),
@@ -128,8 +128,10 @@ class PortalService:
     async def create_resource(self, data: ResourceCreate, actor_id: str, is_admin: bool) -> dict:
         await self._check_refs(data.topic_id, data.unit_id)
         now = _now()
-        visibility = "restricted" if data.catastro_level >= CATASTRO_RESTRICTED else "org"
-        doc = {**data.model_dump(), "platform": detect_platform(data.url), "visibility": visibility,
+        data_categories = sorted(set(data.data_categories))
+        level = level_of(data_categories)
+        visibility = "restricted" if level >= CATASTRO_RESTRICTED else "org"
+        doc = {**data.model_dump(), "data_categories": data_categories, "catastro_level": level, "platform": detect_platform(data.url), "visibility": visibility,
                "created_by": actor_id, "created_at": now, "updated_by": actor_id, "updated_at": now}
         doc["_id"] = (await db_service.db.portal_resources.insert_one(doc)).inserted_id
         if visibility == "restricted" and not is_admin:
@@ -152,6 +154,9 @@ class PortalService:
         if "url" in sent:
             sent["platform"] = detect_platform(sent["url"])
         # Subir el nivel a 2 restringe sin esperar al admin; bajarlo no abre nada por sí solo (solo `visibility` lo hace).
+        if "data_categories" in sent:
+            sent["data_categories"] = sorted(set(sent["data_categories"]))
+            sent["catastro_level"] = level_of(sent["data_categories"])     # el nivel lo deduce el servidor, nunca el cliente
         if sent.get("catastro_level", 0) >= CATASTRO_RESTRICTED and "visibility" not in sent:
             sent["visibility"] = "restricted"
         fields = {**sent, "updated_by": actor_id, "updated_at": _now()}

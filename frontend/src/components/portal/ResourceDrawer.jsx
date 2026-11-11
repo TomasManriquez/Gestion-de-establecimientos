@@ -10,6 +10,11 @@ import { parseApiError, portalApi } from '@/lib/api';
 import { shrinkImage } from '@/lib/image';
 import { LEVELS } from './ResourceCard';
 
+// Cuestionario de datos (política B.4): lo que el proyecto maneja fija su nivel. El servidor repite la cuenta.
+const DATA_A = [['students', 'Datos de estudiantes'], ['sensitive', 'Datos sensibles: PIE, psicosocial, salud'], ['external', 'Datos de apoderados o externos']];
+const DATA_B = [['staff', 'Datos de funcionarios'], ['internal', 'Información interna no pública']];
+const levelOf = (cats) => (DATA_A.some(([k]) => cats.includes(k)) ? 2 : DATA_B.some(([k]) => cats.includes(k)) ? 1 : 0);
+
 const SELECT = 'h-11 w-full rounded-lg border border-[#c9dceb] bg-white px-3 text-base';
 const REQUIRES = [
   'Sin exigencias. Se recomienda usar la plantilla de TI.',
@@ -46,7 +51,7 @@ const Label = ({ id, children }) => <label htmlFor={id} className="flex flex-col
  */
 export default function ResourceDrawer({ open, onOpenChange, topics, units, resource, topicId, admin, onSaved }) {
   const editing = Boolean(resource);
-  const blank = { title: '', url: '', description: '', topic_id: topicId ?? '', unit_id: '', catastro_level: 1, visibility: 'org' };
+  const blank = { title: '', url: '', description: '', topic_id: topicId ?? '', unit_id: '', data_categories: [], visibility: 'org' };
   const [form, setForm] = useState(blank);
   const [cover, setCover] = useState(null);            // { blob, url } elegida ahora; null = sin cambio
   const [dropCover, setDropCover] = useState(false);   // quitar la carátula que ya tiene
@@ -57,7 +62,7 @@ export default function ResourceDrawer({ open, onOpenChange, topics, units, reso
 
   useEffect(() => {
     if (!open) return;
-    setForm(resource ? { ...blank, ...resource, description: resource.description ?? '', unit_id: resource.unit_id ?? '' } : blank);
+    setForm(resource ? { ...blank, ...resource, description: resource.description ?? '', unit_id: resource.unit_id ?? '', data_categories: resource.data_categories ?? [] } : blank);
     setCover(null);
     setDropCover(false);
     setError({ message: '', fields: {} });
@@ -66,7 +71,10 @@ export default function ResourceDrawer({ open, onOpenChange, topics, units, reso
   }, [open, resource, topicId]);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
-  const level = Number(form.catastro_level);
+  const level = levelOf(form.data_categories);
+  const toggle = (key) => () => setForm((f) => ({
+    ...f, data_categories: f.data_categories.includes(key) ? f.data_categories.filter((k) => k !== key) : [...f.data_categories, key],
+  }));
 
   const pick = async (e) => {
     const file = e.target.files?.[0];
@@ -85,7 +93,7 @@ export default function ResourceDrawer({ open, onOpenChange, topics, units, reso
     e.preventDefault();
     const body = {
       title: form.title.trim(), url: form.url.trim(), description: form.description.trim() || null,
-      topic_id: form.topic_id, unit_id: form.unit_id || null, catastro_level: level,
+      topic_id: form.topic_id, unit_id: form.unit_id || null, data_categories: form.data_categories,
     };
     if (editing && admin) body.visibility = form.visibility;
     setPending(true);
@@ -180,12 +188,27 @@ export default function ResourceDrawer({ open, onOpenChange, topics, units, reso
                 </div>
               </Section>
 
-              <Section title="Catastro">
-                <Label id="res-level">Nivel de sensibilidad (catastro)
-                  <select id="res-level" value={form.catastro_level} onChange={set('catastro_level')} className={SELECT} aria-label="Nivel de sensibilidad (catastro)">
-                    {LEVELS.map((l, i) => <option key={l.label} value={i}>{l.label}</option>)}
-                  </select>
-                </Label>
+              <Section title="¿Qué datos tiene?">
+                <p className="text-[13.5px] text-[#5b6f82]">Marca lo que maneja el proyecto: de eso depende su nivel y quién puede verlo.</p>
+                <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="pb-1.5 text-[14.5px] font-bold text-[#b42335]">Cualquiera → nivel 2</legend>
+                    {DATA_A.map(([key, label]) => (
+                      <label key={key} className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border border-[#f0b8c0] bg-[#fdf1f3] px-3 text-[15.5px] has-[:checked]:bg-[#fbdde2]">
+                        <input type="checkbox" checked={form.data_categories.includes(key)} onChange={toggle(key)} className="size-[18px] accent-[#b42335]" />{label}
+                      </label>
+                    ))}
+                  </fieldset>
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="pb-1.5 text-[14.5px] font-bold text-[#0872b8]">Solo estas → nivel 1</legend>
+                    {DATA_B.map(([key, label]) => (
+                      <label key={key} className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border border-[#b8d3e6] bg-[#eef6fc] px-3 text-[15.5px] has-[:checked]:bg-[#d6e8f6]">
+                        <input type="checkbox" checked={form.data_categories.includes(key)} onChange={toggle(key)} className="size-[18px] accent-[#0872b8]" />{label}
+                      </label>
+                    ))}
+                  </fieldset>
+                </div>
+                <p className="text-[13.5px] text-[#5b6f82]">Ninguna marcada: nivel 0.</p>
                 <Label id="res-unit">Unidad responsable (opcional)
                   <select id="res-unit" value={form.unit_id} onChange={set('unit_id')} className={SELECT} aria-label="Unidad responsable">
                     <option value="">Sin unidad</option>
