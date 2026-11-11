@@ -10,6 +10,7 @@ from app.portal.portal_service import detect_platform
 from tests.conftest import ADMIN_USER, DATOS_ADMIN_USER, EDITOR_USER, VIEWER_USER, bearer_for, prepare_org
 
 P = "/api/v1/portal"
+CATS = {0: [], 1: ["staff"], 2: ["students"]}          # el nivel lo deduce el servidor de las categorías de datos
 VIEWER_ID = str(VIEWER_USER["_id"])
 
 
@@ -24,7 +25,7 @@ def ctx(fake_db):
 
 
 def _res(c, h, topic, level=1, **extra):
-    body = {"title": "Tablero", "url": "https://app.powerbi.com/view?r=1", "topic_id": topic, "catastro_level": level, **extra}
+    body = {"title": "Tablero", "url": "https://app.powerbi.com/view?r=1", "topic_id": topic, "data_categories": CATS.get(level, [str(level)]), **extra}
     return c.post(f"{P}/resources", json=body, headers=h)
 
 
@@ -54,6 +55,24 @@ def test_BE66_visibility_is_born_from_catastro_level(ctx):
     assert _res(c, admin, topic, 0).json()["visibility"] == "org"
     assert _res(c, admin, topic, 1).json()["visibility"] == "org"
     assert _res(c, admin, topic, 2).json()["visibility"] == "restricted"
+
+
+@pytest.mark.parametrize("cats,level", [([], 0), (["staff"], 1), (["internal"], 1), (["staff", "internal"], 1),
+                                        (["students"], 2), (["sensitive"], 2), (["external"], 2), (["staff", "external"], 2)])
+def test_BE66_level_is_derived_by_the_server_from_the_data_questionnaire(ctx, cats, level):
+    c, admin, topic, db = ctx
+    r = _res(c, admin, topic, 1, data_categories=cats).json()
+    assert r["catastro_level"] == level and r["data_categories"] == sorted(cats)
+    assert r["visibility"] == ("restricted" if level == 2 else "org")
+
+
+def test_BE66_client_cannot_set_the_level_directly_or_send_unknown_categories(ctx):
+    c, admin, topic, db = ctx
+    base = {"title": "T", "url": "https://x.cl/a", "topic_id": topic}
+    assert c.post(f"{P}/resources", json={**base, "catastro_level": 0}, headers=admin).status_code == 422
+    assert c.post(f"{P}/resources", json={**base, "data_categories": ["otra"]}, headers=admin).status_code == 422
+    rid = _res(c, admin, topic, 2)
+    assert c.put(f"{P}/resources/{rid.json()['_id']}", json={"data_categories": []}, headers=admin).json()["catastro_level"] == 0
 
 
 def test_BE66_registrar_sees_own_restricted_resource_and_others_do_not(ctx):
@@ -115,7 +134,7 @@ def test_BE66_raising_level_to_2_restricts_without_admin(ctx):
     c, admin, topic, db = ctx
     editor = bearer_for(EDITOR_USER)
     rid = _res(c, editor, topic, 0).json()["_id"]
-    assert c.put(f"{P}/resources/{rid}", json={"catastro_level": 2}, headers=editor).json()["visibility"] == "restricted"
+    assert c.put(f"{P}/resources/{rid}", json={"data_categories": ["students"]}, headers=editor).json()["visibility"] == "restricted"
     assert rid not in _ids(c, bearer_for(VIEWER_USER))
 
 

@@ -15,11 +15,12 @@ from app.access.access_service import GrantError, access_service
 from app.audit.audit_entity import AuditAction, AuditTarget
 from app.audit.audit_service import audit_service, diff
 from app.database.database_service import db_service
-from app.portal.portal_entity import (CATASTRO_RESTRICTED, ResourceCreate, ResourceUpdate, TopicCreate)
+from app.portal.portal_entity import (CATASTRO_RESTRICTED, ResourceCreate, ResourceUpdate, TopicCreate, level_of)
 from app.units.units_service import units_service
 
 RESOURCE_TYPE = "portal_resource"
-_TRACKED = ("title", "url", "description", "topic_id", "unit_id", "catastro_level", "visibility")
+_TRACKED = ("title", "url", "description", "topic_id", "unit_id", "data_categories", "catastro_level", "visibility")
+_NO_COVER = {"cover_data": 0}          # la imagen no viaja en listas ni en lecturas del recurso: se pide aparte
 # shortcut: tabla fija de plataformas conocidas; cualquier otra se muestra por su host. Ampliar si aparece una nueva.
 _PLATFORMS = (("docs.google.com/spreadsheets", "Google Sheets"), ("docs.google.com", "Google Docs"),
               ("drive.google.com", "Google Drive"), ("lookerstudio.google.com", "Looker Studio"),
@@ -49,7 +50,18 @@ def _oid(value: str) -> Optional[ObjectId]:
 
 
 def _plain(doc: dict) -> dict:
-    return {**doc, "_id": str(doc["_id"])}
+    return {**doc, "_id": str(doc["_id"]), "has_cover": bool(doc.get("cover_type"))}
+
+
+def sniff_image(data: bytes) -> Optional[str]:
+    """Tipo real de la imagen por sus primeros bytes (no se confía en el Content-Type). Sin SVG: puede llevar scripts."""
+    if data[:8] == bytes.fromhex("89504e470d0a1a0a"):
+        return "image/png"
+    if data[:3] == bytes.fromhex("ffd8ff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 class PortalService:
@@ -104,20 +116,22 @@ class PortalService:
 
     async def find_resource(self, resource_id: str) -> Optional[dict]:
         oid = _oid(resource_id)
-        return None if oid is None else await db_service.db.portal_resources.find_one({"_id": oid})
+        return None if oid is None else await db_service.db.portal_resources.find_one({"_id": oid}, _NO_COVER)
 
     async def list_resources(self, visible: Optional[Set[str]], topic_id: Optional[str] = None) -> list:
         """`visible` = ids con concesión (o None si la persona ve todo). Los `org` salen siempre."""
         filt: dict = {} if topic_id is None else {"topic_id": topic_id}
         if visible is not None:
             filt["$or"] = [{"visibility": "org"}, {"_id": {"$in": [o for o in map(_oid, visible) if o]}}]
-        return [_plain(d) async for d in db_service.db.portal_resources.find(filt).sort("title", 1)]
+        return [_plain(d) async for d in db_service.db.portal_resources.find(filt, _NO_COVER).sort("title", 1)]
 
     async def create_resource(self, data: ResourceCreate, actor_id: str, is_admin: bool) -> dict:
         await self._check_refs(data.topic_id, data.unit_id)
         now = _now()
-        visibility = "restricted" if data.catastro_level >= CATASTRO_RESTRICTED else "org"
-        doc = {**data.model_dump(), "platform": detect_platform(data.url), "visibility": visibility,
+        data_categories = sorted(set(data.data_categories))
+        level = level_of(data_categories)
+        visibility = "restricted" if level >= CATASTRO_RESTRICTED else "org"
+        doc = {**data.model_dump(), "data_categories": data_categories, "catastro_level": level, "platform": detect_platform(data.url), "visibility": visibility,
                "created_by": actor_id, "created_at": now, "updated_by": actor_id, "updated_at": now}
         doc["_id"] = (await db_service.db.portal_resources.insert_one(doc)).inserted_id
         if visibility == "restricted" and not is_admin:
@@ -140,6 +154,9 @@ class PortalService:
         if "url" in sent:
             sent["platform"] = detect_platform(sent["url"])
         # Subir el nivel a 2 restringe sin esperar al admin; bajarlo no abre nada por sí solo (solo `visibility` lo hace).
+        if "data_categories" in sent:
+            sent["data_categories"] = sorted(set(sent["data_categories"]))
+            sent["catastro_level"] = level_of(sent["data_categories"])     # el nivel lo deduce el servidor, nunca el cliente
         if sent.get("catastro_level", 0) >= CATASTRO_RESTRICTED and "visibility" not in sent:
             sent["visibility"] = "restricted"
         fields = {**sent, "updated_by": actor_id, "updated_at": _now()}
@@ -150,6 +167,20 @@ class PortalService:
         await audit_service.record(actor_id, AuditAction.PORTAL_RESOURCE_UPDATE, AuditTarget.PORTAL_RESOURCE,
                                    str(before["_id"]), diff(before, after, _TRACKED))
         return _plain(after)
+
+    async def get_cover(self, resource_id: str) -> Optional[tuple]:
+        oid = _oid(resource_id)
+        doc = None if oid is None else await db_service.db.portal_resources.find_one(
+            {"_id": oid}, {"cover_type": 1, "cover_data": 1})
+        return (doc["cover_type"], bytes(doc["cover_data"])) if doc and doc.get("cover_type") else None
+
+    async def set_cover(self, before: dict, content_type: Optional[str], data: Optional[bytes], actor_id: str) -> dict:
+        """Guarda la carátula, o la quita si `data` es None. Los bytes quedan en el mismo documento (≤ 512 KB)."""
+        fields = {"cover_type": content_type, "cover_data": data, "updated_by": actor_id, "updated_at": _now()}
+        await db_service.db.portal_resources.update_one({"_id": before["_id"]}, {"$set": fields})
+        await audit_service.record(actor_id, AuditAction.PORTAL_RESOURCE_UPDATE, AuditTarget.PORTAL_RESOURCE,
+                                   str(before["_id"]), {"cover": "removed" if data is None else "set"})
+        return _plain({**before, **fields})
 
     async def delete_resource(self, before: dict, actor_id: str) -> None:
         rid = str(before["_id"])

@@ -64,7 +64,7 @@ def test_BE67_unit_grant_opens_restricted_portal_resources(ctx):
     c, admin, db, units = ctx
     topic = c.post("/api/v1/portal/topics", json={"name": "Finanzas"}, headers=admin).json()["_id"]
     rid = c.post("/api/v1/portal/resources", json={"title": "Sueldos", "url": "https://x.cl/s", "topic_id": topic,
-                                                   "catastro_level": 2}, headers=admin).json()["_id"]
+                                                   "data_categories": ["students"]}, headers=admin).json()["_id"]
     viewer = bearer_for(VIEWER_USER)
     assert c.get(f"/api/v1/portal/resources/{rid}", headers=viewer).status_code == 404
     assert _grant(c, admin, units["SD-AF"], include=True, resource_type="portal_resource", resource_id=rid).status_code == 201

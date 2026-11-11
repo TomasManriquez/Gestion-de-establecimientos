@@ -1,50 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Library, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { can, isIamAdmin } from '@/lib/access';
 import { parseApiError, portalApi, unitsApi } from '@/lib/api';
+import ResourceCard from './ResourceCard';
+import ResourceDrawer from './ResourceDrawer';
 
 const SELECT = 'h-10 w-full rounded-md border border-input bg-background px-3 text-base';
-const LEVELS = [
-  [0, 'Nivel 0 · Público: lo ve toda la organización'],
-  [1, 'Nivel 1 · Interno: lo ve toda la organización'],
-  [2, 'Nivel 2 · Sensible: queda restringido'],
-];
-
-/** El aviso del nivel 2 (ADR-021 §5): quién lo ve, a quién pedir acceso y el límite del control. */
-function RestrictedNotice({ saved }) {
-  return (
-    <Alert>
-      <Lock aria-hidden="true" />
-      <AlertDescription>
-        {saved ? 'Este recurso quedó restringido. ' : 'Un recurso de nivel 2 queda restringido. '}
-        Solo las personas autorizadas pueden verlo: solicita a un administrador la autorización de quien deba verlo.
-        Ojo: esto controla quién ve el <strong>enlace</strong>. Una planilla de Google o un informe de Power BI no quedan
-        protegidos por el portal; quien tenga la URL entra según los permisos de esa plataforma.
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-/** Temas en orden de lectura: cada tema seguido de sus subtemas, con la etiqueta «Tema › Subtema». */
-function flattenTopics(topics) {
-  const roots = topics.filter((t) => !t.parent_id);
-  return roots.flatMap((r) => [
-    { ...r, label: r.name },
-    ...topics.filter((t) => t.parent_id === r._id).map((s) => ({ ...s, label: `${r.name} › ${s.name}` })),
-  ]);
-}
+// Un color por tema, los de la marca (diseño V5-C). Solo ordena la vista: no significa nada.
+const ACCENTS = ['#168fd5', '#76c93b', '#f8c928', '#f24f63', '#36bce7', '#ff7f96'];
+const GRID = 'grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]';
+const norm = (t) => (t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 function TopicForm({ open, onOpenChange, topics, onSaved }) {
   const [name, setName] = useState('');
@@ -74,7 +50,7 @@ function TopicForm({ open, onOpenChange, topics, onSaved }) {
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Nuevo tema</DialogTitle>
-            <DialogDescription>El tema ordena los recursos; no da ni quita permisos. Hay dos niveles: tema y subtema.</DialogDescription>
+            <DialogDescription>El tema ordena los proyectos; no da ni quita permisos. Los proyectos van en los subtemas: crea primero el tema y dentro de él sus subtemas.</DialogDescription>
           </DialogHeader>
           {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
           <FieldGroup>
@@ -100,127 +76,11 @@ function TopicForm({ open, onOpenChange, topics, onSaved }) {
   );
 }
 
-function ResourceForm({ open, onOpenChange, topics, units, resource, admin, onSaved }) {
-  const editing = Boolean(resource);
-  const blank = { title: '', url: '', description: '', topic_id: '', unit_id: '', catastro_level: 1, visibility: 'org' };
-  const [form, setForm] = useState(blank);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState({ message: '', fields: {} });
-  const [saved, setSaved] = useState(null);       // recurso recién guardado: si es restringido, se muestra el aviso
-
-  useEffect(() => {
-    if (open) {
-      setForm(resource ? { ...blank, ...resource, description: resource.description ?? '', unit_id: resource.unit_id ?? '' } : blank);
-      setError({ message: '', fields: {} });
-      setSaved(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, resource]);
-
-  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
-
-  const submit = async (e) => {
-    e.preventDefault();
-    const body = {
-      title: form.title.trim(), url: form.url.trim(), description: form.description.trim() || null,
-      topic_id: form.topic_id, unit_id: form.unit_id || null, catastro_level: Number(form.catastro_level),
-    };
-    if (editing && admin) body.visibility = form.visibility;
-    setPending(true);
-    try {
-      const result = editing ? await portalApi.updateResource(resource._id, body) : await portalApi.createResource(body);
-      onSaved();
-      if (!editing && result.visibility === 'restricted') setSaved(result);   // el aviso se lee antes de cerrar
-      else { toast.success(editing ? 'Recurso actualizado' : 'Recurso registrado'); onOpenChange(false); }
-    } catch (err) {
-      const { message, fields } = parseApiError(err);
-      setError({ message, fields });
-    } finally {
-      setPending(false);
-    }
-  };
-
-  if (saved) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Recurso registrado</DialogTitle></DialogHeader>
-          <RestrictedNotice saved />
-          <DialogFooter><Button type="button" onClick={() => onOpenChange(false)}>Entendido</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
-      <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto">
-        <form onSubmit={submit} className="flex flex-col gap-4">
-          <DialogHeader>
-            <DialogTitle>{editing ? 'Editar recurso' : 'Registrar recurso'}</DialogTitle>
-            <DialogDescription>Un enlace a un tablero, planilla o aplicación del SLEP.</DialogDescription>
-          </DialogHeader>
-          {error.message && <Alert variant="destructive"><AlertDescription>{error.message}</AlertDescription></Alert>}
-          <FieldGroup>
-            <Field data-invalid={Boolean(error.fields.title) || undefined}>
-              <FieldLabel htmlFor="res-title">Título</FieldLabel>
-              <Input id="res-title" value={form.title} onChange={set('title')} required maxLength={120} className="text-base" />
-              <FieldError>{error.fields.title}</FieldError>
-            </Field>
-            <Field data-invalid={Boolean(error.fields.url) || undefined}>
-              <FieldLabel htmlFor="res-url">Enlace</FieldLabel>
-              <Input id="res-url" type="url" value={form.url} onChange={set('url')} required maxLength={500} placeholder="https://…" className="text-base" />
-              <FieldError>{error.fields.url}</FieldError>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="res-desc">Descripción (opcional)</FieldLabel>
-              <Input id="res-desc" value={form.description} onChange={set('description')} maxLength={500} className="text-base" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="res-topic">Tema</FieldLabel>
-              <select id="res-topic" value={form.topic_id} onChange={set('topic_id')} required className={SELECT}>
-                <option value="" disabled>Elige un tema</option>
-                {flattenTopics(topics).map((t) => <option key={t._id} value={t._id}>{t.label}</option>)}
-              </select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="res-unit">Unidad responsable (opcional)</FieldLabel>
-              <select id="res-unit" value={form.unit_id} onChange={set('unit_id')} className={SELECT}>
-                <option value="">Sin unidad</option>
-                {units.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
-              </select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="res-level">Nivel de sensibilidad (catastro)</FieldLabel>
-              <select id="res-level" value={form.catastro_level} onChange={set('catastro_level')} className={SELECT}>
-                {LEVELS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-              </select>
-            </Field>
-            {Number(form.catastro_level) === 2 && <RestrictedNotice />}
-            {editing && admin && (
-              <Field>
-                <FieldLabel htmlFor="res-vis">Visibilidad</FieldLabel>
-                <select id="res-vis" value={form.visibility} onChange={set('visibility')} className={SELECT}>
-                  <option value="org">Toda la organización</option>
-                  <option value="restricted">Restringido (solo con acceso concedido)</option>
-                </select>
-              </Field>
-            )}
-          </FieldGroup>
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>Cancelar</Button>
-            <Button type="submit" disabled={pending}>{pending && <Spinner data-icon="inline-start" />}Guardar</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 /**
- * Portal de recursos del SLEP (ADR-021). Lista lo que la persona puede ver, ordenado por tema. Ocultar lo
- * restringido es del servidor: aquí solo se muestra lo que llega. Editar/borrar lo decide el servidor
- * (administrador o quien lo registró); los botones son comodidad.
+ * Portal de proyectos del SLEP (ADR-021), versión C del diseño: árbol de temas y subtemas a la izquierda y los
+ * proyectos del subtema elegido a la derecha. Los proyectos viven en los subtemas; el tema principal agrupa.
+ * Ocultar lo restringido es del servidor: aquí solo se muestra lo que llega. Editar y borrar lo decide el
+ * servidor (administrador o quien lo registró); los botones son comodidad.
  */
 export default function PortalPage({ currentUser }) {
   const admin = isIamAdmin(currentUser);
@@ -231,8 +91,9 @@ export default function PortalPage({ currentUser }) {
   const [resources, setResources] = useState([]);
   const [units, setUnits] = useState([]);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState('');          // '' = todos
-  const [resourceForm, setResourceForm] = useState({ open: false, resource: null });
+  const [q, setQ] = useState('');
+  const [selected, setSelected] = useState('');
+  const [drawer, setDrawer] = useState({ open: false, resource: null, topicId: '' });
   const [topicForm, setTopicForm] = useState(false);
   const [toDelete, setToDelete] = useState(null);
 
@@ -252,21 +113,42 @@ export default function PortalPage({ currentUser }) {
     unitsApi.list().then((u) => setUnits(Array.isArray(u) ? u : (u?.items ?? []))).catch(() => {});
   }, [load]);
 
-  const byId = useMemo(() => Object.fromEntries(flattenTopics(topics ?? []).map((t) => [t._id, t])), [topics]);
-  const roots = (topics ?? []).filter((t) => !t.parent_id);
-  const rootOfSelected = byId[selected]?.parent_id ?? selected;
+  const unitName = (id) => units.find((u) => u._id === id)?.name;
+  const needle = norm(q.trim());
 
-  // Elegir un tema muestra también los recursos de sus subtemas.
-  const shown = resources.filter((r) => {
-    if (!selected) return true;
-    const t = byId[r.topic_id];
-    return r.topic_id === selected || t?.parent_id === selected;
-  });
+  // Árbol: cada tema con su color y sus subtemas; `own` = proyectos de ese nodo, `total` = con los de sus subtemas.
+  const tree = useMemo(() => {
+    const matches = (r) => !needle || norm(`${r.title} ${r.description} ${r.platform} ${unitName(r.unit_id)}`).includes(needle);
+    const own = (id) => resources.filter((r) => r.topic_id === id && matches(r));
+    return (topics ?? []).filter((t) => !t.parent_id).map((root, i) => {
+      const children = (topics ?? []).filter((t) => t.parent_id === root._id)
+        .map((c) => ({ ...c, label: `${root.name} › ${c.name}`, accent: ACCENTS[i % ACCENTS.length], items: own(c._id) }));
+      const items = own(root._id);
+      return { ...root, label: root.name, accent: ACCENTS[i % ACCENTS.length], items, children,
+        total: items.length + children.reduce((n, c) => n + c.items.length, 0) };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topics, resources, needle, units]);
+
+  const nodes = useMemo(() => tree.flatMap((t) => [t, ...t.children]), [tree]);
+  // Por defecto: el primer subtema con proyectos (el tema principal suele quedar vacío).
+  const activeId = nodes.some((n) => n._id === selected) ? selected : (nodes.find((n) => n.parent_id && n.items.length)?._id ?? nodes[0]?._id ?? '');
+  const active = nodes.find((n) => n._id === activeId);
+  const parentOf = active?.parent_id ? tree.find((t) => t._id === active.parent_id) : null;
+  // Con búsqueda se ven todas las coincidencias, agrupadas por su subtema; sin ella, solo el nodo elegido.
+  const shown = needle
+    ? nodes.filter((n) => n.items.length > 0)
+    : (active ? (active.children?.length ? [active, ...active.children] : [active]) : []);
+  const total = resources.length;
+  const subtopicCount = (topics ?? []).filter((t) => t.parent_id).length;
+  // Solo se registra en subtemas (o en un tema sin subtemas): el tema que agrupa queda vacío.
+  const topicOptions = tree.flatMap((t) => (t.children.length ? t.children : [t]));
+  const manageable = (r) => admin || (canWrite && r.created_by === me);
 
   const remove = async () => {
     try {
       await portalApi.removeResource(toDelete._id);
-      toast.success('Recurso eliminado');
+      toast.success('Proyecto eliminado');
       setToDelete(null);
       await load();
     } catch (err) {
@@ -274,84 +156,120 @@ export default function PortalPage({ currentUser }) {
     }
   };
 
-  const chip = (active) => `rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${
-    active ? 'border-slep-navy bg-slep-navy text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`;
+  const openDrawer = (resource = null, topicId = '') => setDrawer({ open: true, resource, topicId });
+  const navItem = (on, extra = '') => `flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[15px] ${on ? 'bg-[#e6f1f9] font-bold text-[#0b3a66]' : 'text-[#17324d] hover:bg-[#f3f9fd]'} ${extra}`;
 
   return (
-    <div className="space-y-6 font-sans">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-extrabold font-outfit text-slate-800"><Library aria-hidden="true" />Portal de recursos</h1>
-          <p className="mt-1 text-sm text-slate-500">Tableros, planillas y aplicaciones del SLEP, ordenados por tema.</p>
+    <div className="flex max-w-[1240px] flex-col gap-5 font-sans text-[#17324d]">
+      <div className="flex flex-wrap items-end justify-between gap-3.5">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[34px] font-bold leading-tight tracking-tight">Tableros y proyectos</h1>
+          <span className="text-[15px] text-[#5b6f82]">{total} proyectos en {tree.length} temas y {subtopicCount} subtemas</span>
         </div>
-        <div className="flex gap-2">
-          {admin && <Button type="button" variant="outline" onClick={() => setTopicForm(true)}><Plus data-icon="inline-start" />Nuevo tema</Button>}
-          {canWrite && <Button type="button" onClick={() => setResourceForm({ open: true, resource: null })}><Plus data-icon="inline-start" />Registrar recurso</Button>}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <label className="relative flex min-w-[220px] flex-1 items-center sm:flex-none">
+            <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3.5 text-[#5b6f82]" />
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar proyecto o unidad" aria-label="Buscar proyecto o unidad"
+              className="h-11 w-full rounded-xl border border-[#c9dceb] bg-white pl-[42px] pr-3.5 text-base sm:w-72" />
+          </label>
+          {admin && <Button type="button" variant="outline" className="h-11 rounded-xl" onClick={() => setTopicForm(true)}><Plus data-icon="inline-start" />Nuevo tema</Button>}
+          {canWrite && <Button type="button" className="h-11 rounded-xl bg-[#0872b8] hover:bg-[#0b4f8a]" onClick={() => openDrawer(null, active && !active.children?.length ? active._id : '')}><Plus data-icon="inline-start" />Registrar proyecto</Button>}
         </div>
       </div>
 
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
 
-      {topics && (
-        <nav aria-label="Temas" className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className={chip(!selected)} aria-pressed={!selected} onClick={() => setSelected('')}>Todos</button>
-            {roots.map((t) => (
-              <button key={t._id} type="button" className={chip(rootOfSelected === t._id)} aria-pressed={rootOfSelected === t._id}
-                onClick={() => setSelected(t._id)}>{t.name}</button>
-            ))}
+      {topics && nodes.length > 0 && (
+        <div className="flex flex-col gap-5 md:flex-row md:items-start">
+          {/* Celular: el árbol pasa a un selector */}
+          <select aria-label="Tema o subtema" value={activeId} onChange={(e) => { setSelected(e.target.value); setQ(''); }}
+            className="h-11 rounded-xl border border-[#c9dceb] bg-white px-3 text-base md:hidden">
+            {nodes.map((n) => <option key={n._id} value={n._id}>{n.parent_id ? `   ${n.name}` : n.name}</option>)}
+          </select>
+          <aside className="hidden w-[280px] shrink-0 rounded-[14px] border border-[#d7e8f1] bg-white p-2.5 md:block">
+            <nav aria-label="Temas y subtemas">
+              <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                {tree.map((t) => (
+                  <li key={t._id}>
+                    <button type="button" aria-current={t._id === activeId && !needle ? 'page' : undefined} onClick={() => { setSelected(t._id); setQ(''); }}
+                      className={navItem(t._id === activeId && !needle, 'font-bold')}>
+                      <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: t.accent }} />
+                      <span className="flex-1">{t.name}</span>
+                      <span className="text-[13px] font-normal text-[#5b6f82]">{t.total}</span>
+                    </button>
+                    {t.children.length > 0 && (
+                      <ul className="m-0 mb-1 flex list-none flex-col gap-0.5 p-0 pl-[22px]">
+                        {t.children.map((c) => (
+                          <li key={c._id}>
+                            <button type="button" aria-current={c._id === activeId && !needle ? 'page' : undefined} onClick={() => { setSelected(c._id); setQ(''); }}
+                              className={navItem(c._id === activeId && !needle)}>
+                              <span className="flex-1">{c.name}</span>
+                              <span className="text-[13px] font-normal text-[#5b6f82]">{c.items.length}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </aside>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-6">
+            {!needle && active && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm text-[#5b6f82]">{parentOf ? `${parentOf.name} › ${active.name}` : 'Tema'}</span>
+                <h2 className="border-b-[3px] pb-2 text-[26px] font-bold" style={{ borderColor: active.accent }}>{active.name}</h2>
+              </div>
+            )}
+            {shown.map((s) => {
+              const isGroup = !needle && active?.children?.length && s._id === active._id;   // el tema que agrupa no pinta tarjetas propias
+              if (isGroup && s.items.length === 0) return null;
+              return (
+                <section key={s._id} aria-label={s.label} className="flex flex-col gap-3">
+                  {(needle || s._id !== active?._id) && (
+                    <div className="flex items-baseline gap-2.5 border-b-2 pb-1.5" style={{ borderColor: s.accent }}>
+                      <h3 className="text-xl font-bold">{needle ? s.label : s.name}</h3>
+                      <span className="text-[13.5px] text-[#5b6f82]">{s.items.length} {s.items.length === 1 ? 'proyecto' : 'proyectos'}</span>
+                    </div>
+                  )}
+                  <div className={GRID}>
+                    {s.items.map((r) => (
+                      <ResourceCard key={r._id} resource={r} unitName={unitName(r.unit_id)} manage={manageable(r)}
+                        onEdit={() => openDrawer(r)} onDelete={() => setToDelete(r)} />
+                    ))}
+                    {canWrite && !needle && !isGroup && (
+                      <button type="button" onClick={() => openDrawer(null, s._id)}
+                        className="flex min-h-[120px] flex-col items-center justify-center gap-1.5 rounded-[14px] border-[1.5px] border-dashed border-[#b8d3e6] text-[15px] font-bold text-[#0872b8] active:scale-[0.97]">
+                        <Plus size={22} aria-hidden="true" />Registrar en este subtema
+                      </button>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+            {needle && shown.length === 0 && (
+              <p className="rounded-[14px] border border-dashed border-[#c9dceb] bg-white p-7 text-center text-base text-[#5b6f82]">Ningún proyecto coincide con «{q.trim()}».</p>
+            )}
           </div>
-          {byId[rootOfSelected] && (topics.some((t) => t.parent_id === rootOfSelected)) && (
-            <div className="flex flex-wrap gap-2 pl-3">
-              {topics.filter((t) => t.parent_id === rootOfSelected).map((s) => (
-                <button key={s._id} type="button" className={chip(selected === s._id)} aria-pressed={selected === s._id}
-                  onClick={() => setSelected(s._id)}>{s.name}</button>
-              ))}
-            </div>
-          )}
-        </nav>
+        </div>
       )}
 
-      {topics && (shown.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">
-          {topics.length === 0 ? 'Aún no hay temas. Un administrador debe crearlos primero.' : 'No hay recursos en este tema.'}
-        </p>
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {shown.map((r) => (
-            <li key={r._id} className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
-              <div className="flex items-start justify-between gap-2">
-                <a href={r.url} target="_blank" rel="noopener noreferrer"
-                  className="flex min-w-0 items-center gap-1.5 font-bold text-slate-800 hover:underline">
-                  <span className="truncate">{r.title}</span><ExternalLink size={14} aria-hidden="true" className="shrink-0" />
-                </a>
-                {r.visibility === 'restricted' && <Badge variant="secondary" className="shrink-0"><Lock data-icon="inline-start" />Restringido</Badge>}
-              </div>
-              {r.description && <p className="text-sm text-slate-600">{r.description}</p>}
-              <p className="text-xs text-slate-500">{r.platform} · {byId[r.topic_id]?.label ?? 'Sin tema'}</p>
-              {(admin || (canWrite && r.created_by === me)) && (
-                <div className="mt-auto flex justify-end gap-1">
-                  <Button type="button" variant="ghost" size="icon" aria-label={`Editar ${r.title}`}
-                    onClick={() => setResourceForm({ open: true, resource: r })}><Pencil size={16} /></Button>
-                  <Button type="button" variant="ghost" size="icon" aria-label={`Eliminar ${r.title}`}
-                    onClick={() => setToDelete(r)}><Trash2 size={16} /></Button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      ))}
+      {topics && nodes.length === 0 && (
+        <p className="rounded-[14px] border border-dashed border-[#c9dceb] bg-white p-7 text-center text-base text-[#5b6f82]">Aún no hay temas. Un administrador debe crearlos primero.</p>
+      )}
 
       <TopicForm open={topicForm} onOpenChange={setTopicForm} topics={topics ?? []} onSaved={load} />
-      <ResourceForm open={resourceForm.open} resource={resourceForm.resource} topics={topics ?? []} units={units} admin={admin}
-        onOpenChange={(open) => setResourceForm((s) => ({ ...s, open }))} onSaved={load} />
+      <ResourceDrawer open={drawer.open} resource={drawer.resource} topicId={drawer.topicId} topics={topicOptions} units={units} admin={admin}
+        onOpenChange={(open) => setDrawer((d) => ({ ...d, open }))} onSaved={load} />
 
       <AlertDialog open={Boolean(toDelete)} onOpenChange={(open) => !open && setToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar este recurso?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar este proyecto?</AlertDialogTitle>
             <AlertDialogDescription>
-              {toDelete && `«${toDelete.title}» dejará de aparecer en el portal y se borrarán los accesos concedidos sobre él. El enlace externo no se toca.`}
+              {toDelete && `«${toDelete.title}» dejará de aparecer en el portal y se borrarán su carátula y los accesos concedidos sobre él. El enlace externo no se toca.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
